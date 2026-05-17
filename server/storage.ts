@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { eq, and, desc, avg, sql } from "drizzle-orm";
+import { eq, and, desc, avg, sql, or } from "drizzle-orm";
 import {
   users,
   chauffeurs,
@@ -100,6 +100,7 @@ export interface IStorage {
   getOperatorProfiles(filters?: { type?: string; status?: string }): Promise<OperatorProfile[]>;
   createOperatorProfile(data: any): Promise<OperatorProfile>;
   updateOperatorProfile(id: string, data: Partial<OperatorProfile>): Promise<OperatorProfile | undefined>;
+  deleteOperatorProfile(id: string): Promise<boolean>;
 
   getPartnerProfileByOperatorId(operatorProfileId: string): Promise<PartnerProfile | undefined>;
   createPartnerProfile(data: any): Promise<PartnerProfile>;
@@ -110,6 +111,7 @@ export interface IStorage {
   getVehicles(filters?: { status?: string; ownerOperatorProfileId?: string }): Promise<Vehicle[]>;
   createVehicle(data: any): Promise<Vehicle>;
   updateVehicle(id: string, data: Partial<Vehicle>): Promise<Vehicle | undefined>;
+  deleteVehicle(id: string): Promise<boolean>;
 
   getActiveVehicleAssignment(vehicleId: string, driverOperatorProfileId: string): Promise<VehicleAssignment | undefined>;
   getVehicleAssignments(filters?: {
@@ -416,6 +418,27 @@ export class DatabaseStorage implements IStorage {
     return profile;
   }
 
+  async deleteOperatorProfile(id: string): Promise<boolean> {
+    const profile = await this.getOperatorProfile(id);
+    if (!profile) return false;
+    const ownedVehicles = await this.getVehiclesByOwnerOperator(id);
+    for (const vehicle of ownedVehicles) {
+      await this.deleteVehicle(vehicle.id);
+    }
+    await db
+      .delete(vehicleAssignments)
+      .where(
+        or(
+          eq(vehicleAssignments.driverOperatorProfileId, id),
+          eq(vehicleAssignments.assignedByOperatorProfileId, id),
+        ),
+      );
+    await db.delete(partnerProfiles).where(eq(partnerProfiles.operatorProfileId, id));
+    await db.delete(documents).where(eq(documents.userId, profile.userId));
+    const deleted = await db.delete(operatorProfiles).where(eq(operatorProfiles.id, id)).returning();
+    return deleted.length > 0;
+  }
+
   async getPartnerProfileByOperatorId(operatorProfileId: string): Promise<PartnerProfile | undefined> {
     const [profile] = await db
       .select()
@@ -489,6 +512,14 @@ export class DatabaseStorage implements IStorage {
       .where(eq(vehicles.id, id))
       .returning();
     return vehicle;
+  }
+
+  async deleteVehicle(id: string): Promise<boolean> {
+    await db.update(chauffeurs).set({ activeVehicleId: null }).where(eq(chauffeurs.activeVehicleId, id));
+    await db.delete(documents).where(eq(documents.vehicleId, id));
+    await db.delete(vehicleAssignments).where(eq(vehicleAssignments.vehicleId, id));
+    const deleted = await db.delete(vehicles).where(eq(vehicles.id, id)).returning();
+    return deleted.length > 0;
   }
 
   async getActiveVehicleAssignment(

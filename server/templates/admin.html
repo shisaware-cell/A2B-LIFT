@@ -980,7 +980,8 @@ function renderAppsTable(tableId, data) {
       <td><div class="action-cell">
         ${a.status==='pending' ? `<button class="btn-sm btn-approve" onclick="approveApp('${a.id}','${a.chauffeurId||''}')">✓ Approve</button>` : ''}
         ${a.status==='pending' ? `<button class="btn-sm btn-reject" onclick="rejectApp('${a.id}')">✕ Reject</button>` : ''}
-        <button class="btn-sm btn-detail" onclick="editAppNotes('${a.id}')">✏ Notes</button>
+        <button class="btn-sm btn-detail" onclick="appDetail('${a.id}')">Details</button>
+        <button class="btn-sm btn-detail" onclick="editAppNotes('${a.id}')">✏ Edit</button>
         <button class="btn-sm btn-reject" onclick="deleteApp('${a.id}')">🗑 Delete</button>
       </div></td>
     </tr>`).join('')}
@@ -989,6 +990,28 @@ function renderAppsTable(tableId, data) {
 
 function approveApp(id, chauffeurId) { showAppConfirm(id, chauffeurId, 'approve'); }
 function rejectApp(id, chauffeurId) { showAppConfirm(id, chauffeurId, 'reject'); }
+
+function appDetail(id) {
+  const a = allApps.find(x => x.id === id); if (!a) return;
+  const c = allChauf.find(x => x.id === a.chauffeurId);
+  document.getElementById('m-title').textContent = 'Driver Application';
+  document.getElementById('m-sub').textContent = a.userId || '';
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid">
+      <div class="info-row"><div class="info-label">Status</div><div class="info-val"><span class="badge ${a.status==='approved'?'b-approved':a.status==='rejected'?'b-offline':'b-pending'}">${a.status || 'pending'}</span></div></div>
+      <div class="info-row"><div class="info-label">Submitted</div><div class="info-val">${fmtFull(a.submittedAt)}</div></div>
+      <div class="info-row"><div class="info-label">Reviewed</div><div class="info-val">${a.reviewedAt ? fmtFull(a.reviewedAt) : '—'}</div></div>
+      <div class="info-row"><div class="info-label">Notes</div><div class="info-val">${escapeHtml(a.notes || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Driver</div><div class="info-val">${c ? escapeHtml(c.userName || c.userEmail || 'Driver') : '—'}</div></div>
+      <div class="info-row"><div class="info-label">Vehicle</div><div class="info-val">${c ? escapeHtml([c.carMake, c.vehicleModel, c.plateNumber].filter(Boolean).join(' · ')) : '—'}</div></div>
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Close</button>
+    ${c ? `<button class="btn-lg btn-outline" onclick="closeModal();chaufDetail('${c.id}')">Driver Details</button>` : ''}
+    <button class="btn-lg btn-outline" onclick="closeModal();editAppNotes('${a.id}')">✏ Edit Notes</button>
+    <button class="btn-lg btn-delete" onclick="closeModal();deleteApp('${a.id}')">🗑 Delete</button>`;
+  openModal();
+}
 
 function showAppConfirm(id, chauffeurId, action) {
   const a = allApps.find(x => x.id === id); if (!a) return;
@@ -1066,8 +1089,23 @@ async function doRejectApp(id) {
 
 async function editAppNotes(id) {
   const a = allApps.find(x => x.id === id); if (!a) return;
-  const notes = prompt('Edit notes for this application:', a.notes || '');
-  if (notes === null) return;
+  document.getElementById('m-title').textContent = 'Edit Driver Application';
+  document.getElementById('m-sub').textContent = 'Update internal review notes';
+  document.getElementById('m-body').innerHTML = `
+    <div style="margin-top:4px">
+      <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Notes</label>
+      <textarea id="app-edit-notes" class="f-input" style="width:100%;min-height:110px;resize:vertical;box-sizing:border-box">${escapeHtml(a.notes || '')}</textarea>
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-green" onclick="saveAppNotes('${id}')">💾 Save Notes</button>`;
+  openModal();
+}
+
+async function saveAppNotes(id) {
+  const a = allApps.find(x => x.id === id); if (!a) return;
+  const notes = document.getElementById('app-edit-notes')?.value || '';
+  closeModal();
   try {
     const res = await apiFetch('/api/admin/driver-applications/' + id, {
       method: 'PUT',
@@ -1137,10 +1175,81 @@ function renderFilteredPartners() {
         <td><div class="action-cell">
           ${p.status==='pending' ? `<button class="btn-sm btn-approve" onclick="setOperatorStatus('${p.id}','approved')">✓ Approve</button>` : ''}
           ${p.status==='pending' ? `<button class="btn-sm btn-reject" onclick="rejectOperator('${p.id}')">✕ Reject</button>` : ''}
+          <button class="btn-sm btn-detail" onclick="partnerDetail('${p.id}')">Details</button>
+          <button class="btn-sm btn-detail" onclick="editPartner('${p.id}')">✏ Edit</button>
           <button class="btn-sm btn-detail" onclick="viewOperatorDocs('${p.userId}','${company.replace(/'/g,"\\'")}')">📂 Docs</button>
+          <button class="btn-sm btn-reject" onclick="deletePartner('${p.id}')">🗑 Delete</button>
         </div></td>
       </tr>`;
     }).join('')}</tbody></table>`;
+}
+
+function partnerDetail(id) {
+  const p = allPartners.find(x => x.id === id); if (!p) return;
+  const pp = p.partnerProfile || {};
+  const company = pp.companyName || 'Partner';
+  document.getElementById('m-title').textContent = company;
+  document.getElementById('m-sub').textContent = 'Partner application details';
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid">
+      <div class="info-row"><div class="info-label">Status</div><div class="info-val"><span class="badge ${p.status==='approved'?'b-approved':p.status==='rejected'?'b-rejected':'b-pending'}">${p.status || 'pending'}</span></div></div>
+      <div class="info-row"><div class="info-label">Company</div><div class="info-val">${escapeHtml(company)}</div></div>
+      <div class="info-row"><div class="info-label">Registration</div><div class="info-val">${escapeHtml(pp.registrationNumber || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Contact</div><div class="info-val">${escapeHtml(pp.contactPersonName || p.user?.name || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Phone</div><div class="info-val">${escapeHtml(pp.contactPhone || p.user?.phone || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Email</div><div class="info-val">${escapeHtml(pp.contactEmail || p.user?.username || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Bank</div><div class="info-val">${escapeHtml([pp.bankName, pp.accountHolder, pp.accountNumber].filter(Boolean).join(' · ') || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Submitted</div><div class="info-val">${fmtFull(p.submittedAt || p.createdAt)}</div></div>
+      ${p.rejectionReason ? `<div class="info-row"><div class="info-label">Reason</div><div class="info-val">${escapeHtml(p.rejectionReason)}</div></div>` : ''}
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Close</button>
+    <button class="btn-lg btn-outline" onclick="closeModal();editPartner('${id}')">✏ Edit</button>
+    <button class="btn-lg btn-outline" onclick="closeModal();viewOperatorDocs('${p.userId}','${company.replace(/'/g,"\\'")}')">📂 Docs</button>
+    <button class="btn-lg btn-delete" onclick="closeModal();deletePartner('${id}')">🗑 Delete</button>`;
+  openModal();
+}
+
+function editPartner(id) {
+  const p = allPartners.find(x => x.id === id); if (!p) return;
+  const pp = p.partnerProfile || {};
+  document.getElementById('m-title').textContent = 'Edit Partner';
+  document.getElementById('m-sub').textContent = pp.companyName || p.user?.name || 'Partner';
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid" style="gap:12px">
+      ${[
+        ['companyName','Company Name', pp.companyName],
+        ['registrationNumber','Registration Number', pp.registrationNumber],
+        ['contactPersonName','Contact Person', pp.contactPersonName],
+        ['contactPhone','Contact Phone', pp.contactPhone],
+        ['contactEmail','Contact Email', pp.contactEmail],
+        ['bankName','Bank Name', pp.bankName],
+        ['accountHolder','Account Holder', pp.accountHolder],
+        ['accountNumber','Account Number', pp.accountNumber],
+      ].map(([key,label,value]) => `<div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">${label}</label><input id="partner-${key}" class="f-input" value="${escapeHtml(value || '')}" /></div>`).join('')}
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-green" onclick="savePartnerEdit('${id}')">💾 Save Changes</button>`;
+  openModal();
+}
+
+async function savePartnerEdit(id) {
+  const body = {};
+  ['companyName','registrationNumber','contactPersonName','contactPhone','contactEmail','bankName','accountHolder','accountNumber'].forEach(key => {
+    body[key] = document.getElementById('partner-' + key)?.value.trim() || '';
+  });
+  closeModal();
+  try {
+    const res = await apiFetch('/api/admin/operator-profiles/' + id, {
+      method:'PUT',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast('✅ Partner updated.', 'ok');
+    loadPartners();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
 }
 
 async function setOperatorStatus(id, status, reason) {
@@ -1157,9 +1266,39 @@ async function setOperatorStatus(id, status, reason) {
 }
 
 function rejectOperator(id) {
-  const reason = prompt('Reason for rejecting this partner application:');
-  if (reason === null) return;
-  setOperatorStatus(id, 'rejected', reason.trim());
+  document.getElementById('m-title').textContent = 'Reject Partner Application';
+  document.getElementById('m-sub').textContent = 'The partner will be notified immediately.';
+  document.getElementById('m-body').innerHTML = `
+    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Rejection Reason</label>
+    <textarea id="partner-reject-reason" class="f-input" style="width:100%;min-height:90px;resize:vertical;box-sizing:border-box"></textarea>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-red" onclick="doRejectOperator('${id}')">✕ Confirm Rejection</button>`;
+  openModal();
+}
+
+function doRejectOperator(id) {
+  const reason = document.getElementById('partner-reject-reason')?.value.trim() || '';
+  closeModal();
+  setOperatorStatus(id, 'rejected', reason);
+}
+
+function deletePartner(id) {
+  const p = allPartners.find(x => x.id === id);
+  showDeleteConfirm({
+    title: 'Delete Partner Application',
+    subtitle: 'This removes the partner profile and linked fleet records.',
+    message: `Delete ${p?.partnerProfile?.companyName || 'this partner application'}?`,
+    confirmLabel: 'Confirm Delete',
+    onConfirm: async () => {
+      try {
+        const res = await apiFetch('/api/admin/operator-profiles/' + id, { method:'DELETE' });
+        if (!res.ok) throw new Error(await res.text());
+        toast('🗑 Partner application deleted.', 'ok');
+        loadPartners(); loadVehicles();
+      } catch(e) { toast('❌ ' + e.message, 'err'); }
+    },
+  });
 }
 
 function renderDocsModal(docs) {
@@ -1232,7 +1371,10 @@ function renderFilteredVehicles() {
       <td><div class="action-cell">
         ${v.status==='pending' ? `<button class="btn-sm btn-approve" onclick="setVehicleStatus('${v.id}','approved')">✓ Approve</button>` : ''}
         ${v.status==='pending' ? `<button class="btn-sm btn-reject" onclick="rejectVehicle('${v.id}')">✕ Reject</button>` : ''}
+        <button class="btn-sm btn-detail" onclick="vehicleDetail('${v.id}')">Details</button>
+        <button class="btn-sm btn-detail" onclick="editVehicle('${v.id}')">✏ Edit</button>
         <button class="btn-sm btn-detail" onclick="renderDocsModalForVehicle('${v.id}')">📂 Docs</button>
+        <button class="btn-sm btn-reject" onclick="deleteVehicle('${v.id}')">🗑 Delete</button>
       </div></td>
     </tr>`).join('')}</tbody></table>`;
 }
@@ -1251,9 +1393,21 @@ async function setVehicleStatus(id, status, reason) {
 }
 
 function rejectVehicle(id) {
-  const reason = prompt('Reason for rejecting this vehicle:');
-  if (reason === null) return;
-  setVehicleStatus(id, 'rejected', reason.trim());
+  document.getElementById('m-title').textContent = 'Reject Vehicle';
+  document.getElementById('m-sub').textContent = 'The owner will be notified immediately.';
+  document.getElementById('m-body').innerHTML = `
+    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Rejection Reason</label>
+    <textarea id="vehicle-reject-reason" class="f-input" style="width:100%;min-height:90px;resize:vertical;box-sizing:border-box"></textarea>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-red" onclick="doRejectVehicle('${id}')">✕ Confirm Rejection</button>`;
+  openModal();
+}
+
+function doRejectVehicle(id) {
+  const reason = document.getElementById('vehicle-reject-reason')?.value.trim() || '';
+  closeModal();
+  setVehicleStatus(id, 'rejected', reason);
 }
 
 async function renderDocsModalForVehicle(id) {
@@ -1263,6 +1417,115 @@ async function renderDocsModalForVehicle(id) {
   document.getElementById('m-foot').innerHTML = '<button class="btn-lg btn-outline" onclick="closeModal()">Close</button>';
   renderDocsModal(vehicle?.documents || []);
   openModal();
+}
+
+function vehicleDetail(id) {
+  const v = allVehicles.find(x => x.id === id); if (!v) return;
+  document.getElementById('m-title').textContent = [v.carMake, v.vehicleModel].filter(Boolean).join(' ') || 'Vehicle';
+  document.getElementById('m-sub').textContent = v.plateNumber || '';
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid">
+      <div class="info-row"><div class="info-label">Status</div><div class="info-val"><span class="badge ${v.status==='approved'?'b-approved':v.status==='rejected'?'b-rejected':'b-pending'}">${v.status || 'draft'}</span></div></div>
+      <div class="info-row"><div class="info-label">Owner</div><div class="info-val">${escapeHtml(v.owner?.partnerProfile?.companyName || v.owner?.user?.name || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Vehicle</div><div class="info-val">${escapeHtml([v.carMake, v.vehicleModel].filter(Boolean).join(' ') || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Plate</div><div class="info-val"><span style="font-family:var(--mono)">${escapeHtml(v.plateNumber || '—')}</span></div></div>
+      <div class="info-row"><div class="info-label">Year</div><div class="info-val">${escapeHtml(v.vehicleYear || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Category</div><div class="info-val">${escapeHtml(v.vehicleType || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Color</div><div class="info-val">${escapeHtml(v.carColor || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Capacity</div><div class="info-val">${v.passengerCapacity || 4} passengers · ${v.luggageCapacity || 2} bags</div></div>
+      <div class="info-row"><div class="info-label">Documents</div><div class="info-val">${(v.documents || []).length}</div></div>
+      <div class="info-row"><div class="info-label">Submitted</div><div class="info-val">${fmtFull(v.submittedAt || v.createdAt)}</div></div>
+      ${v.rejectionReason ? `<div class="info-row"><div class="info-label">Reason</div><div class="info-val">${escapeHtml(v.rejectionReason)}</div></div>` : ''}
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Close</button>
+    <button class="btn-lg btn-outline" onclick="closeModal();editVehicle('${id}')">✏ Edit</button>
+    <button class="btn-lg btn-outline" onclick="closeModal();renderDocsModalForVehicle('${id}')">📂 Docs</button>
+    <button class="btn-lg btn-delete" onclick="closeModal();deleteVehicle('${id}')">🗑 Delete</button>`;
+  openModal();
+}
+
+function editVehicle(id) {
+  const v = allVehicles.find(x => x.id === id); if (!v) return;
+  document.getElementById('m-title').textContent = 'Edit Vehicle';
+  document.getElementById('m-sub').textContent = [v.carMake, v.vehicleModel, v.plateNumber].filter(Boolean).join(' · ');
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid" style="gap:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Car Make</label><input id="vehicle-carMake" class="f-input" value="${escapeHtml(v.carMake || '')}" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Model</label><input id="vehicle-vehicleModel" class="f-input" value="${escapeHtml(v.vehicleModel || '')}" /></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Plate</label><input id="vehicle-plateNumber" class="f-input" value="${escapeHtml(v.plateNumber || '')}" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Color</label><input id="vehicle-carColor" class="f-input" value="${escapeHtml(v.carColor || '')}" /></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Year</label><input id="vehicle-vehicleYear" class="f-input" type="number" value="${escapeHtml(v.vehicleYear || '')}" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Passengers</label><input id="vehicle-passengerCapacity" class="f-input" type="number" value="${v.passengerCapacity || 4}" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Luggage</label><input id="vehicle-luggageCapacity" class="f-input" type="number" value="${v.luggageCapacity || 2}" /></div>
+      </div>
+      <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Category</label>
+        <select id="vehicle-vehicleType" class="f-input">
+          ${vehicleCategoryOptions(v.vehicleType)}
+        </select>
+      </div>
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-green" onclick="saveVehicleEdit('${id}')">💾 Save Changes</button>`;
+  openModal();
+}
+
+function vehicleCategoryOptions(selected) {
+  return [
+    ['budget','Budget'],
+    ['luxury','Luxury'],
+    ['business','Business Class'],
+    ['van','Van'],
+    ['luxury_van','Luxury Van'],
+  ].map(([value,label]) => `<option value="${value}" ${selected===value?'selected':''}>${label}</option>`).join('');
+}
+
+async function saveVehicleEdit(id) {
+  const body = {
+    carMake: document.getElementById('vehicle-carMake')?.value.trim() || '',
+    vehicleModel: document.getElementById('vehicle-vehicleModel')?.value.trim() || '',
+    plateNumber: document.getElementById('vehicle-plateNumber')?.value.trim() || '',
+    carColor: document.getElementById('vehicle-carColor')?.value.trim() || '',
+    vehicleYear: parseInt(document.getElementById('vehicle-vehicleYear')?.value || '0', 10),
+    passengerCapacity: parseInt(document.getElementById('vehicle-passengerCapacity')?.value || '4', 10),
+    luggageCapacity: parseInt(document.getElementById('vehicle-luggageCapacity')?.value || '2', 10),
+    vehicleType: document.getElementById('vehicle-vehicleType')?.value || 'budget',
+  };
+  closeModal();
+  try {
+    const res = await apiFetch('/api/admin/vehicles/' + id, {
+      method:'PUT',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast('✅ Vehicle updated.', 'ok');
+    loadVehicles();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+function deleteVehicle(id) {
+  const v = allVehicles.find(x => x.id === id);
+  showDeleteConfirm({
+    title: 'Delete Vehicle',
+    subtitle: 'This removes the vehicle, its documents, and assignments.',
+    message: `Delete ${[v?.carMake, v?.vehicleModel, v?.plateNumber].filter(Boolean).join(' · ') || 'this vehicle'}?`,
+    confirmLabel: 'Confirm Delete',
+    onConfirm: async () => {
+      try {
+        const res = await apiFetch('/api/admin/vehicles/' + id, { method:'DELETE' });
+        if (!res.ok) throw new Error(await res.text());
+        toast('🗑 Vehicle deleted.', 'ok');
+        loadVehicles();
+      } catch(e) { toast('❌ ' + e.message, 'err'); }
+    },
+  });
 }
 
 function chaufDetail(id) {

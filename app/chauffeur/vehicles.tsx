@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, ActivityIndicator, Alert, RefreshControl, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,9 +14,17 @@ const VEHICLE_DOCS = [
   { id: "vehicle:passenger_liability_insurance", label: "Passenger Liability Insurance" },
   { id: "vehicle:dekra_report", label: "Dekra Report" },
 ];
+const VEHICLE_CATEGORIES = [
+  { id: "budget", label: "Budget", desc: "Toyota Corolla, Toyota Quest" },
+  { id: "luxury", label: "Luxury", desc: "BMW 3 Series, Mercedes C Class" },
+  { id: "business", label: "Business Class", desc: "BMW 5 Series, Mercedes E Class" },
+  { id: "van", label: "Van", desc: "Hyundai H1, Mercedes Vito, Staria" },
+  { id: "luxury_van", label: "Luxury Van", desc: "Mercedes V Class" },
+];
 
 export default function VehiclesScreen() {
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
   const [operatorProfile, setOperatorProfile] = useState<any>(null);
@@ -24,6 +32,10 @@ export default function VehiclesScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [uploadingDocs, setUploadingDocs] = useState<Record<string, boolean>>({});
+  const [submittingVehicles, setSubmittingVehicles] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     try {
@@ -73,7 +85,9 @@ export default function VehiclesScreen() {
         luggageCapacity: Number.parseInt(form.luggageCapacity, 10) || 2,
       });
       setForm(emptyForm);
+      setShowForm(false);
       await load();
+      requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
     } catch (e: any) {
       Alert.alert("Vehicle not saved", e.message || "Please try again.");
     } finally {
@@ -92,6 +106,7 @@ export default function VehiclesScreen() {
   }
 
   async function pickAndUploadDocument(vehicleId: string, type: string) {
+    const uploadKey = `${vehicleId}:${type}`;
     try {
       if (Platform.OS !== "web") {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -102,6 +117,7 @@ export default function VehiclesScreen() {
       }
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.65 });
       if (result.canceled || !result.assets?.[0]) return;
+      setUploadingDocs((prev) => ({ ...prev, [uploadKey]: true }));
       const asset = result.assets[0];
       let url = asset.uri;
       try {
@@ -111,16 +127,29 @@ export default function VehiclesScreen() {
       await load();
     } catch (e: any) {
       Alert.alert("Upload failed", e.message || "Could not upload this document.");
+    } finally {
+      setUploadingDocs((prev) => {
+        const next = { ...prev };
+        delete next[uploadKey];
+        return next;
+      });
     }
   }
 
   async function submitVehicle(vehicleId: string) {
+    if (submittingVehicles[vehicleId]) return;
+    setSubmittingVehicles((prev) => ({ ...prev, [vehicleId]: true }));
     try {
       await apiRequest("POST", `/api/vehicles/${vehicleId}/submit`);
       Alert.alert("Vehicle submitted", "A2B will review the vehicle documents.");
       await load();
     } catch (e: any) {
       Alert.alert("Cannot submit vehicle", e.message || "Please upload all required documents.");
+      setSubmittingVehicles((prev) => {
+        const next = { ...prev };
+        delete next[vehicleId];
+        return next;
+      });
     }
   }
 
@@ -136,38 +165,69 @@ export default function VehiclesScreen() {
         <View style={styles.backBtn} />
       </View>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.white} />}
       >
-        <Text style={styles.sectionTitle}>Add vehicle</Text>
-        <View style={styles.form}>
-          {([
-            ["carMake", "Car Make"],
-            ["vehicleModel", "Car Model"],
-            ["vehicleYear", "Model Year"],
-            ["plateNumber", "Plate Number"],
-            ["vehicleType", "Category"],
-            ["carColor", "Color"],
-            ["passengerCapacity", "Passengers"],
-            ["luggageCapacity", "Luggage"],
-          ] as const).map(([field, label]) => (
-            <TextInput
-              key={field}
-              style={styles.input}
-              value={form[field]}
-              onChangeText={(value) => update(field, value)}
-              placeholder={label}
-              placeholderTextColor={Colors.textMuted}
-              keyboardType={field.includes("Year") || field.includes("Capacity") ? "number-pad" : "default"}
-              autoCapitalize={field === "plateNumber" ? "characters" : "words"}
-            />
-          ))}
-          <Pressable style={[styles.submitBtn, saving && { opacity: 0.7 }]} onPress={createVehicle} disabled={saving}>
-            {saving ? <ActivityIndicator color={Colors.primary} /> : <Text style={styles.submitText}>Save Vehicle</Text>}
-          </Pressable>
-        </View>
+        <Pressable style={styles.addVehicleBtn} onPress={() => setShowForm((prev) => !prev)}>
+          <Ionicons name={showForm ? "close-circle-outline" : "add-circle-outline"} size={20} color={Colors.primary} />
+          <Text style={styles.submitText}>{showForm ? "Cancel" : "Add New Vehicle"}</Text>
+        </Pressable>
 
-        <Text style={styles.sectionTitle}>My vehicles</Text>
+        {showForm && (
+          <View style={styles.form}>
+            <Text style={styles.sectionTitle}>Add vehicle</Text>
+            {([
+              ["carMake", "Car Make"],
+              ["vehicleModel", "Car Model"],
+              ["vehicleYear", "Model Year"],
+              ["plateNumber", "Plate Number"],
+              ["carColor", "Color"],
+              ["passengerCapacity", "Passengers"],
+              ["luggageCapacity", "Luggage"],
+            ] as const).map(([field, label]) => (
+              <TextInput
+                key={field}
+                style={styles.input}
+                value={form[field]}
+                onChangeText={(value) => update(field, value)}
+                placeholder={label}
+                placeholderTextColor={Colors.textMuted}
+                keyboardType={field.includes("Year") || field.includes("Capacity") ? "number-pad" : "default"}
+                autoCapitalize={field === "plateNumber" ? "characters" : "words"}
+              />
+            ))}
+            <Pressable style={styles.categorySelect} onPress={() => setCategoryOpen((prev) => !prev)}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.categoryLabel}>Category</Text>
+                <Text style={styles.categoryValue}>{VEHICLE_CATEGORIES.find((item) => item.id === form.vehicleType)?.label || "Budget"}</Text>
+              </View>
+              <Ionicons name={categoryOpen ? "chevron-up" : "chevron-down"} size={18} color={Colors.textMuted} />
+            </Pressable>
+            {categoryOpen && (
+              <View style={styles.categoryMenu}>
+                {VEHICLE_CATEGORIES.map((item) => (
+                  <Pressable
+                    key={item.id}
+                    style={[styles.categoryOption, form.vehicleType === item.id && styles.categoryOptionActive]}
+                    onPress={() => {
+                      update("vehicleType", item.id);
+                      setCategoryOpen(false);
+                    }}
+                  >
+                    <Text style={styles.categoryOptionTitle}>{item.label}</Text>
+                    <Text style={styles.categoryOptionDesc}>{item.desc}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+            <Pressable style={[styles.submitBtn, saving && { opacity: 0.7 }]} onPress={createVehicle} disabled={saving}>
+              {saving ? <ActivityIndicator color={Colors.primary} /> : <Text style={styles.submitText}>Save Vehicle</Text>}
+            </Pressable>
+          </View>
+        )}
+
+        <Text style={styles.sectionTitle}>My Vehicles</Text>
         {vehicles.length === 0 ? (
           <Text style={styles.emptyText}>No vehicles yet.</Text>
         ) : vehicles.map((vehicle) => {
@@ -176,6 +236,7 @@ export default function VehiclesScreen() {
           const docs = Array.isArray(vehicle.documents) ? vehicle.documents : [];
           const uploadedTypes = new Set(docs.map((doc: any) => doc.type));
           const missingDocs = VEHICLE_DOCS.filter((doc) => !uploadedTypes.has(doc.id));
+          const isSubmitting = !!submittingVehicles[vehicleData.id] || vehicleData.status === "pending";
           return (
             <View key={vehicle.id} style={styles.vehicleCard}>
               <View style={styles.vehicleTop}>
@@ -190,14 +251,22 @@ export default function VehiclesScreen() {
 
               {vehicleData.status !== "approved" && (
                 <View style={styles.docsBlock}>
-                  {VEHICLE_DOCS.map((doc) => (
-                    <Pressable key={doc.id} style={styles.docRow} onPress={() => pickAndUploadDocument(vehicleData.id, doc.id)}>
-                      <Ionicons name={uploadedTypes.has(doc.id) ? "checkmark-circle" : "cloud-upload-outline"} size={18} color={uploadedTypes.has(doc.id) ? Colors.success : Colors.textMuted} />
-                      <Text style={styles.docText}>{doc.label}</Text>
-                    </Pressable>
-                  ))}
-                  <Pressable style={[styles.submitBtn, missingDocs.length > 0 && styles.submitBtnMuted]} onPress={() => submitVehicle(vehicleData.id)}>
-                    <Text style={styles.submitText}>Submit for Approval</Text>
+                  {VEHICLE_DOCS.map((doc) => {
+                    const isUploading = !!uploadingDocs[`${vehicleData.id}:${doc.id}`];
+                    const isUploaded = uploadedTypes.has(doc.id);
+                    return (
+                      <Pressable key={doc.id} style={[styles.docRow, isUploading && { opacity: 0.75 }]} onPress={() => pickAndUploadDocument(vehicleData.id, doc.id)} disabled={isUploading}>
+                        {isUploading ? <ActivityIndicator size="small" color={Colors.white} /> : <Ionicons name={isUploaded ? "checkmark-circle" : "cloud-upload-outline"} size={18} color={isUploaded ? Colors.success : Colors.textMuted} />}
+                        <Text style={styles.docText}>{isUploading ? `Uploading ${doc.label}...` : doc.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                  <Pressable
+                    style={[styles.submitBtn, (missingDocs.length > 0 || isSubmitting) && styles.submitBtnMuted]}
+                    onPress={() => submitVehicle(vehicleData.id)}
+                    disabled={missingDocs.length > 0 || isSubmitting}
+                  >
+                    {submittingVehicles[vehicleData.id] ? <ActivityIndicator color={Colors.primary} /> : <Text style={styles.submitText}>{vehicleData.status === "pending" ? "Submitted for Approval" : "Submit for Approval"}</Text>}
                   </Pressable>
                 </View>
               )}
@@ -234,6 +303,15 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 13, fontFamily: "Inter_700Bold", color: Colors.textSecondary, textTransform: "uppercase", marginTop: 14, marginBottom: 10 },
   form: { gap: 10, marginBottom: 16 },
   input: { minHeight: 46, borderRadius: 12, paddingHorizontal: 14, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, color: Colors.white },
+  addVehicleBtn: { minHeight: 48, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white, flexDirection: "row", gap: 8, marginTop: 12 },
+  categorySelect: { minHeight: 54, borderRadius: 12, paddingHorizontal: 14, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, flexDirection: "row", alignItems: "center", gap: 10 },
+  categoryLabel: { color: Colors.textMuted, fontFamily: "Inter_600SemiBold", fontSize: 11, textTransform: "uppercase" },
+  categoryValue: { color: Colors.white, fontFamily: "Inter_700Bold", fontSize: 14, marginTop: 2 },
+  categoryMenu: { borderWidth: 1, borderColor: Colors.border, borderRadius: 12, overflow: "hidden", backgroundColor: Colors.card },
+  categoryOption: { paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  categoryOptionActive: { backgroundColor: Colors.surface },
+  categoryOptionTitle: { color: Colors.white, fontFamily: "Inter_700Bold", fontSize: 13 },
+  categoryOptionDesc: { color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 11, marginTop: 3 },
   submitBtn: { minHeight: 48, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white },
   submitText: { color: Colors.primary, fontFamily: "Inter_700Bold" },
   emptyText: { color: Colors.textMuted, fontFamily: "Inter_400Regular" },
@@ -254,5 +332,5 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: "row", justifyContent: "flex-end" },
   selectBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: Colors.accent },
   selectText: { color: Colors.white, fontFamily: "Inter_700Bold", fontSize: 12 },
-  submitBtnMuted: { opacity: 0.85 },
+  submitBtnMuted: { opacity: 0.55 },
 });

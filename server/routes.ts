@@ -2978,12 +2978,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put("/api/vehicles/:id", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
-      const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
-      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
       const vehicle = await storage.getVehicle(req.params.id);
       if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
-      if (vehicle.ownerOperatorProfileId !== profile.id && req.auth!.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
+      if (req.auth!.role !== "admin") {
+        const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
+        if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+        if (vehicle.ownerOperatorProfileId !== profile.id) {
+          return res.status(403).json({ message: "Forbidden" });
+        }
       }
       if (vehicle.status === "approved" && req.auth!.role !== "admin") {
         return res.status(400).json({ message: "Approved vehicles cannot be edited from the app. Contact support." });
@@ -4080,6 +4082,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.put("/api/admin/operator-profiles/:id", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
+    try {
+      const profile = await storage.getOperatorProfile(req.params.id);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+
+      const profileUpdate: any = {};
+      if (req.body.status !== undefined) {
+        const status = String(req.body.status).trim();
+        if (!["draft", "pending", "approved", "rejected"].includes(status)) {
+          return res.status(400).json({ message: "Invalid operator profile status" });
+        }
+        profileUpdate.status = status;
+      }
+      if (req.body.rejectionReason !== undefined) {
+        profileUpdate.rejectionReason = String(req.body.rejectionReason || "").trim() || null;
+      }
+      const updatedProfile = Object.keys(profileUpdate).length
+        ? await storage.updateOperatorProfile(profile.id, profileUpdate)
+        : profile;
+
+      if (profile.type === "partner") {
+        const partnerProfile = await storage.getPartnerProfileByOperatorId(profile.id);
+        const partnerUpdate: any = {};
+        for (const field of ["companyName", "registrationNumber", "contactPersonName", "contactPhone", "contactEmail", "bankName", "accountHolder", "accountNumber"] as const) {
+          if (req.body[field] !== undefined) partnerUpdate[field] = String(req.body[field]).trim();
+        }
+        if (partnerProfile && Object.keys(partnerUpdate).length) {
+          await storage.updatePartnerProfile(partnerProfile.id, partnerUpdate);
+        }
+      }
+
+      return res.json(await serializeOperatorProfile(updatedProfile));
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/admin/operator-profiles/:id", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
+    try {
+      const deleted = await storage.deleteOperatorProfile(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "Operator profile not found" });
+      return res.json({ message: "Operator profile deleted" });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
   app.get("/api/admin/vehicles", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
     try {
       const status = typeof req.query.status === "string" ? req.query.status : undefined;
@@ -4154,6 +4203,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json(await serializeVehicle(updated));
     } catch (error: any) {
       return res.status(400).json({ message: error.message });
+    }
+  });
+
+  app.put("/api/admin/vehicles/:id", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
+    try {
+      const vehicle = await storage.getVehicle(req.params.id);
+      if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
+      const update: any = {};
+      for (const field of ["carMake", "vehicleModel", "plateNumber", "vehicleType", "carColor", "status", "rejectionReason"] as const) {
+        if (req.body[field] !== undefined) update[field] = String(req.body[field]).trim();
+      }
+      if (req.body.vehicleYear !== undefined) update.vehicleYear = Number.parseInt(String(req.body.vehicleYear), 10);
+      if (req.body.passengerCapacity !== undefined) update.passengerCapacity = Number.parseInt(String(req.body.passengerCapacity), 10) || 4;
+      if (req.body.luggageCapacity !== undefined) update.luggageCapacity = Number.parseInt(String(req.body.luggageCapacity), 10) || 2;
+      const updated = await storage.updateVehicle(vehicle.id, update);
+      return res.json(await serializeVehicle(updated));
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/admin/vehicles/:id", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
+    try {
+      const deleted = await storage.deleteVehicle(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "Vehicle not found" });
+      return res.json({ message: "Vehicle deleted" });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
     }
   });
 
