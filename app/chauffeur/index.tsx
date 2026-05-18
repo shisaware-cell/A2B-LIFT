@@ -15,6 +15,7 @@ import {
   ScrollView,
   TextInput,
   KeyboardAvoidingView,
+  AppState,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -199,8 +200,11 @@ export default function ChauffeurDashboard() {
   const incomingSlide = useRef(new Animated.Value(300)).current;
   const notificationsRef = useRef<any>(null);
   const locationWatchRef = useRef<Location.LocationSubscription | null>(null);
+  const locationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastLocationRestPostRef = useRef(0);
   const currentRideRef = useRef<any>(null);
+  const isOnlineRef = useRef(false);
+  const chauffeurRef = useRef<any>(null);
   const isExpoGoAndroid = Platform.OS === "android" && Constants.appOwnership === "expo";
 
   function getClientFirstName(name?: string | null, fallback = "Client") {
@@ -654,6 +658,14 @@ export default function ChauffeurDashboard() {
     }
   }, [currentRide]);
 
+  useEffect(() => {
+    isOnlineRef.current = isOnline;
+  }, [isOnline]);
+
+  useEffect(() => {
+    chauffeurRef.current = chauffeur;
+  }, [chauffeur]);
+
   // ─── Location tracking ────────────────────────────────────────────────────
   useEffect(() => {
     if (isOnline && chauffeur) {
@@ -661,8 +673,33 @@ export default function ChauffeurDashboard() {
     } else {
       stopLocationUpdates();
     }
-    return () => stopLocationUpdates();
+    return () => {
+      stopForegroundLocationUpdates();
+    };
   }, [isOnline, chauffeur]);
+
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        if (chauffeurRef.current?.id) {
+          refreshChauffeur(chauffeurRef.current.id);
+        } else if (user?.id) {
+          fetchChauffeurForUser(user.id);
+        }
+        restoreActiveRide();
+        if (isOnlineRef.current && chauffeurRef.current?.id) {
+          startLocationUpdates();
+        }
+        return;
+      }
+      stopForegroundLocationUpdates();
+      if (isOnlineRef.current && chauffeurRef.current?.id) {
+        void startBackgroundLocationTask(chauffeurRef.current.id);
+      }
+    });
+    return () => subscription.remove();
+  }, [user?.id]);
 
   useEffect(() => {
     if (!chauffeur || myLocation) return;
@@ -972,6 +1009,7 @@ export default function ChauffeurDashboard() {
         const refreshed = cached?.id ? await refreshChauffeur(cached.id) : null;
         if (refreshed) {
           await loadDriverVehicles();
+          await loadFleetOverview();
           restoreActiveRide();
           return;
         }
@@ -980,6 +1018,7 @@ export default function ChauffeurDashboard() {
       const c = await fetchChauffeurForUser(user.id);
       if (!c) throw new Error("not found");
       await loadDriverVehicles();
+      await loadFleetOverview();
       restoreActiveRide();
     } catch {
       router.replace("/chauffeur-onboarding");
@@ -1182,6 +1221,7 @@ export default function ChauffeurDashboard() {
           publishChauffeurLocation(toLatLng(loc));
         } catch {}
       }, 15000);
+      locationIntervalRef.current = interval;
       setLocationIntervalId(interval);
     } catch { setMyLocation(JHB_FALLBACK); }
   }
@@ -1189,6 +1229,12 @@ export default function ChauffeurDashboard() {
   function stopForegroundLocationUpdates() {
     locationWatchRef.current?.remove();
     locationWatchRef.current = null;
+    if (locationIntervalRef.current) {
+      clearInterval(locationIntervalRef.current);
+      locationIntervalRef.current = null;
+      setLocationIntervalId(null);
+      return;
+    }
     if (locationInterval) { clearInterval(locationInterval); setLocationIntervalId(null); }
   }
 
@@ -1557,6 +1603,9 @@ export default function ChauffeurDashboard() {
 
   if (!chauffeur) return null;
   const activeVehicle = driverVehicles.find((vehicle) => vehicle.id === chauffeur.activeVehicleId);
+  const canManageFleetDrivers = driverVehicles.some((vehicle) => (
+    vehicle.ownerOperatorProfileId === operatorProfile?.id && vehicle.status === "approved"
+  ));
 
   // ─── Pending approval ─────────────────────────────────────────────────────
   if (!chauffeur.isApproved) {
@@ -1583,6 +1632,7 @@ export default function ChauffeurDashboard() {
   const menuItems = [
     { icon: isOnline ? "stop-circle-outline" : "play-circle-outline", label: isOnline ? "Go Offline" : "Go Online", onPress: toggleOnline, color: isOnline ? "#ff6b6b" : Colors.success },
     { icon: "car-outline", label: "Vehicles", onPress: () => { router.push("/chauffeur/vehicles" as never); closeMenu(); }, color: Colors.white },
+    ...(canManageFleetDrivers ? [{ icon: "people-outline", label: "Drivers", onPress: () => { router.push("/chauffeur/fleet" as never); closeMenu(); }, color: Colors.white }] : []),
     { icon: "car-sport-outline", label: "My Rides", onPress: () => { router.push("/chauffeur/rides"); closeMenu(); }, color: Colors.white },
     { icon: "map-outline", label: "Long Distance", onPress: () => { router.push("/chauffeur/long-distance" as never); closeMenu(); }, color: Colors.white },
     { icon: "bar-chart-outline", label: "Earnings", onPress: () => { router.push("/chauffeur/earnings"); closeMenu(); }, color: Colors.white },

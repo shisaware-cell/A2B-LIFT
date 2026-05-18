@@ -26,10 +26,15 @@ export default function FleetScreen() {
         apiRequest("GET", "/api/fleet/assignments"),
         apiRequest("GET", "/api/fleet/overview"),
       ]);
+      const profileRes = await apiRequest("GET", "/api/operator-profile/me").catch(() => null);
+      const profileData = profileRes?.ok ? await profileRes.json() : null;
       const vehicleData = await vehicleRes.json();
       const assignmentData = await assignmentRes.json();
       const overviewData = await overviewRes.json();
-      setVehicles((vehicleData.vehicles || []).filter((vehicle: any) => vehicle.status === "approved"));
+      const profile = profileData?.profile || null;
+      setVehicles((vehicleData.vehicles || []).filter((vehicle: any) => (
+        vehicle.status === "approved" && (!profile?.id || vehicle.ownerOperatorProfileId === profile.id)
+      )));
       setAssignments(assignmentData.assignments || []);
       setOverview({
         vehicles: overviewData?.overview?.vehicles || 0,
@@ -127,9 +132,12 @@ export default function FleetScreen() {
 
         <Text style={styles.sectionTitle}>Assign driver to vehicle</Text>
         <View style={styles.form}>
+          <Text style={styles.helperText}>Search A2B-approved drivers, choose one of your approved cars, then assign them. Drivers can be called from this screen before matching.</Text>
           <TextInput style={styles.input} value={query} onChangeText={setQuery} placeholder="Search approved drivers" placeholderTextColor={Colors.textMuted} />
           <View style={styles.choiceGrid}>
-            {vehicles.map((vehicle) => (
+            {vehicles.length === 0 ? (
+              <Text style={styles.emptyText}>No approved vehicles available for matching yet.</Text>
+            ) : vehicles.map((vehicle) => (
               <Pressable key={vehicle.id} style={[styles.choice, selectedVehicleId === vehicle.id && styles.choiceActive]} onPress={() => setSelectedVehicleId(vehicle.id)}>
                 <Text style={styles.choiceTitle}>{vehicle.carMake} {vehicle.vehicleModel}</Text>
                 <Text style={styles.choiceMeta}>{vehicle.plateNumber}</Text>
@@ -137,7 +145,9 @@ export default function FleetScreen() {
             ))}
           </View>
           <View style={styles.choiceGrid}>
-            {drivers.map((driver) => (
+            {drivers.length === 0 ? (
+              <Text style={styles.emptyText}>{query.trim() ? "No approved drivers matched your search." : "Approved drivers will appear here."}</Text>
+            ) : drivers.map((driver) => (
               <Pressable key={driver.id} style={[styles.choice, selectedDriverId === driver.id && styles.choiceActive]} onPress={() => setSelectedDriverId(driver.id)}>
                 <Text style={styles.choiceTitle}>{driver.user?.name || "Approved driver"}</Text>
                 <Pressable onPress={() => callDriver(driver.user?.phone || driver.chauffeur?.phone)}>
@@ -189,6 +199,7 @@ const styles = StyleSheet.create({
   overviewLabel: { color: Colors.textMuted, fontFamily: "Inter_500Medium", fontSize: 11, textTransform: "uppercase", marginTop: 2 },
   sectionTitle: { fontSize: 13, fontFamily: "Inter_700Bold", color: Colors.textSecondary, textTransform: "uppercase", marginTop: 14, marginBottom: 10 },
   form: { gap: 10, marginBottom: 18 },
+  helperText: { color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 12, lineHeight: 18 },
   input: { minHeight: 46, borderRadius: 12, paddingHorizontal: 14, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, color: Colors.white },
   choiceGrid: { gap: 8 },
   choice: { padding: 12, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.card },

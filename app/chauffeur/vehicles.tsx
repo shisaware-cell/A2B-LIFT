@@ -237,6 +237,7 @@ export default function VehiclesScreen() {
           const uploadedTypes = new Set(docs.map((doc: any) => doc.type));
           const missingDocs = VEHICLE_DOCS.filter((doc) => !uploadedTypes.has(doc.id));
           const isSubmitting = !!submittingVehicles[vehicleData.id] || vehicleData.status === "pending";
+          const ownsVehicle = vehicleData.ownerOperatorProfileId === operatorProfile?.id;
           return (
             <View key={vehicle.id} style={styles.vehicleCard}>
               <View style={styles.vehicleTop}>
@@ -278,9 +279,9 @@ export default function VehiclesScreen() {
                       <Text style={styles.selectText}>Select for Driving</Text>
                     </Pressable>
                   )}
-                  {operatorProfile?.type === "partner" && (
+                  {ownsVehicle && (
                     <Pressable style={styles.selectBtn} onPress={() => router.push("/chauffeur/fleet" as never)}>
-                      <Text style={styles.selectText}>Assign Driver</Text>
+                      <Text style={styles.selectText}>Manage Drivers</Text>
                     </Pressable>
                   )}
                 </View>
@@ -329,7 +330,7 @@ const styles = StyleSheet.create({
   docsBlock: { gap: 8 },
   docRow: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: Colors.border, borderRadius: 10, paddingHorizontal: 12 },
   docText: { color: Colors.white, fontFamily: "Inter_600SemiBold", fontSize: 12, flex: 1 },
-  actionRow: { flexDirection: "row", justifyContent: "flex-end" },
+  actionRow: { flexDirection: "row", justifyContent: "flex-end", flexWrap: "wrap", gap: 8 },
   selectBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: Colors.accent },
   selectText: { color: Colors.white, fontFamily: "Inter_700Bold", fontSize: 12 },
   submitBtnMuted: { opacity: 0.55 },
