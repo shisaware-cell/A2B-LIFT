@@ -540,6 +540,72 @@
     // Set today as minimum date
     document.getElementById('ldDate').min = new Date().toISOString().split('T')[0];
 
+    function attachBackendAutocomplete(inputId, { cityOnly = false } = {}) {
+      const input = document.getElementById(inputId);
+      if (!input || input.dataset.autocompleteFallbackBound === '1') return;
+      input.dataset.autocompleteFallbackBound = '1';
+
+      const listId = `${inputId}Suggestions`;
+      let list = document.getElementById(listId);
+      if (!list) {
+        list = document.createElement('datalist');
+        list.id = listId;
+        document.body.appendChild(list);
+      }
+      input.setAttribute('list', listId);
+
+      let debounceTimer = null;
+      let activeController = null;
+
+      const renderPredictions = (predictions) => {
+        const seen = new Set();
+        list.innerHTML = '';
+        predictions.forEach((prediction) => {
+          const value = (prediction?.mainText || prediction?.description || '').trim();
+          if (!value || seen.has(value.toLowerCase())) return;
+          seen.add(value.toLowerCase());
+          const option = document.createElement('option');
+          option.value = value;
+          list.appendChild(option);
+        });
+      };
+
+      input.addEventListener('input', () => {
+        const query = input.value.trim();
+        if (debounceTimer) clearTimeout(debounceTimer);
+        if (activeController) activeController.abort();
+
+        if (query.length < 2) {
+          list.innerHTML = '';
+          return;
+        }
+
+        debounceTimer = setTimeout(async () => {
+          activeController = new AbortController();
+          try {
+            const params = new URLSearchParams({ input: query });
+            if (cityOnly) params.set('cityOnly', '1');
+            const res = await fetch(`${API}/api/places/autocomplete?${params.toString()}`, {
+              signal: activeController.signal,
+            });
+            if (!res.ok) return;
+            const payload = await res.json();
+            const predictions = Array.isArray(payload?.predictions) ? payload.predictions : [];
+            renderPredictions(predictions);
+          } catch (error) {
+            if (error?.name !== 'AbortError') {
+              list.innerHTML = '';
+            }
+          }
+        }, 260);
+      });
+    }
+
+    function initLongDistanceAddressAutosuggest() {
+      attachBackendAutocomplete('ldFrom', { cityOnly: true });
+      attachBackendAutocomplete('ldTo', { cityOnly: true });
+    }
+
     function initMap() {
       // Always show the results layout so the map is visible immediately
       document.getElementById('ldResultsLayout').style.display = 'grid';
@@ -591,15 +657,8 @@
         polylineOptions: { strokeColor: '#0A0A0A', strokeWeight: 4 }
       });
 
-      // Places Autocomplete on search inputs
-      fromAutocomplete = new google.maps.places.Autocomplete(
-        document.getElementById('ldFrom'),
-        { componentRestrictions: { country: 'za' }, types: ['(cities)'] }
-      );
-      toAutocomplete = new google.maps.places.Autocomplete(
-        document.getElementById('ldTo'),
-        { componentRestrictions: { country: 'za' }, types: ['(cities)'] }
-      );
+      // Places autocomplete with backend fallback when Google is unavailable.
+      initLongDistanceAddressAutosuggest();
 
       // Auto-load available drivers on page load
       autoLoadDrivers();
@@ -1031,6 +1090,9 @@
     document.getElementById('bookModal').addEventListener('click', function(e) {
       if (e.target === this) closeModal();
     });
+
+    // Bind autosuggest even if Google callback is blocked or delayed.
+    window.addEventListener('load', initLongDistanceAddressAutosuggest);
   </script>
 </body>
 </html>

@@ -167,6 +167,67 @@
     let directionsRenderer;
     let geocoder;
 
+    function attachBackendAutocomplete(inputId, { cityOnly = false } = {}) {
+      const input = document.getElementById(inputId);
+      if (!input || input.dataset.autocompleteFallbackBound === '1') return;
+      input.dataset.autocompleteFallbackBound = '1';
+
+      const listId = `${inputId}Suggestions`;
+      let list = document.getElementById(listId);
+      if (!list) {
+        list = document.createElement('datalist');
+        list.id = listId;
+        document.body.appendChild(list);
+      }
+      input.setAttribute('list', listId);
+
+      let debounceTimer = null;
+      let activeController = null;
+
+      const renderPredictions = (predictions) => {
+        const seen = new Set();
+        list.innerHTML = '';
+        predictions.forEach((prediction) => {
+          const value = (prediction?.mainText || prediction?.description || '').trim();
+          if (!value || seen.has(value.toLowerCase())) return;
+          seen.add(value.toLowerCase());
+          const option = document.createElement('option');
+          option.value = value;
+          list.appendChild(option);
+        });
+      };
+
+      input.addEventListener('input', () => {
+        const query = input.value.trim();
+        if (debounceTimer) clearTimeout(debounceTimer);
+        if (activeController) activeController.abort();
+
+        if (query.length < 2) {
+          list.innerHTML = '';
+          return;
+        }
+
+        debounceTimer = setTimeout(async () => {
+          activeController = new AbortController();
+          try {
+            const params = new URLSearchParams({ input: query });
+            if (cityOnly) params.set('cityOnly', '1');
+            const res = await fetch(`https://api.a2blift.com/api/places/autocomplete?${params.toString()}`, {
+              signal: activeController.signal,
+            });
+            if (!res.ok) return;
+            const payload = await res.json();
+            const predictions = Array.isArray(payload?.predictions) ? payload.predictions : [];
+            renderPredictions(predictions);
+          } catch (error) {
+            if (error?.name !== 'AbortError') {
+              list.innerHTML = '';
+            }
+          }
+        }, 260);
+      });
+    }
+
     function initAirportMap() {
       const initial = AIRPORTS['or-tambo'];
       airportMap = new google.maps.Map(document.getElementById('airportMap'), {
@@ -178,7 +239,11 @@
       directionsService = new google.maps.DirectionsService();
       directionsRenderer = new google.maps.DirectionsRenderer({ map: airportMap, suppressMarkers: false });
       geocoder = new google.maps.Geocoder();
-      new google.maps.places.Autocomplete(document.getElementById('airportDestination'), { componentRestrictions: { country: 'za' } });
+      try {
+        new google.maps.places.Autocomplete(document.getElementById('airportDestination'), { componentRestrictions: { country: 'za' } });
+      } catch (_) {
+        attachBackendAutocomplete('airportDestination');
+      }
 
       // Show user's current location pin
       if (navigator.geolocation) {
@@ -292,7 +357,10 @@
 
     setTodayMin();
     window.initAirportMap = initAirportMap;
-    window.addEventListener('load', () => { if (window.google) initAirportMap(); });
+    window.addEventListener('load', () => {
+      if (window.google) initAirportMap();
+      else attachBackendAutocomplete('airportDestination');
+    });
   </script>
 </body>
 </html>
