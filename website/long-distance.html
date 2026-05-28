@@ -518,7 +518,7 @@
     </div>
   </div>
 
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDhC2aHuhOQ8ZwuWj2K5XZ5nAElB572-wo&libraries=places&callback=initMap" async defer></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC_CIf3H2FMP6aXZ3hfXTfLv_EWyDUGDWs&libraries=places&callback=initMap" async defer></script>
   <script src="https://js.paystack.co/v1/inline.js"></script>
   <script src="main.js"></script>
   <script>
@@ -661,7 +661,6 @@
         suppressMarkers: false,
         polylineOptions: { strokeColor: '#0A0A0A', strokeWeight: 4 }
       });
-
       // Auto-load available drivers on page load
       autoLoadDrivers();
       restorePendingBooking();
@@ -1094,13 +1093,7 @@
     });
 
     // Bind autosuggest even if Google callback is blocked or delayed.
-    window.addEventListener('load', () => {
-      initLongDistanceAddressAutosuggest();
-      if (!window.google || !window.google.maps) {
-        autoLoadDrivers();
-        restorePendingBooking();
-      }
-    }, { once: true });
+    window.addEventListener('load', initLongDistanceAddressAutosuggest);
   </script>
 </body>
 </html>
