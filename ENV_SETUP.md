@@ -16,7 +16,8 @@ JWT_SECRET=your-secret-key-here-minimum-32-characters-long
 
 ### Google Maps And Google OAuth
 ```bash
-GOOGLE_API_KEY=your-google-maps-server-key
+GOOGLE_MAPS_SERVER_API_KEY=your-google-maps-server-key
+GOOGLE_API_KEY=your-google-maps-server-key-legacy-fallback
 EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=your-google-maps-native-key
 GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-google-oauth-client-secret
@@ -83,7 +84,8 @@ This does not change your app code. It only switches Expo owner/project for the 
 
 - **DATABASE_URL**: Your PostgreSQL connection string. If using Supabase, you can get this from your Supabase project settings.
 - **JWT_SECRET**: Generate a secure random string (minimum 32 characters). You can use: `openssl rand -base64 32`
-- **GOOGLE_API_KEY**: Used by the backend for directions, geocoding, and reverse geocoding.
+- **GOOGLE_MAPS_SERVER_API_KEY**: Preferred backend-only key for Railway/server requests.
+- **GOOGLE_API_KEY**: Legacy backend fallback for older deployments.
 - **EXPO_PUBLIC_GOOGLE_MAPS_API_KEY**: Used by the Expo app config and native map SDKs at build time.
 - **GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET**: Used by the backend Google OAuth endpoints.
 - **SUPABASE_URL/ANON_KEY**: Already provided above
