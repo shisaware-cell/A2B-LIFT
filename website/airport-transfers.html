@@ -229,6 +229,8 @@
     }
 
     function initAirportMap() {
+      attachBackendAutocomplete('airportDestination');
+
       const initial = AIRPORTS['or-tambo'];
       airportMap = new google.maps.Map(document.getElementById('airportMap'), {
         center: { lat: initial.lat, lng: initial.lng },
@@ -239,11 +241,6 @@
       directionsService = new google.maps.DirectionsService();
       directionsRenderer = new google.maps.DirectionsRenderer({ map: airportMap, suppressMarkers: false });
       geocoder = new google.maps.Geocoder();
-      try {
-        new google.maps.places.Autocomplete(document.getElementById('airportDestination'), { componentRestrictions: { country: 'za' } });
-      } catch (_) {
-        attachBackendAutocomplete('airportDestination');
-      }
 
       // Show user's current location pin
       if (navigator.geolocation) {
@@ -358,8 +355,8 @@
     setTodayMin();
     window.initAirportMap = initAirportMap;
     window.addEventListener('load', () => {
+      attachBackendAutocomplete('airportDestination');
       if (window.google) initAirportMap();
-      else attachBackendAutocomplete('airportDestination');
     });
   </script>
 </body>

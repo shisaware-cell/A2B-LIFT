@@ -1327,7 +1327,7 @@ export default function ClientHomeScreen() {
       setSuggestionsLoading(true);
       const sessionToken = placesSessionTokenRef.current;
       const isManualSuggestion = suggestion.placeId.startsWith("manual:") || suggestion.placeId.startsWith("synthetic:") || suggestion.placeId.startsWith("query:");
-      let coords = (suggestion.lat && suggestion.lng) ? { lat: suggestion.lat, lng: suggestion.lng } : null;
+      let coords = (suggestion.lat != null && suggestion.lng != null) ? { lat: suggestion.lat, lng: suggestion.lng } : null;
       let resolutionSource = coords ? "suggestion" : "unresolved";
       let resolvedAddress = buildResolvedAddressLabel(suggestion) || suggestion.description;
 
@@ -1336,11 +1336,17 @@ export default function ClientHomeScreen() {
         // Fallback: server-side details endpoint
         try {
           const tokenQuery = sessionToken ? `&sessionToken=${encodeURIComponent(sessionToken)}` : "";
-          const res = await apiRequest("GET", `/api/places/details?placeId=${encodeURIComponent(suggestion.placeId)}${tokenQuery}`);
+          const descriptionQuery = suggestion.description
+            ? `&description=${encodeURIComponent(suggestion.description)}`
+            : "";
+          const res = await apiRequest("GET", `/api/places/details?placeId=${encodeURIComponent(suggestion.placeId)}${tokenQuery}${descriptionQuery}`);
           const data = await res.json();
           if (data.lat && data.lng) {
             coords = { lat: data.lat, lng: data.lng };
             resolutionSource = "details";
+            if (data.address) {
+              resolvedAddress = data.address;
+            }
           }
         } catch {}
       }

@@ -530,6 +530,7 @@
     let selectedPayMethod = 'card';
     let pendingLongDistanceBooking = null;
     let attemptedPendingRestore = false;
+    let longDistanceAutosuggestReady = false;
 
     try {
       pendingLongDistanceBooking = JSON.parse(localStorage.getItem('a2b_pending_long_distance') || 'null');
@@ -602,11 +603,15 @@
     }
 
     function initLongDistanceAddressAutosuggest() {
+      if (longDistanceAutosuggestReady) return;
+      longDistanceAutosuggestReady = true;
       attachBackendAutocomplete('ldFrom', { cityOnly: true });
       attachBackendAutocomplete('ldTo', { cityOnly: true });
     }
 
     function initMap() {
+      initLongDistanceAddressAutosuggest();
+
       // Always show the results layout so the map is visible immediately
       document.getElementById('ldResultsLayout').style.display = 'grid';
       document.getElementById('ldStatus').style.display = 'none';
@@ -656,9 +661,6 @@
         suppressMarkers: false,
         polylineOptions: { strokeColor: '#0A0A0A', strokeWeight: 4 }
       });
-
-      // Places autocomplete with backend fallback when Google is unavailable.
-      initLongDistanceAddressAutosuggest();
 
       // Auto-load available drivers on page load
       autoLoadDrivers();
@@ -1092,7 +1094,13 @@
     });
 
     // Bind autosuggest even if Google callback is blocked or delayed.
-    window.addEventListener('load', initLongDistanceAddressAutosuggest);
+    window.addEventListener('load', () => {
+      initLongDistanceAddressAutosuggest();
+      if (!window.google || !window.google.maps) {
+        autoLoadDrivers();
+        restorePendingBooking();
+      }
+    }, { once: true });
   </script>
 </body>
 </html>

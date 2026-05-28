@@ -2096,12 +2096,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/places/details", async (req: Request, res: Response) => {
     try {
       const placeId = req.query.placeId as string;
+      const description = typeof req.query.description === "string"
+        ? req.query.description.trim()
+        : "";
       const sessionToken = typeof req.query.sessionToken === "string"
         ? req.query.sessionToken
         : typeof req.query.sessiontoken === "string"
           ? req.query.sessiontoken
           : "";
       if (!placeId) return res.status(400).json({ message: "placeId is required" });
+
+      const isGooglePlaceId = !/^(nominatim|photon|sa-city|manual|synthetic|query):/i.test(placeId);
+
+      if (!isGooglePlaceId && description) {
+        const fallbackPredictions = await nominatimSearch(description, 1);
+        const bestMatch = fallbackPredictions.find((prediction) => prediction.lat != null && prediction.lng != null);
+        if (bestMatch && bestMatch.lat != null && bestMatch.lng != null) {
+          return res.json({
+            lat: bestMatch.lat,
+            lng: bestMatch.lng,
+            address: bestMatch.description,
+          });
+        }
+      }
+
       if (!GOOGLE_KEY) return res.status(500).json({ message: "Google Maps API key not configured" });
 
       const newDetails = await fetchGooglePlaceDetailsNew(placeId, sessionToken);
