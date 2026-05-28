@@ -97,14 +97,15 @@ function setupSecurity(app: express.Application) {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://unpkg.com", "https://cdn.jsdelivr.net"],
-          scriptSrcElem: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://unpkg.com", "https://cdn.jsdelivr.net"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://unpkg.com", "https://cdn.jsdelivr.net", "https://maps.googleapis.com", "https://maps.gstatic.com", "https://js.paystack.co", "https://checkout.paystack.com"],
+          scriptSrcElem: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://unpkg.com", "https://cdn.jsdelivr.net", "https://maps.googleapis.com", "https://maps.gstatic.com", "https://js.paystack.co", "https://checkout.paystack.com"],
           scriptSrcAttr: ["'unsafe-inline'"],
           styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
           styleSrcElem: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
           fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
           imgSrc: ["'self'", "data:", "https:"],
           connectSrc: ["'self'", "https:", "wss:"],
+          frameSrc: ["'self'", "https://js.paystack.co", "https://checkout.paystack.com"],
           frameAncestors: ["'self'", "https://*.replit.dev", "https://*.repl.co", "https://*.replit.com", "https://*.replit.app"],
         },
       },
@@ -190,6 +191,10 @@ async function detectMetroPort(): Promise<number> {
 
 function hasStaticBuild(): boolean {
   return fs.existsSync(path.resolve(process.cwd(), "static-build", "index.html"));
+}
+
+function hasWebsiteBuild(): boolean {
+  return fs.existsSync(path.resolve(process.cwd(), "website", "index.html"));
 }
 
 // Proxy factory — always uses resolvedMetroPort so it stays current
@@ -278,10 +283,15 @@ async function configureExpoAndLanding(app: express.Application) {
   }
 
   const staticBuildExists = hasStaticBuild();
+  const websiteBuildExists = hasWebsiteBuild();
   if (!allowMetroProxy) {
-    log(`Static build: ${staticBuildExists ? "found" : "not found"} — production mode (Metro proxy disabled)`);
+    log(
+      `Static build: ${staticBuildExists ? "found" : "not found"}; website build: ${websiteBuildExists ? "found" : "not found"} — production mode (Metro proxy disabled)`,
+    );
   } else {
-    log(`Static build: ${staticBuildExists ? "found" : "not found"} — routing non-API traffic to Metro:${metroPort}`);
+    log(
+      `Static build: ${staticBuildExists ? "found" : "not found"}; website build: ${websiteBuildExists ? "found" : "not found"} — routing non-API traffic to Metro:${metroPort}`,
+    );
   }
 
   // Admin dashboard — served at BOTH /admin and /a2b-admin (new URL busts any stale browser cache)
@@ -296,8 +306,33 @@ async function configureExpoAndLanding(app: express.Application) {
   app.get("/admin", serveAdmin);
   app.get("/a2b-admin", serveAdmin);
 
+  const serveReferralLaunch = (req: Request, res: Response) => {
+    const referralCode = req.params.code;
+    const target = referralCode
+      ? `/referral-launch.html?code=${encodeURIComponent(referralCode)}`
+      : "/referral-launch.html";
+    res.redirect(302, target);
+  };
+  app.get("/referral/:code", serveReferralLaunch);
+  app.get("/ref/:code", serveReferralLaunch);
+  app.get("/r/:code", serveReferralLaunch);
+
   // Serve local assets folder
   app.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
+
+  if (websiteBuildExists) {
+    const websiteRoot = path.resolve(process.cwd(), "website");
+
+    app.get("/", (_req, res) => {
+      res.sendFile(path.resolve(websiteRoot, "index.html"));
+    });
+
+    app.use(
+      express.static(websiteRoot, {
+        extensions: ["html"],
+      }),
+    );
+  }
 
   // If a static web build exists, serve it for non-API paths
   if (staticBuildExists) {
@@ -313,6 +348,24 @@ async function configureExpoAndLanding(app: express.Application) {
       }
       const staticIndex = path.resolve(process.cwd(), "static-build", "index.html");
       res.sendFile(staticIndex);
+    });
+  } else if (websiteBuildExists) {
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      if (req.path.startsWith("/api")) return next();
+      if (req.path === "/admin" || req.path === "/a2b-admin" || req.path.startsWith("/admin/") || req.path.startsWith("/a2b-admin/")) return next();
+      if (req.path.startsWith("/socket.io")) return next();
+
+      const htmlPath = path.resolve(
+        process.cwd(),
+        "website",
+        `${req.path.replace(/^\//, "")}.html`,
+      );
+
+      if (fs.existsSync(htmlPath)) {
+        return res.sendFile(htmlPath);
+      }
+
+      return res.status(404).sendFile(path.resolve(process.cwd(), "website", "index.html"));
     });
   } else if (allowMetroProxy) {
     // No static build — proxy everything (web + native) to Metro
