@@ -1901,7 +1901,7 @@ async function registerRoutes(app2) {
       return res.status(500).json({ message: error.message || "Failed to submit cash-out request" });
     }
   });
-  const GOOGLE_KEY = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_WEB_SERVICE_API_KEY || process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_API_KEY || "";
+  const GOOGLE_KEY = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_WEB_SERVICE_API_KEY || "";
   const NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org";
   const PHOTON_BASE_URL = "https://photon.komoot.io/api";
   const MAPS_USER_AGENT = "A2B-LIFT/1.0 (support@a2blift.app)";
@@ -2382,6 +2382,23 @@ async function registerRoutes(app2) {
       lat,
       lng
     };
+  }
+  async function photonCitySearch(query, limit = 8, options) {
+    const normalizedQuery = normalizeMapsQuery(query);
+    if (normalizedQuery.length < 2) return [];
+    const hasBias = typeof options?.lat === "number" && Number.isFinite(options.lat) && typeof options?.lng === "number" && Number.isFinite(options.lng);
+    const biasLat = hasBias ? Number(options?.lat) : SA_DEFAULT_BIAS.lat;
+    const biasLng = hasBias ? Number(options?.lng) : SA_DEFAULT_BIAS.lng;
+    const url = `${PHOTON_BASE_URL}/?q=${encodeURIComponent(normalizedQuery)}&limit=${Math.max(limit, 8)}&lang=en&lat=${biasLat}&lon=${biasLng}&osm_tag=place:city&osm_tag=place:town&osm_tag=place:village&osm_tag=place:municipality`;
+    const response = await fetchMapsJsonSafely(url);
+    const features = Array.isArray(response?.features) ? response.features : [];
+    if (features.length === 0) return [];
+    return dedupeAddressAutocompletePredictions(
+      features.map(mapPhotonFeatureToPrediction).filter((p) => Boolean(p))
+    ).map((prediction) => ({
+      ...prediction,
+      score: scoreMapsPrediction(prediction, normalizedQuery, options?.lat, options?.lng)
+    })).sort((a, b) => b.score - a.score).slice(0, limit).map(({ score: _score, ...prediction }) => prediction);
   }
   async function photonSearch(query, limit = 6, options) {
     const normalizedQuery = normalizeMapsQuery(query);
@@ -2869,13 +2886,17 @@ async function registerRoutes(app2) {
           });
         }
       }
-      const osmPredictions = await nominatimSearch(normalizedInput, ADDRESS_AUTOCOMPLETE_RESULT_LIMIT, { cityOnly, lat, lng });
+      const [osmPredictions, photonCityPredictions] = await Promise.all([
+        nominatimSearch(normalizedInput, ADDRESS_AUTOCOMPLETE_RESULT_LIMIT, { cityOnly, lat, lng }),
+        cityOnly ? photonCitySearch(normalizedInput, ADDRESS_AUTOCOMPLETE_RESULT_LIMIT, { lat, lng }) : Promise.resolve([])
+      ]);
       providerDebug.osmCount = osmPredictions.length;
+      providerDebug.photonCityCount = photonCityPredictions.length;
       const filteredOsmPredictions = cityOnly ? osmPredictions : filterAddressAutocompletePredictions(normalizedInput, osmPredictions, lat, lng);
       providerDebug.osmFilteredCount = filteredOsmPredictions.length;
       if (cityOnly) {
         const seenCities = /* @__PURE__ */ new Set();
-        const cityPredictions = [...staticCityPredictions, ...osmPredictions].filter((prediction) => {
+        const cityPredictions = [...staticCityPredictions, ...photonCityPredictions, ...osmPredictions].filter((prediction) => {
           const key = String(prediction.mainText || prediction.description || "").toLowerCase();
           if (!key || seenCities.has(key)) return false;
           seenCities.add(key);
@@ -3319,10 +3340,10 @@ async function registerRoutes(app2) {
       const existingChauffeur = await storage.getChauffeurByUserId(userId);
       const normalizedVehicleYear = rawVehicleYear == null || rawVehicleYear === "" ? existingChauffeur?.vehicleYear ?? null : Number.parseInt(String(rawVehicleYear), 10);
       if (!Number.isFinite(normalizedVehicleYear) || normalizedVehicleYear == null) {
-        return res.status(400).json({ message: "vehicleYear is required" });
+        return res.status(400).json({ message: "Please add your vehicle model year before continuing." });
       }
       if (normalizedVehicleYear < 2015 || normalizedVehicleYear > currentYear + 1) {
-        return res.status(400).json({ message: `vehicleYear must be between 2015 and ${currentYear + 1}` });
+        return res.status(400).json({ message: `Please enter a vehicle model year between 2015 and ${currentYear + 1}.` });
       }
       if (existingChauffeur) {
         chauffeur = await storage.updateChauffeur(existingChauffeur.id, {
@@ -5081,7 +5102,7 @@ async function registerRoutes(app2) {
               id: clientId,
               username: placeholderEmail,
               password: randomPw,
-              name: name || "A2B Client",
+              name: name || "A2B LIFT",
               phone: null,
               role: role || "client"
             });
@@ -5096,7 +5117,8 @@ async function registerRoutes(app2) {
         const claimedName = typeof req.auth.name === "string" ? req.auth.name.trim() : "";
         const storedName = typeof clientUser.name === "string" ? clientUser.name.trim() : "";
         if (claimedName && getUserFirstName({ name: storedName }, "") !== getUserFirstName({ name: claimedName }, "")) {
-          const storedLooksGeneric = ["", "a2b client", "client", "rider"].includes(storedName.toLowerCase());
+          const normalizedStoredName = storedName.toLowerCase();
+          const storedLooksGeneric = ["", "client", "rider"].includes(normalizedStoredName) || normalizedStoredName.startsWith("a2b ") && normalizedStoredName.endsWith("client");
           if (storedLooksGeneric) {
             clientUser = await storage.updateUser(clientUser.id, { name: claimedName });
           }
