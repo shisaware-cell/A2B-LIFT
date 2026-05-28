@@ -12,6 +12,40 @@ import { pool } from "./db";
 const app = express();
 const log = console.log;
 
+const projectRootCandidates = Array.from(
+  new Set([
+    process.cwd(),
+    path.resolve(__dirname, ".."),
+    path.resolve(__dirname, "..", ".."),
+  ]),
+);
+
+function resolveExistingFile(...segments: string[]): string | undefined {
+  for (const root of projectRootCandidates) {
+    const candidate = path.resolve(root, ...segments);
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function resolveExistingDirectory(...segments: string[]): string | undefined {
+  for (const root of projectRootCandidates) {
+    const candidate = path.resolve(root, ...segments);
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function resolveProjectPath(...segments: string[]): string {
+  return path.resolve(projectRootCandidates[0], ...segments);
+}
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
@@ -163,7 +197,7 @@ function setupRequestLogging(app: express.Application) {
 
 function getAppName(): string {
   try {
-    const appJsonPath = path.resolve(process.cwd(), "app.json");
+    const appJsonPath = resolveExistingFile("app.json") || resolveProjectPath("app.json");
     const appJsonContent = fs.readFileSync(appJsonPath, "utf-8");
     const appJson = JSON.parse(appJsonContent);
     return appJson.expo?.name || "App Landing Page";
@@ -190,11 +224,11 @@ async function detectMetroPort(): Promise<number> {
 }
 
 function hasStaticBuild(): boolean {
-  return fs.existsSync(path.resolve(process.cwd(), "static-build", "index.html"));
+  return Boolean(resolveExistingFile("static-build", "index.html"));
 }
 
 function hasWebsiteBuild(): boolean {
-  return fs.existsSync(path.resolve(process.cwd(), "website", "index.html"));
+  return Boolean(resolveExistingFile("website", "index.html"));
 }
 
 // Proxy factory — always uses resolvedMetroPort so it stays current
@@ -260,13 +294,17 @@ async function configureExpoAndLanding(app: express.Application) {
   const isProductionRuntime = process.env.NODE_ENV === "production" || isRailwayRuntime;
   const appPort = Number.parseInt(process.env.PORT || "", 10);
   let allowMetroProxy = !isProductionRuntime;
-  const adminTemplatePath = path.resolve(
-    process.cwd(),
-    "server",
-    "templates",
-    "admin.html",
-  );
+  const adminTemplatePath =
+    resolveExistingFile("server", "templates", "admin.html") ||
+    resolveProjectPath("server", "templates", "admin.html");
   const adminTemplate = fs.readFileSync(adminTemplatePath, "utf-8");
+  const assetsRoot =
+    resolveExistingDirectory("assets") || resolveProjectPath("assets");
+  const staticBuildRoot =
+    resolveExistingDirectory("static-build") ||
+    resolveProjectPath("static-build");
+  const websiteRoot =
+    resolveExistingDirectory("website") || resolveProjectPath("website");
 
   // Metro proxying is for development only; production must never proxy web/admin paths.
   let metroPort = resolvedMetroPort;
@@ -318,11 +356,9 @@ async function configureExpoAndLanding(app: express.Application) {
   app.get("/r/:code", serveReferralLaunch);
 
   // Serve local assets folder
-  app.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
+  app.use("/assets", express.static(assetsRoot));
 
   if (websiteBuildExists) {
-    const websiteRoot = path.resolve(process.cwd(), "website");
-
     app.get("/", (_req, res) => {
       res.sendFile(path.resolve(websiteRoot, "index.html"));
     });
@@ -336,7 +372,7 @@ async function configureExpoAndLanding(app: express.Application) {
 
   // If a static web build exists, serve it for non-API paths
   if (staticBuildExists) {
-    app.use(express.static(path.resolve(process.cwd(), "static-build")));
+    app.use(express.static(staticBuildRoot));
     // Catch-all for SPA routing — still proxy native manifests
     app.use((req: Request, res: Response, next: NextFunction) => {
       if (req.path.startsWith("/api")) return next();
@@ -346,7 +382,7 @@ async function configureExpoAndLanding(app: express.Application) {
         log(`[Metro proxy] ${platform} manifest → Metro:${metroPort}`);
         return (metroProxy as any)(req, res, next);
       }
-      const staticIndex = path.resolve(process.cwd(), "static-build", "index.html");
+      const staticIndex = path.resolve(staticBuildRoot, "index.html");
       res.sendFile(staticIndex);
     });
   } else if (websiteBuildExists) {
@@ -356,8 +392,7 @@ async function configureExpoAndLanding(app: express.Application) {
       if (req.path.startsWith("/socket.io")) return next();
 
       const htmlPath = path.resolve(
-        process.cwd(),
-        "website",
+        websiteRoot,
         `${req.path.replace(/^\//, "")}.html`,
       );
 
@@ -365,7 +400,7 @@ async function configureExpoAndLanding(app: express.Application) {
         return res.sendFile(htmlPath);
       }
 
-      return res.status(404).sendFile(path.resolve(process.cwd(), "website", "index.html"));
+      return res.status(404).sendFile(path.resolve(websiteRoot, "index.html"));
     });
   } else if (allowMetroProxy) {
     // No static build — proxy everything (web + native) to Metro

@@ -613,6 +613,24 @@ var DatabaseStorage = class {
     const [profile] = await db.update(operatorProfiles).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm2.eq)(operatorProfiles.id, id)).returning();
     return profile;
   }
+  async deleteOperatorProfile(id) {
+    const profile = await this.getOperatorProfile(id);
+    if (!profile) return false;
+    const ownedVehicles = await this.getVehiclesByOwnerOperator(id);
+    for (const vehicle of ownedVehicles) {
+      await this.deleteVehicle(vehicle.id);
+    }
+    await db.delete(vehicleAssignments).where(
+      (0, import_drizzle_orm2.or)(
+        (0, import_drizzle_orm2.eq)(vehicleAssignments.driverOperatorProfileId, id),
+        (0, import_drizzle_orm2.eq)(vehicleAssignments.assignedByOperatorProfileId, id)
+      )
+    );
+    await db.delete(partnerProfiles).where((0, import_drizzle_orm2.eq)(partnerProfiles.operatorProfileId, id));
+    await db.delete(documents).where((0, import_drizzle_orm2.eq)(documents.userId, profile.userId));
+    const deleted = await db.delete(operatorProfiles).where((0, import_drizzle_orm2.eq)(operatorProfiles.id, id)).returning();
+    return deleted.length > 0;
+  }
   async getPartnerProfileByOperatorId(operatorProfileId) {
     const [profile] = await db.select().from(partnerProfiles).where((0, import_drizzle_orm2.eq)(partnerProfiles.operatorProfileId, operatorProfileId));
     return profile;
@@ -649,6 +667,13 @@ var DatabaseStorage = class {
   async updateVehicle(id, data) {
     const [vehicle] = await db.update(vehicles).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm2.eq)(vehicles.id, id)).returning();
     return vehicle;
+  }
+  async deleteVehicle(id) {
+    await db.update(chauffeurs).set({ activeVehicleId: null }).where((0, import_drizzle_orm2.eq)(chauffeurs.activeVehicleId, id));
+    await db.delete(documents).where((0, import_drizzle_orm2.eq)(documents.vehicleId, id));
+    await db.delete(vehicleAssignments).where((0, import_drizzle_orm2.eq)(vehicleAssignments.vehicleId, id));
+    const deleted = await db.delete(vehicles).where((0, import_drizzle_orm2.eq)(vehicles.id, id)).returning();
+    return deleted.length > 0;
   }
   async getActiveVehicleAssignment(vehicleId, driverOperatorProfileId) {
     const [assignment] = await db.select().from(vehicleAssignments).where((0, import_drizzle_orm2.and)(
@@ -3625,12 +3650,14 @@ async function registerRoutes(app2) {
   });
   app2.put("/api/vehicles/:id", requireAuth, async (req, res) => {
     try {
-      const profile = await storage.getOperatorProfileByUserId(req.auth.sub);
-      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
       const vehicle = await storage.getVehicle(req.params.id);
       if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
-      if (vehicle.ownerOperatorProfileId !== profile.id && req.auth.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
+      if (req.auth.role !== "admin") {
+        const profile = await storage.getOperatorProfileByUserId(req.auth.sub);
+        if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+        if (vehicle.ownerOperatorProfileId !== profile.id) {
+          return res.status(403).json({ message: "Forbidden" });
+        }
       }
       if (vehicle.status === "approved" && req.auth.role !== "admin") {
         return res.status(400).json({ message: "Approved vehicles cannot be edited from the app. Contact support." });
@@ -4570,6 +4597,46 @@ async function registerRoutes(app2) {
       return res.status(400).json({ message: error.message });
     }
   });
+  app2.put("/api/admin/operator-profiles/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const profile = await storage.getOperatorProfile(req.params.id);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      const profileUpdate = {};
+      if (req.body.status !== void 0) {
+        const status = String(req.body.status).trim();
+        if (!["draft", "pending", "approved", "rejected"].includes(status)) {
+          return res.status(400).json({ message: "Invalid operator profile status" });
+        }
+        profileUpdate.status = status;
+      }
+      if (req.body.rejectionReason !== void 0) {
+        profileUpdate.rejectionReason = String(req.body.rejectionReason || "").trim() || null;
+      }
+      const updatedProfile = Object.keys(profileUpdate).length ? await storage.updateOperatorProfile(profile.id, profileUpdate) : profile;
+      if (profile.type === "partner") {
+        const partnerProfile = await storage.getPartnerProfileByOperatorId(profile.id);
+        const partnerUpdate = {};
+        for (const field of ["companyName", "registrationNumber", "contactPersonName", "contactPhone", "contactEmail", "bankName", "accountHolder", "accountNumber"]) {
+          if (req.body[field] !== void 0) partnerUpdate[field] = String(req.body[field]).trim();
+        }
+        if (partnerProfile && Object.keys(partnerUpdate).length) {
+          await storage.updatePartnerProfile(partnerProfile.id, partnerUpdate);
+        }
+      }
+      return res.json(await serializeOperatorProfile(updatedProfile));
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
+  });
+  app2.delete("/api/admin/operator-profiles/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const deleted = await storage.deleteOperatorProfile(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "Operator profile not found" });
+      return res.json({ message: "Operator profile deleted" });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
   app2.get("/api/admin/vehicles", requireAuth, requireRole(["admin"]), async (req, res) => {
     try {
       const status = typeof req.query.status === "string" ? req.query.status : void 0;
@@ -4639,6 +4706,32 @@ async function registerRoutes(app2) {
       return res.json(await serializeVehicle(updated));
     } catch (error) {
       return res.status(400).json({ message: error.message });
+    }
+  });
+  app2.put("/api/admin/vehicles/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const vehicle = await storage.getVehicle(req.params.id);
+      if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
+      const update = {};
+      for (const field of ["carMake", "vehicleModel", "plateNumber", "vehicleType", "carColor", "status", "rejectionReason"]) {
+        if (req.body[field] !== void 0) update[field] = String(req.body[field]).trim();
+      }
+      if (req.body.vehicleYear !== void 0) update.vehicleYear = Number.parseInt(String(req.body.vehicleYear), 10);
+      if (req.body.passengerCapacity !== void 0) update.passengerCapacity = Number.parseInt(String(req.body.passengerCapacity), 10) || 4;
+      if (req.body.luggageCapacity !== void 0) update.luggageCapacity = Number.parseInt(String(req.body.luggageCapacity), 10) || 2;
+      const updated = await storage.updateVehicle(vehicle.id, update);
+      return res.json(await serializeVehicle(updated));
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
+  });
+  app2.delete("/api/admin/vehicles/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const deleted = await storage.deleteVehicle(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "Vehicle not found" });
+      return res.json({ message: "Vehicle deleted" });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
     }
   });
   app2.put(
@@ -6911,6 +7004,34 @@ var path = __toESM(require("path"));
 var import_http_proxy_middleware = require("http-proxy-middleware");
 var app = (0, import_express.default)();
 var log = console.log;
+var projectRootCandidates = Array.from(
+  /* @__PURE__ */ new Set([
+    process.cwd(),
+    path.resolve(__dirname, ".."),
+    path.resolve(__dirname, "..", "..")
+  ])
+);
+function resolveExistingFile(...segments) {
+  for (const root of projectRootCandidates) {
+    const candidate = path.resolve(root, ...segments);
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      return candidate;
+    }
+  }
+  return void 0;
+}
+function resolveExistingDirectory(...segments) {
+  for (const root of projectRootCandidates) {
+    const candidate = path.resolve(root, ...segments);
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+      return candidate;
+    }
+  }
+  return void 0;
+}
+function resolveProjectPath(...segments) {
+  return path.resolve(projectRootCandidates[0], ...segments);
+}
 function addUrlOrigin(origins, rawUrl) {
   if (!rawUrl) return;
   try {
@@ -6962,14 +7083,15 @@ function setupSecurity(app2) {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://unpkg.com", "https://cdn.jsdelivr.net"],
-          scriptSrcElem: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://unpkg.com", "https://cdn.jsdelivr.net"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://unpkg.com", "https://cdn.jsdelivr.net", "https://maps.googleapis.com", "https://maps.gstatic.com", "https://js.paystack.co", "https://checkout.paystack.com"],
+          scriptSrcElem: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://unpkg.com", "https://cdn.jsdelivr.net", "https://maps.googleapis.com", "https://maps.gstatic.com", "https://js.paystack.co", "https://checkout.paystack.com"],
           scriptSrcAttr: ["'unsafe-inline'"],
           styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
           styleSrcElem: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
           fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
           imgSrc: ["'self'", "data:", "https:"],
           connectSrc: ["'self'", "https:", "wss:"],
+          frameSrc: ["'self'", "https://js.paystack.co", "https://checkout.paystack.com"],
           frameAncestors: ["'self'", "https://*.replit.dev", "https://*.repl.co", "https://*.replit.com", "https://*.replit.app"]
         }
       },
@@ -7035,7 +7157,10 @@ async function detectMetroPort() {
   return resolvedMetroPort;
 }
 function hasStaticBuild() {
-  return fs.existsSync(path.resolve(process.cwd(), "static-build", "index.html"));
+  return Boolean(resolveExistingFile("static-build", "index.html"));
+}
+function hasWebsiteBuild() {
+  return Boolean(resolveExistingFile("website", "index.html"));
 }
 function makeMetroProxy(port) {
   return (0, import_http_proxy_middleware.createProxyMiddleware)({
@@ -7062,13 +7187,11 @@ async function configureExpoAndLanding(app2) {
   const isProductionRuntime = process.env.NODE_ENV === "production" || isRailwayRuntime;
   const appPort = Number.parseInt(process.env.PORT || "", 10);
   let allowMetroProxy = !isProductionRuntime;
-  const adminTemplatePath = path.resolve(
-    process.cwd(),
-    "server",
-    "templates",
-    "admin.html"
-  );
+  const adminTemplatePath = resolveExistingFile("server", "templates", "admin.html") || resolveProjectPath("server", "templates", "admin.html");
   const adminTemplate = fs.readFileSync(adminTemplatePath, "utf-8");
+  const assetsRoot = resolveExistingDirectory("assets") || resolveProjectPath("assets");
+  const staticBuildRoot = resolveExistingDirectory("static-build") || resolveProjectPath("static-build");
+  const websiteRoot = resolveExistingDirectory("website") || resolveProjectPath("website");
   let metroPort = resolvedMetroPort;
   if (allowMetroProxy) {
     metroPort = await detectMetroPort();
@@ -7080,10 +7203,15 @@ async function configureExpoAndLanding(app2) {
     log(`Metro bundler detected on port ${metroPort}`);
   }
   const staticBuildExists = hasStaticBuild();
+  const websiteBuildExists = hasWebsiteBuild();
   if (!allowMetroProxy) {
-    log(`Static build: ${staticBuildExists ? "found" : "not found"} \u2014 production mode (Metro proxy disabled)`);
+    log(
+      `Static build: ${staticBuildExists ? "found" : "not found"}; website build: ${websiteBuildExists ? "found" : "not found"} \u2014 production mode (Metro proxy disabled)`
+    );
   } else {
-    log(`Static build: ${staticBuildExists ? "found" : "not found"} \u2014 routing non-API traffic to Metro:${metroPort}`);
+    log(
+      `Static build: ${staticBuildExists ? "found" : "not found"}; website build: ${websiteBuildExists ? "found" : "not found"} \u2014 routing non-API traffic to Metro:${metroPort}`
+    );
   }
   const serveAdmin = (_req, res) => {
     const freshTemplate = fs.readFileSync(adminTemplatePath, "utf-8");
@@ -7095,9 +7223,27 @@ async function configureExpoAndLanding(app2) {
   };
   app2.get("/admin", serveAdmin);
   app2.get("/a2b-admin", serveAdmin);
-  app2.use("/assets", import_express.default.static(path.resolve(process.cwd(), "assets")));
+  const serveReferralLaunch = (req, res) => {
+    const referralCode = req.params.code;
+    const target = referralCode ? `/referral-launch.html?code=${encodeURIComponent(referralCode)}` : "/referral-launch.html";
+    res.redirect(302, target);
+  };
+  app2.get("/referral/:code", serveReferralLaunch);
+  app2.get("/ref/:code", serveReferralLaunch);
+  app2.get("/r/:code", serveReferralLaunch);
+  app2.use("/assets", import_express.default.static(assetsRoot));
+  if (websiteBuildExists) {
+    app2.get("/", (_req, res) => {
+      res.sendFile(path.resolve(websiteRoot, "index.html"));
+    });
+    app2.use(
+      import_express.default.static(websiteRoot, {
+        extensions: ["html"]
+      })
+    );
+  }
   if (staticBuildExists) {
-    app2.use(import_express.default.static(path.resolve(process.cwd(), "static-build")));
+    app2.use(import_express.default.static(staticBuildRoot));
     app2.use((req, res, next) => {
       if (req.path.startsWith("/api")) return next();
       if (req.path === "/r" || req.path.startsWith("/r/")) return next();
@@ -7106,8 +7252,22 @@ async function configureExpoAndLanding(app2) {
         log(`[Metro proxy] ${platform} manifest \u2192 Metro:${metroPort}`);
         return metroProxy(req, res, next);
       }
-      const staticIndex = path.resolve(process.cwd(), "static-build", "index.html");
+      const staticIndex = path.resolve(staticBuildRoot, "index.html");
       res.sendFile(staticIndex);
+    });
+  } else if (websiteBuildExists) {
+    app2.use((req, res, next) => {
+      if (req.path.startsWith("/api")) return next();
+      if (req.path === "/admin" || req.path === "/a2b-admin" || req.path.startsWith("/admin/") || req.path.startsWith("/a2b-admin/")) return next();
+      if (req.path.startsWith("/socket.io")) return next();
+      const htmlPath = path.resolve(
+        websiteRoot,
+        `${req.path.replace(/^\//, "")}.html`
+      );
+      if (fs.existsSync(htmlPath)) {
+        return res.sendFile(htmlPath);
+      }
+      return res.status(404).sendFile(path.resolve(websiteRoot, "index.html"));
     });
   } else if (allowMetroProxy) {
     app2.use((req, res, next) => {
