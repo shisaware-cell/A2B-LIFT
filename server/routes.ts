@@ -4404,7 +4404,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ── Document upload proxy (server → Supabase, bypasses client CORS/RLS) ──
   app.post("/api/upload-document", authOptional, async (req: AuthedRequest, res: Response) => {
     try {
-      const { base64Data, userId, docType } = req.body;
+      const { base64Data, userId, docType, mimeType, fileExtension } = req.body;
       if (!base64Data || !userId || !docType) {
         return res.status(400).json({ message: "base64Data, userId, and docType are required" });
       }
@@ -4413,7 +4413,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const SUPABASE_ANON_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
       const BUCKET = "driver-documents";
 
-      const fileName = `${userId}/${docType}_${Date.now()}.jpg`;
+      const contentType =
+        typeof mimeType === "string" && mimeType.includes("/") ? mimeType : "image/jpeg";
+      const extension =
+        typeof fileExtension === "string" && /^[a-zA-Z0-9]{1,10}$/.test(fileExtension)
+          ? fileExtension.toLowerCase()
+          : contentType === "application/pdf"
+            ? "pdf"
+            : "jpg";
+      const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, "_") || "user";
+      const safeDocType = String(docType).replace(/[^a-zA-Z0-9_-]/g, "_") || "document";
+      const fileName = `${safeUserId}/${safeDocType}_${Date.now()}.${extension}`;
       const buffer = Buffer.from(base64Data, "base64");
 
       const uploadRes = await fetch(
@@ -4423,7 +4433,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           headers: {
             Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
             apikey: SUPABASE_ANON_KEY,
-            "Content-Type": "image/jpeg",
+            "Content-Type": contentType,
             "x-upsert": "true",
           },
           body: buffer,

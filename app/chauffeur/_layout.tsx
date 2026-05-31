@@ -7,6 +7,7 @@ import { Platform, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Colors } from "@mobile-ui/colors";
+import { useKeepAwake } from "expo-keep-awake";
 
 function NativeTabLayout() {
   return (
@@ -143,6 +144,8 @@ function ClassicTabLayout() {
 }
 
 export default function ChauffeurLayout() {
+  useKeepAwake("a2b-chauffeur-active");
+
   if (isLiquidGlassAvailable()) {
     return <NativeTabLayout />;
   }

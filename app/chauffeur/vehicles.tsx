@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, ActivityIndic
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
 import { apiRequest } from "@/lib/query-client";
 import { uploadDocument } from "@/lib/supabase-storage";
 import Colors from "@/constants/colors";
@@ -108,20 +108,20 @@ export default function VehiclesScreen() {
   async function pickAndUploadDocument(vehicleId: string, type: string) {
     const uploadKey = `${vehicleId}:${type}`;
     try {
-      if (Platform.OS !== "web") {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== "granted") {
-          Alert.alert("Permission needed", "Please allow photo access.");
-          return;
-        }
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.65 });
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
       if (result.canceled || !result.assets?.[0]) return;
       setUploadingDocs((prev) => ({ ...prev, [uploadKey]: true }));
       const asset = result.assets[0];
       let url = asset.uri;
       try {
-        url = await uploadDocument(asset.uri, vehicleId, type.replace("vehicle:", "vehicle_"));
+        url = await uploadDocument(asset.uri, vehicleId, type.replace("vehicle:", "vehicle_"), {
+          fileName: asset.name,
+          mimeType: asset.mimeType,
+        });
       } catch {}
       await apiRequest("POST", `/api/vehicles/${vehicleId}/documents`, { type, url });
       await load();

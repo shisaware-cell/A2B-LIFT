@@ -6,7 +6,7 @@ import { router } from "expo-router";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest, queryClient } from "@/lib/query-client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
 import { uploadDocument } from "@/lib/supabase-storage";
 import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
@@ -94,27 +94,23 @@ export default function ChauffeurSettingsScreen() {
 
   async function pickAndUploadDocument(type: string) {
     try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permissionResult.granted) {
-        Alert.alert("Permission Required", "Please grant camera roll access to upload documents");
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.8,
-        aspect: [4, 3],
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        copyToCacheDirectory: true,
+        multiple: false,
       });
 
-      if (result.canceled || !result.assets[0]) return;
+      if (result.canceled || !result.assets?.[0]) return;
 
       setUploadingDoc(type);
       const asset = result.assets[0];
 
       let publicUrl: string;
       try {
-        publicUrl = await uploadDocument(asset.uri, user!.id, type);
+        publicUrl = await uploadDocument(asset.uri, user!.id, type, {
+          fileName: asset.name,
+          mimeType: asset.mimeType,
+        });
       } catch (uploadErr: any) {
         Alert.alert("Upload Failed", "Could not upload to cloud storage. Please try again.");
         setUploadingDoc(null);
@@ -130,7 +126,7 @@ export default function ChauffeurSettingsScreen() {
       });
 
       await docRes.json();
-      Alert.alert("Success", `${type} uploaded successfully. Admin will review it.`);
+      Alert.alert("Success", `${asset.name || type} uploaded successfully. Admin will review it.`);
       refetchDocuments();
       queryClient.invalidateQueries({ queryKey: ["/api/driver/documents"] });
     } catch (error: any) {
@@ -447,7 +443,7 @@ export default function ChauffeurSettingsScreen() {
               })}
             </ScrollView>
             <Text style={styles.docNote}>
-              Tap on a document to upload. Documents are reviewed by our admin team. Your driver status will be updated once all documents are verified.
+              Tap on a document to upload. Images, PDFs, and other document files are supported. Documents are reviewed by our admin team.
             </Text>
           </View>
         </Pressable>

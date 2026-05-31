@@ -8,9 +8,15 @@ const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp6d2tpZWlrdGJocHR2Z3NxZXJkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4ODA1NjEsImV4cCI6MjA4NjQ1NjU2MX0.BgTFknM60JsTl1iHAN1ri3pxFi2rTJfbyZ6rj6Etecc";
 const BUCKET = "driver-documents";
 const UPLOAD_TIMEOUT_MS = 60_000;
+const DEFAULT_DOCUMENT_MIME = "application/octet-stream";
+
+type UploadDocumentOptions = {
+  fileName?: string | null;
+  mimeType?: string | null;
+};
 
 /**
- * Upload a document image to Supabase Storage.
+ * Upload a driver document to Supabase Storage.
  *
  * Strategy:
  *   1. Fetch the local file/blob URI to get raw bytes (works on both mobile & web).
@@ -24,12 +30,14 @@ const UPLOAD_TIMEOUT_MS = 60_000;
 export async function uploadDocument(
   localUri: string,
   userId: string,
-  docType: string
+  docType: string,
+  options: UploadDocumentOptions = {}
 ): Promise<string> {
-  const fileName = `${userId}/${docType}_${Date.now()}.jpg`;
-
   // ── 1. Read the file bytes ──────────────────────────────────────────────
   const blob = await readUriAsBlob(localUri);
+  const mimeType = normalizeMimeType(options.mimeType, blob.type);
+  const extension = inferFileExtension(mimeType, options.fileName, localUri);
+  const fileName = `${sanitizePathSegment(userId)}/${sanitizePathSegment(docType)}_${Date.now()}.${extension}`;
 
   // ── 2. Direct Supabase Storage upload ───────────────────────────────────
   try {
@@ -43,7 +51,7 @@ export async function uploadDocument(
           headers: {
             Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
             apikey: SUPABASE_ANON_KEY,
-            "Content-Type": "image/jpeg",
+            "Content-Type": mimeType,
             "x-upsert": "true",
           },
           body: blob,
@@ -72,7 +80,7 @@ export async function uploadDocument(
     const res = await fetch(`${apiUrl}/api/upload-document`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ base64Data, userId, docType }),
+      body: JSON.stringify({ base64Data, userId, docType, mimeType, fileExtension: extension }),
       signal: controller.signal,
     });
     if (!res.ok) {
@@ -87,6 +95,53 @@ export async function uploadDocument(
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+function normalizeMimeType(candidate?: string | null, blobType?: string | null): string {
+  const value = candidate || blobType;
+  if (typeof value === "string" && value.includes("/")) {
+    return value;
+  }
+  return DEFAULT_DOCUMENT_MIME;
+}
+
+function inferFileExtension(mimeType: string, fileName?: string | null, localUri?: string): string {
+  const namedExtension = extractExtension(fileName) || extractExtension(localUri);
+  if (namedExtension) return namedExtension;
+
+  const mimeExtensions: Record<string, string> = {
+    "application/pdf": "pdf",
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/heic": "heic",
+    "text/plain": "txt",
+    "application/msword": "doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.ms-excel": "xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  };
+
+  return mimeExtensions[mimeType] || "bin";
+}
+
+function extractExtension(value?: string | null): string | null {
+  if (!value) return null;
+  const cleanValue = safeDecodeURIComponent(value.split("?")[0] || "").trim();
+  const match = cleanValue.match(/\.([a-zA-Z0-9]{1,10})$/);
+  return match ? match[1].toLowerCase() : null;
+}
+
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function sanitizePathSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_") || "document";
+}
 
 async function readUriAsBlob(uri: string): Promise<Blob> {
   if (uri.startsWith("data:")) {
