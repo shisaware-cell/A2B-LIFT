@@ -76,6 +76,17 @@
     .ld-form-grid label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--grey-400); display: block; margin-bottom: 6px; }
     .ld-form-grid input { width: 100%; padding: 10px 12px; border: 1.5px solid var(--grey-200); border-radius: var(--radius-sm); font-size: 14px; font-family: var(--font); outline: none; }
     .ld-form-grid input:focus { border-color: var(--black); }
+    .driver-apply-card { background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius); padding: 24px; margin-bottom: 24px; }
+    .driver-apply-card h3 { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 8px; }
+    .driver-apply-card p { color: var(--grey-500); font-size: 14px; line-height: 1.7; margin-bottom: 18px; }
+    .doc-upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+    .doc-upload-tile { position: relative; border: 1.5px dashed var(--grey-200); border-radius: var(--radius-sm); padding: 16px; background: var(--grey-50); cursor: pointer; min-height: 96px; transition: border-color .15s, background .15s; }
+    .doc-upload-tile:hover { border-color: var(--black); background: var(--white); }
+    .doc-upload-tile input[type=file] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+    .doc-upload-title { font-size: 13px; font-weight: 800; color: var(--grey-900); margin-bottom: 6px; }
+    .doc-upload-meta { font-size: 12px; color: var(--grey-500); line-height: 1.5; }
+    .doc-upload-tile.uploaded { border-color: #16a34a; background: #f0fdf4; }
+    .doc-upload-tile.uploaded .doc-upload-meta { color: #15803d; }
     .empty-state { text-align: center; padding: 60px 20px; color: var(--grey-400); }
     /* Modal */
     .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:2000; align-items:center; justify-content:center; padding:16px; }
@@ -98,7 +109,7 @@
     .toast.toast--success { background:#16a34a; }
     .toast.toast--error { background:#dc2626; }
     @media(max-width: 900px) { .dash-layout { grid-template-columns: 1fr; } .dash-sidebar { position: static; padding: 24px 0 0; } .dash-nav { flex-direction: row; flex-wrap: wrap; gap: 4px; } .dash-stats { grid-template-columns: 1fr 1fr; } }
-    @media(max-width: 640px) { .dash-stats { grid-template-columns: 1fr; } .ld-mini-form { grid-template-columns: 1fr; } .ld-form-grid { grid-template-columns: 1fr; } }
+    @media(max-width: 640px) { .dash-stats { grid-template-columns: 1fr; } .ld-mini-form { grid-template-columns: 1fr; } .ld-form-grid, .doc-upload-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -154,6 +165,9 @@
         <div class="dash-nav-item" onclick="showPage('referral')" id="nav-referral">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Referrals
         </div>
+        <div class="dash-nav-item" id="nav-driverapply" style="display:none;" onclick="showPage('driverapply')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M17 11l2 2 4-5"/></svg>Become a driver
+        </div>
         <div class="dash-sidebar-sep" id="driverSep" style="display:none;"></div>
         <div class="dash-nav-item" id="nav-availability" style="display:none;" onclick="showPage('availability')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>Availability
@@ -182,6 +196,11 @@
         <div class="referral-box">
           <div><h3>Refer friends, earn rewards</h3><p>Share your code and earn commission on every ride they take — up to 5 levels deep.</p></div>
           <div class="ref-code-pill"><span id="ovRefCode">—</span><button class="copy-btn" style="background:rgba(255,255,255,0.15);color:var(--white);border:1px solid rgba(255,255,255,0.2);padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font);" onclick="copyCode('ovRefCode')">Copy</button></div>
+        </div>
+        <div class="driver-apply-card" id="overviewDriverApplyCard" style="display:none;">
+          <h3>Want to earn as an A2B driver?</h3>
+          <p>Submit your driver application from this dashboard. We will review your documents and approve your profile before any driver features go live.</p>
+          <button class="btn btn-primary btn-sm" onclick="showPage('driverapply')">Start driver application</button>
         </div>
         <h2 style="font-size:18px;font-weight:700;margin-bottom:16px;">Recent trips</h2>
         <div id="recentTripsTable"></div>
@@ -277,6 +296,43 @@
           <button class="btn btn-ghost" onclick="shareRef('copy')">Copy link</button>
         </div>
         <a href="referral.html" class="btn btn-ghost">View full referral details →</a>
+      </div>
+
+      <!-- DRIVER APPLICATION -->
+      <div class="dash-page" id="page-driverapply">
+        <h1 class="dash-page-title">Become a Driver</h1>
+        <div class="driver-apply-card">
+          <h3>Submit your driver application</h3>
+          <p>Use this form if you already have an A2B rider account and want to become a driver. Your account will move into the same admin approval flow used by the driver app.</p>
+          <div id="driverApplyStatus" style="font-size:13px;color:var(--grey-500);line-height:1.7;margin-bottom:16px;"></div>
+          <div class="ld-form-grid">
+            <div><label>Phone number</label><input type="tel" id="driverApplyPhone" placeholder="+27 82 123 4567" /></div>
+            <div><label>Driver photo</label><input type="file" id="driverApplyPhoto" accept="image/*" /></div>
+          </div>
+          <div class="doc-upload-grid">
+            <label class="doc-upload-tile" data-doc-tile="driver:pdrp_certificate">
+              <input type="file" id="docPdrp" accept="image/*,application/pdf" />
+              <div class="doc-upload-title">PDRP Certificate</div>
+              <div class="doc-upload-meta">Required · JPG, PNG or PDF</div>
+            </label>
+            <label class="doc-upload-tile" data-doc-tile="driver:drivers_license">
+              <input type="file" id="docLicense" accept="image/*,application/pdf" />
+              <div class="doc-upload-title">Valid Driver's License</div>
+              <div class="doc-upload-meta">Required · JPG, PNG or PDF</div>
+            </label>
+            <label class="doc-upload-tile" data-doc-tile="driver:criminal_background_check">
+              <input type="file" id="docBackground" accept="image/*,application/pdf" />
+              <div class="doc-upload-title">Criminal Background Check</div>
+              <div class="doc-upload-meta">Required · JPG, PNG or PDF</div>
+            </label>
+            <label class="doc-upload-tile" data-doc-tile="driver:driver_evaluation">
+              <input type="file" id="docEvaluation" accept="image/*,application/pdf" />
+              <div class="doc-upload-title">Driver Evaluation</div>
+              <div class="doc-upload-meta">Optional · JPG, PNG or PDF</div>
+            </label>
+          </div>
+          <button class="btn btn-primary" id="driverApplySubmitBtn" style="margin-top:20px;" onclick="submitDriverApplication()">Submit driver application</button>
+        </div>
       </div>
 
       <!-- DRIVER AVAILABILITY -->
@@ -642,6 +698,148 @@
       }
     }
 
+    function updateDriverApplicationVisibility(user) {
+      const isDriver = user?.role === 'chauffeur';
+      const navItem = document.getElementById('nav-driverapply');
+      const overviewCard = document.getElementById('overviewDriverApplyCard');
+      if (navItem) navItem.style.display = isDriver ? 'none' : 'flex';
+      if (overviewCard) overviewCard.style.display = isDriver ? 'none' : 'block';
+      const phoneInput = document.getElementById('driverApplyPhone');
+      if (phoneInput && !phoneInput.value) phoneInput.value = user?.phone || '';
+      if (!isDriver) loadDriverApplicationStatus();
+    }
+
+    function setDriverApplyStatus(message, type = 'info') {
+      const el = document.getElementById('driverApplyStatus');
+      if (!el) return;
+      el.textContent = message;
+      el.style.color = type === 'error' ? '#dc2626' : type === 'success' ? '#15803d' : 'var(--grey-500)';
+    }
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function getFileExtension(file) {
+      const fromName = String(file?.name || '').split('.').pop();
+      if (fromName && /^[a-z0-9]{1,10}$/i.test(fromName)) return fromName.toLowerCase();
+      if (file?.type === 'application/pdf') return 'pdf';
+      if (file?.type === 'image/png') return 'png';
+      if (file?.type === 'image/webp') return 'webp';
+      return 'jpg';
+    }
+
+    async function uploadDriverApplicationFile(file, docType) {
+      if (!file) throw new Error('Missing file.');
+      if (file.size > 8 * 1024 * 1024) throw new Error(`${file.name} is larger than 8 MB.`);
+      const token = localStorage.getItem('a2b_token');
+      const base64Data = await fileToBase64(file);
+      const res = await fetch(`${API}/api/upload-document`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          base64Data,
+          userId: currentUser.id,
+          docType: docType.replace('driver:', 'driver_'),
+          mimeType: file.type || 'application/octet-stream',
+          fileExtension: getFileExtension(file),
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload.message || `Could not upload ${file.name}.`);
+      return payload.url;
+    }
+
+    async function saveDriverDocument(type, url) {
+      const token = localStorage.getItem('a2b_token');
+      const res = await fetch(`${API}/api/operator-profile/documents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ type, url }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload.message || 'Could not save driver document.');
+      return payload;
+    }
+
+    async function loadDriverApplicationStatus() {
+      const token = localStorage.getItem('a2b_token');
+      if (!token) return;
+      try {
+        const res = await fetch(`${API}/api/operator-profile/me`, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.status === 404) {
+          setDriverApplyStatus('No driver application submitted yet. Upload the required documents and submit when ready.');
+          return;
+        }
+        if (!res.ok) return;
+        const data = await res.json();
+        const status = data.profile?.status || (data.chauffeur?.isApproved ? 'approved' : 'pending');
+        setDriverApplyStatus(`Driver application status: ${status}. Admin approval is required before driver features go live.`, status === 'approved' ? 'success' : 'info');
+        if (data.chauffeur?.phone) document.getElementById('driverApplyPhone').value = data.chauffeur.phone;
+      } catch(e) {}
+    }
+
+    async function submitDriverApplication() {
+      if (!currentUser) return;
+      const phone = document.getElementById('driverApplyPhone').value.trim();
+      const photo = document.getElementById('driverApplyPhoto').files?.[0];
+      const requiredDocs = [
+        ['driver:pdrp_certificate', document.getElementById('docPdrp').files?.[0]],
+        ['driver:drivers_license', document.getElementById('docLicense').files?.[0]],
+        ['driver:criminal_background_check', document.getElementById('docBackground').files?.[0]],
+      ];
+      const optionalEvaluation = document.getElementById('docEvaluation').files?.[0];
+      if (!phone) { showNotification('Please enter your phone number.', 'error'); return; }
+      if (!photo) { showNotification('Please upload a driver photo.', 'error'); return; }
+      const missing = requiredDocs.filter(([, file]) => !file).map(([type]) => type.replace('driver:', '').replace(/_/g, ' '));
+      if (missing.length) { showNotification(`Please upload: ${missing.join(', ')}.`, 'error'); return; }
+
+      const btn = document.getElementById('driverApplySubmitBtn');
+      btn.disabled = true;
+      btn.textContent = 'Submitting...';
+      setDriverApplyStatus('Uploading documents and submitting your application...');
+      try {
+        const photoUrl = await uploadDriverApplicationFile(photo, 'driver:driver_photo');
+        await saveDriverDocument('driver:driver_photo', photoUrl);
+        for (const [type, file] of requiredDocs) {
+          const url = await uploadDriverApplicationFile(file, type);
+          await saveDriverDocument(type, url);
+        }
+        if (optionalEvaluation) {
+          const url = await uploadDriverApplicationFile(optionalEvaluation, 'driver:driver_evaluation');
+          await saveDriverDocument('driver:driver_evaluation', url);
+        }
+
+        const token = localStorage.getItem('a2b_token');
+        const res = await fetch(`${API}/api/operator-profile/driver`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ phone, profilePhoto: photoUrl }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(payload.message || 'Driver application failed.');
+        currentUser = { ...currentUser, role: 'chauffeur', phone };
+        localStorage.setItem('a2b_user', JSON.stringify(currentUser));
+        document.getElementById('dashRole').textContent = 'chauffeur';
+        updateDriverApplicationVisibility(currentUser);
+        document.getElementById('driverSep').style.display = 'block';
+        document.getElementById('nav-availability').style.display = 'flex';
+        setDriverApplyStatus('Application submitted. Your driver profile is pending admin approval.', 'success');
+        showNotification('Driver application submitted.', 'success');
+      } catch(e) {
+        setDriverApplyStatus(e?.message || 'Unable to submit driver application.', 'error');
+        showNotification(e?.message || 'Unable to submit driver application.', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Submit driver application';
+      }
+    }
+
     function renderTripsTable(trips, limit) {
       const shown = limit ? trips.slice(0, limit) : trips;
       if (!shown.length) return '<div class="empty-state"><p>No trips yet</p></div>';
@@ -688,6 +886,7 @@
       document.getElementById('walletRewards').textContent = Math.round(user.rewardsBalance || 0);
       document.getElementById('ovRefCode').textContent = user.referralCode || '—';
       document.getElementById('refCodeDisplay').textContent = user.referralCode || '—';
+      updateDriverApplicationVisibility(user);
       if (user.role === 'chauffeur') {
         document.getElementById('driverSep').style.display = 'block';
         document.getElementById('nav-availability').style.display = 'flex';
@@ -837,6 +1036,20 @@
 
     // Bind autosuggest even if Google callback is blocked or delayed.
     window.addEventListener('load', initDashboardAddressAutosuggest);
+
+    document.querySelectorAll('.doc-upload-tile input[type=file]').forEach((input) => {
+      input.addEventListener('change', () => {
+        const tile = input.closest('.doc-upload-tile');
+        const meta = tile?.querySelector('.doc-upload-meta');
+        const file = input.files?.[0];
+        tile?.classList.toggle('uploaded', Boolean(file));
+        if (meta && file) meta.textContent = `${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB`;
+      });
+    });
+    document.getElementById('driverApplyPhoto')?.addEventListener('change', (event) => {
+      const file = event.target.files?.[0];
+      if (file) setDriverApplyStatus(`Driver photo selected: ${file.name}`);
+    });
 
     loadDashboard();
   </script>
