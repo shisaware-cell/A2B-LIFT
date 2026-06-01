@@ -51,6 +51,15 @@ export default function EarningsScreen() {
     enabled: !!chauffeurId,
   });
 
+  const { data: annualShare } = useQuery({
+    queryKey: ["/api/earnings/chauffeur", chauffeurId || "", "annual-share"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/earnings/chauffeur/${chauffeurId}/annual-share`);
+      return res.json();
+    },
+    enabled: !!chauffeurId,
+  });
+
   const { data: banksData, isLoading: banksLoading } = useQuery({
     queryKey: ["/api/wallet/banks"],
     enabled: showWithdraw,
@@ -90,7 +99,7 @@ export default function EarningsScreen() {
   });
 
   const earningsList = Array.isArray(earningsData) ? earningsData : [];
-  const cardEarnings = earningsList.filter((e: any) => e.type === "card");
+  const cardEarnings = earningsList.filter((e: any) => e.type === "card" || e.type === "wallet" || String(e.type || "").startsWith("long_distance_card"));
   const totalEarnings = cardEarnings.reduce((sum: number, e: any) => sum + (e.amount || 0), 0);
   const totalCommission = cardEarnings.reduce((sum: number, e: any) => sum + (e.commission || 0), 0);
   const withdrawalsList = Array.isArray(withdrawals) ? withdrawals : [];
@@ -108,7 +117,7 @@ export default function EarningsScreen() {
       <View style={styles.totalCard}>
         <Text style={styles.totalLabel}>Card Trip Earnings</Text>
         <Text style={styles.totalValue}>R {totalEarnings.toFixed(0)}</Text>
-        <Text style={styles.totalSub}>Commission paid: R {totalCommission.toFixed(0)} (15%)</Text>
+        <Text style={styles.totalSub}>Commission paid: R {totalCommission.toFixed(0)} (25%)</Text>
         <Pressable
           style={({ pressed }) => [styles.withdrawBtn, pressed && { opacity: 0.9 }]}
           onPress={() => setShowWithdraw(true)}
@@ -116,6 +125,26 @@ export default function EarningsScreen() {
           <Ionicons name="arrow-up-circle" size={18} color={Colors.primary} />
           <Text style={styles.withdrawBtnText}>Request Withdrawal</Text>
         </Pressable>
+      </View>
+
+      <View style={styles.shareCard}>
+        <View style={styles.shareHeader}>
+          <View>
+            <Text style={styles.shareEyebrow}>Annual Driver Share</Text>
+            <Text style={styles.shareTitle}>{annualShare?.year || new Date().getFullYear()} December payout</Text>
+          </View>
+          <Ionicons name="gift-outline" size={22} color={Colors.success} />
+        </View>
+        <Text style={styles.shareAmount}>R {(annualShare?.annualShare || 0).toFixed(0)}</Text>
+        <Text style={styles.shareCopy}>
+          5% of every qualifying normal and long-distance trip is accumulated for your annual driver reward. Daily Lift Club trips are excluded.
+        </Text>
+        <View style={styles.shareRules}>
+          <Text style={styles.shareRule}>Trips counted: {annualShare?.qualifyingTrips || 0}</Text>
+          <Text style={styles.shareRule}>Platform fee: 20% | Annual share: 5%</Text>
+          <Text style={styles.shareRule}>Rules: 3+ months active, 5 trips/week, good service standards</Text>
+        </View>
+        <Text style={styles.shareMotto}>Improving Drivers' Lives and Building True Partnerships.</Text>
       </View>
 
       <View style={styles.statsRow}>
@@ -299,6 +328,15 @@ const styles = StyleSheet.create({
   totalLabel: { fontSize: 13, fontFamily: "Inter_500Medium", color: Colors.textSecondary, textTransform: "uppercase" as const, letterSpacing: 1 },
   totalValue: { fontSize: 40, fontFamily: "Inter_700Bold", color: Colors.white },
   totalSub: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textMuted },
+  shareCard: { backgroundColor: Colors.card, borderRadius: 18, padding: 20, gap: 10, borderWidth: 1, borderColor: Colors.border, marginBottom: 20 },
+  shareHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  shareEyebrow: { fontSize: 11, fontFamily: "Inter_700Bold", color: Colors.success, textTransform: "uppercase" as const, letterSpacing: 1 },
+  shareTitle: { fontSize: 16, fontFamily: "Inter_700Bold", color: Colors.white, marginTop: 3 },
+  shareAmount: { fontSize: 34, fontFamily: "Inter_700Bold", color: Colors.white },
+  shareCopy: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textSecondary, lineHeight: 19 },
+  shareRules: { gap: 5, paddingTop: 4 },
+  shareRule: { fontSize: 12, fontFamily: "Inter_500Medium", color: Colors.textMuted },
+  shareMotto: { fontSize: 12, fontFamily: "Inter_600SemiBold", color: Colors.success, paddingTop: 2 },
   withdrawBtn: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.white, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 12, marginTop: 12 },
   withdrawBtnText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.primary },
   statsRow: { flexDirection: "row", gap: 12, marginBottom: 24 },

@@ -8,7 +8,9 @@ export const VEHICLE_CATEGORIES: Record<string, { name: string; pricePerKm: numb
 
 const PRICING_CONFIG = {
   lateNightPremiumMultiplier: 1.3,
-  commissionRate: 0.15,
+  commissionRate: 0.25,
+  platformFeeRate: 0.2,
+  driverAnnualShareRate: 0.05,
 };
 
 export interface PriceEstimate {
@@ -55,10 +57,14 @@ export function calculatePrice(
 
 export function calculateChauffeurEarnings(totalPrice: number) {
   const commission = totalPrice * PRICING_CONFIG.commissionRate;
+  const platformFee = totalPrice * PRICING_CONFIG.platformFeeRate;
+  const driverAnnualShare = totalPrice * PRICING_CONFIG.driverAnnualShareRate;
   const chauffeurEarnings = totalPrice - commission;
   return {
     totalPrice,
     commission: Math.round(commission),
+    platformFee: Math.round(platformFee),
+    driverAnnualShare: Math.round(driverAnnualShare),
     chauffeurEarnings: Math.round(chauffeurEarnings),
   };
 }

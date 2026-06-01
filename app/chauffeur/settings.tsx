@@ -561,7 +561,7 @@ export default function ChauffeurSettingsScreen() {
             </View>
             <View style={styles.faqItem}>
               <Text style={styles.faqQ}>How are earnings calculated?</Text>
-              <Text style={styles.faqA}>You receive 85% of each ride fare. A2B LIFT retains 15% as a commission. Earnings are credited after each completed trip.</Text>
+              <Text style={styles.faqA}>You receive 75% of each qualifying ride fare immediately. A2B LIFT deducts 25%: 20% is the platform fee and 5% accumulates toward the annual driver share paid in December if qualification rules are met.</Text>
             </View>
             <View style={styles.faqItem}>
               <Text style={styles.faqQ}>How do withdrawals work?</Text>

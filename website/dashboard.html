@@ -63,6 +63,17 @@
     .referral-box { background: linear-gradient(135deg, #0a0a0a, #1a1a1a); color: var(--white); border-radius: var(--radius); padding: 28px; display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 24px; }
     .referral-box h3 { font-weight: 700; font-size: 16px; margin-bottom: 4px; }
     .referral-box p { font-size: 13px; color: rgba(255,255,255,0.55); }
+    .driver-share-card { display:none; background: var(--white); border:1px solid var(--grey-200); border-radius: var(--radius); padding:24px; margin-bottom:24px; }
+    .driver-share-head { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:16px; }
+    .driver-share-kicker { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.1em; color:var(--grey-400); margin-bottom:4px; }
+    .driver-share-card h3 { font-size:20px; font-weight:800; letter-spacing:-.02em; }
+    .driver-share-amount { font-size:42px; font-weight:900; letter-spacing:-.04em; margin-bottom:8px; }
+    .driver-share-copy { color:var(--grey-500); font-size:14px; line-height:1.7; max-width:760px; }
+    .driver-share-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:18px 0; }
+    .driver-share-stat { background:var(--grey-50); border:1px solid var(--grey-200); border-radius:10px; padding:14px; }
+    .driver-share-stat b { display:block; font-size:18px; margin-bottom:4px; }
+    .driver-share-stat span { font-size:12px; color:var(--grey-500); }
+    .driver-share-motto { font-size:13px; font-weight:800; color:var(--black); }
     .ref-code-pill { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 10px 16px; flex-shrink: 0; }
     .ref-code-pill span { font-weight: 800; font-size: 16px; letter-spacing: 0.05em; }
     .availability-card { background: var(--white); border-radius: var(--radius); padding: 24px; border: 1px solid var(--grey-200); margin-bottom: 24px; }
@@ -194,7 +205,7 @@
           </div>
         </div>
         <div class="referral-box">
-          <div><h3>Refer friends, earn rewards</h3><p>Share your code and earn commission on every ride they take — up to 5 levels deep.</p></div>
+          <div><h3>Refer friends, earn rewards</h3><p>Share your code and earn 2.5% when referred riders or drivers complete qualifying trips.</p></div>
           <div class="ref-code-pill"><span id="ovRefCode">—</span><button class="copy-btn" style="background:rgba(255,255,255,0.15);color:var(--white);border:1px solid rgba(255,255,255,0.2);padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font);" onclick="copyCode('ovRefCode')">Copy</button></div>
         </div>
         <div class="driver-apply-card" id="overviewDriverApplyCard" style="display:none;">
@@ -223,6 +234,23 @@
             <button class="btn btn-white btn-sm" onclick="topUpWallet()">Top up</button>
             <a href="support.html#payments" class="btn btn-ghost btn-sm" style="color:rgba(255,255,255,0.6);border-color:rgba(255,255,255,0.2);">How it works</a>
           </div>
+        </div>
+        <div class="driver-share-card" id="driverShareCard">
+          <div class="driver-share-head">
+            <div>
+              <div class="driver-share-kicker">Annual Driver Share</div>
+              <h3 id="driverShareTitle">December payout</h3>
+            </div>
+            <span class="ref-code-pill" style="background:var(--grey-50);color:var(--black);">5% annual share</span>
+          </div>
+          <div class="driver-share-amount" id="driverShareAmount">R0</div>
+          <p class="driver-share-copy">A2B deducts 25% from qualifying normal and long-distance trips. 20% is the platform fee and 5% is accumulated toward your December driver share. Daily Lift Club bookings are excluded.</p>
+          <div class="driver-share-grid">
+            <div class="driver-share-stat"><b id="driverShareTrips">0</b><span>qualifying trips</span></div>
+            <div class="driver-share-stat"><b>3+ months</b><span>minimum active period</span></div>
+            <div class="driver-share-stat"><b>5/week</b><span>target trip consistency</span></div>
+          </div>
+          <div class="driver-share-motto">Improving Drivers' Lives and Building True Partnerships.</div>
         </div>
         <div class="wallet-transactions">
           <div class="wallet-tx-header">Recent transactions</div>
@@ -892,6 +920,7 @@
         document.getElementById('nav-availability').style.display = 'flex';
         loadDriverAvailability();
         loadLiftClubAvailability();
+        loadDriverAnnualShare(user);
       }
       await loadTrips(user);
       await loadWallet();
@@ -945,6 +974,38 @@
             <div class="${(tx.type === 'credit' || tx.amount > 0) ? 'wallet-tx-credit' : 'wallet-tx-debit'}">${tx.amount > 0 ? '+' : ''}R${Math.abs(tx.amount || 0).toFixed(2)}</div>
           </div>`).join('') || '<div class="empty-state"><p>No transactions yet</p></div>';
       } catch(e) {}
+    }
+
+    async function getCurrentChauffeurId(user) {
+      if (user?.chauffeurId) return user.chauffeurId;
+      const token = localStorage.getItem('a2b_token');
+      try {
+        const res = await fetch(`${API}/api/chauffeurs/user/${user.id}`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) return null;
+        const chauffeur = await res.json();
+        return chauffeur?.id || null;
+      } catch(e) {
+        return null;
+      }
+    }
+
+    async function loadDriverAnnualShare(user) {
+      const card = document.getElementById('driverShareCard');
+      if (!card || user?.role !== 'chauffeur') return;
+      const token = localStorage.getItem('a2b_token');
+      const chauffeurId = await getCurrentChauffeurId(user);
+      if (!chauffeurId) return;
+      try {
+        const res = await fetch(`${API}/api/earnings/chauffeur/${chauffeurId}/annual-share`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        card.style.display = 'block';
+        document.getElementById('driverShareTitle').textContent = `${data.year || new Date().getFullYear()} December payout`;
+        document.getElementById('driverShareAmount').textContent = `R${Number(data.annualShare || 0).toFixed(0)}`;
+        document.getElementById('driverShareTrips').textContent = Number(data.qualifyingTrips || 0);
+      } catch(e) {
+        card.style.display = 'block';
+      }
     }
 
     async function loadLiftClubBookings() {

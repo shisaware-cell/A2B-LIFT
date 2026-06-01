@@ -21,6 +21,115 @@ import { externalApiService } from "./external-api-service";
 
 const RIDE_MATCH_RADIUS_KM = 25;
 const CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
+const TOTAL_COMMISSION_RATE = 0.25;
+const DRIVER_ANNUAL_SHARE_RATE = 0.05;
+const REFERRAL_REWARD_RATE = 0.025;
+const DRIVER_SHARE_MIN_ACTIVE_MONTHS = 3;
+const DRIVER_SHARE_MIN_WEEKLY_TRIPS = 5;
+
+function getAnnualShareGrossFromEarning(earning: any): number {
+  const amount = Math.abs(Number(earning?.amount || 0));
+  const commission = Math.abs(Number(earning?.commission || 0));
+  if (commission > 0) return commission / TOTAL_COMMISSION_RATE;
+  return amount > 0 ? amount / (1 - TOTAL_COMMISSION_RATE) : 0;
+}
+
+function summarizeAnnualDriverShare(earnings: any[], year = new Date().getFullYear()) {
+  const start = new Date(year, 0, 1).getTime();
+  const end = new Date(year + 1, 0, 1).getTime();
+  const qualifying = earnings.filter((earning) => {
+    const createdAt = new Date(earning.createdAt || Date.now()).getTime();
+    const type = String(earning.type || "");
+    return (
+      createdAt >= start &&
+      createdAt < end &&
+      !type.includes("lift_club") &&
+      (type === "cash" || type === "card" || type === "wallet" || type.startsWith("long_distance"))
+    );
+  });
+  const gross = qualifying.reduce((sum, earning) => sum + getAnnualShareGrossFromEarning(earning), 0);
+  return {
+    year,
+    qualifyingTrips: qualifying.length,
+    grossQualifyingFare: Math.round(gross * 100) / 100,
+    annualShare: Math.round(gross * DRIVER_ANNUAL_SHARE_RATE * 100) / 100,
+    platformFee: Math.round(gross * 0.2 * 100) / 100,
+    totalCommission: Math.round(gross * TOTAL_COMMISSION_RATE * 100) / 100,
+    rules: {
+      minimumActiveMonths: DRIVER_SHARE_MIN_ACTIVE_MONTHS,
+      minimumWeeklyTrips: DRIVER_SHARE_MIN_WEEKLY_TRIPS,
+      excludes: "Daily Lift Club trips and bookings",
+      payoutMonth: "December",
+    },
+  };
+}
+
+async function creditReferralReward(options: {
+  referredUserId?: string | null;
+  riderUserId?: string | null;
+  rideId?: string | null;
+  sourceUserId?: string | null;
+  grossFare: number;
+  type: "driver_referral_commission" | "rider_referral_commission";
+  description: string;
+  notificationBody: string;
+  referencePrefix: string;
+}) {
+  const sourceUserId = options.sourceUserId || options.referredUserId || options.riderUserId;
+  const sourceUser = sourceUserId ? await storage.getUser(sourceUserId) : undefined;
+  const referrerUserId = sourceUser?.referredByUserId;
+  if (!referrerUserId) return;
+
+  const reward = Math.round(options.grossFare * REFERRAL_REWARD_RATE * 100) / 100;
+  if (reward <= 0) return;
+
+  if (options.rideId) {
+    const alreadyPaid = await storage.getRewardTransactionByRideAndType(
+      referrerUserId,
+      options.rideId,
+      options.type,
+      sourceUserId || undefined,
+    );
+    if (alreadyPaid) return;
+  }
+
+  const referrer = await storage.getUser(referrerUserId);
+  if (!referrer) return;
+
+  const balanceBefore = referrer.rewardsBalance || 0;
+  const balanceAfter = balanceBefore + reward;
+  await storage.updateUser(referrer.id, { rewardsBalance: balanceAfter });
+  await storage.createRewardTransaction({
+    userId: referrer.id,
+    sourceUserId,
+    rideId: options.rideId || null,
+    type: options.type,
+    amount: reward,
+    balanceBefore,
+    balanceAfter,
+    description: options.description,
+    status: "completed",
+    reference: `${options.referencePrefix}_${options.rideId || Date.now()}_${referrer.id.slice(0, 6)}`,
+  });
+
+  if (sourceUserId) {
+    const refEvent = await storage.getReferralEventByReferredUserId(sourceUserId);
+    if (refEvent) {
+      await storage.updateReferralEvent(refEvent.id, {
+        totalRewards: (refEvent.totalRewards || 0) + reward,
+        lastRewardAt: new Date(),
+        status: "active",
+      });
+    }
+  }
+
+  await storage.createNotification({
+    userId: referrer.id,
+    title: "Referral Earnings",
+    body: options.notificationBody.replace("{amount}", reward.toFixed(2)),
+    type: "reward",
+  });
+}
 
 function hasFreshChauffeurLocation(chauffeur: { lat?: number | null; lng?: number | null; locationUpdatedAt?: Date | string | null }) {
   if (chauffeur.lat == null || chauffeur.lng == null) return false;
@@ -3980,6 +4089,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         availableForLongDistance: remainingSeats > 0,
       });
 
+      const bookingFare = Number(chauffeur.longDistancePricePerSeat || 0) * seatsRequested;
+      const earningsCalc = calculateChauffeurEarnings(bookingFare);
+      if (bookingFare > 0) {
+        await storage.createEarning({
+          chauffeurId: chauffeur.id,
+          rideId: null,
+          amount: method === "cash" ? -earningsCalc.commission : earningsCalc.chauffeurEarnings,
+          commission: earningsCalc.commission,
+          type: `long_distance_${method}`,
+        });
+        await storage.updateChauffeur(chauffeur.id, {
+          earningsTotal:
+            (chauffeur.earningsTotal || 0) +
+            (method === "cash" ? -earningsCalc.commission : earningsCalc.chauffeurEarnings),
+        });
+      }
+
       const riderFirstName = String((passengerName || rider.name || "Passenger")).trim().split(" ")[0] || "Passenger";
       const routeFrom = chauffeur.longDistanceFrom || from;
       const routeTo = chauffeur.longDistanceTo || to;
@@ -4024,6 +4150,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         body: `${routeFrom} to ${routeTo} on ${travelDate} is confirmed with ${chauffeurUser?.name || "your driver"}. ${method === "cash" ? "Pay your driver in cash on the day." : "Your card payment has been recorded."}`,
         type: "long_distance",
       });
+
+      if (bookingFare > 0) {
+        try {
+          await creditReferralReward({
+            referredUserId: chauffeur.userId,
+            sourceUserId: chauffeur.userId,
+            grossFare: bookingFare,
+            type: "driver_referral_commission",
+            description: "2.5% referral reward from a long-distance booking by a driver you referred",
+            notificationBody: "You earned R {amount} — 2.5% from a long-distance booking by a driver you referred.",
+            referencePrefix: "drv_ld_ref",
+          });
+          await creditReferralReward({
+            riderUserId: rider.id,
+            sourceUserId: rider.id,
+            grossFare: bookingFare,
+            type: "rider_referral_commission",
+            description: "2.5% referral reward from a long-distance booking by a rider you referred",
+            notificationBody: "You earned R {amount} — 2.5% from a long-distance booking by a rider you referred.",
+            referencePrefix: "rdr_ld_ref",
+          });
+        } catch (referralErr: any) {
+          console.error("long-distance referral commission failed (non-fatal):", referralErr.message);
+        }
+      }
 
       return res.json({
         success: true,
@@ -5571,7 +5722,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (!alreadyRecorded) {
             if (paymentMethod === "cash") {
               // Cash trips: driver collects the gross fare in hand,
-              // while the platform records the 15% commission digitally.
+              // while the platform records the 25% commission digitally.
               await storage.createEarning({
                 chauffeurId: ride.chauffeurId,
                 rideId: ride.id,
@@ -5587,7 +5738,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 });
               }
             } else {
-              // Card / wallet trips: add the driver's 85% share to the digital wallet balance.
+              // Card / wallet trips: add the driver's 75% share to the digital wallet balance.
               await storage.createEarning({
                 chauffeurId: ride.chauffeurId,
                 rideId: ride.id,
@@ -5608,69 +5759,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.error("earnings record failed (non-fatal):", earningsErr.message);
         }
 
-        // ── Driver referral commission: credit 2.5% to the driver who referred this driver ──
+        // ── Referral rewards: credit 2.5% for referred drivers and riders ──
         try {
-          const DRIVER_REFERRAL_RATE = 0.025;
           const completingChauffeur = await storage.getChauffeur(ride.chauffeurId);
           if (completingChauffeur?.userId) {
-            const driverUser = await storage.getUser(completingChauffeur.userId);
-            if (driverUser?.referredByUserId) {
-              const referralCommission = Math.round(ride.price * DRIVER_REFERRAL_RATE * 100) / 100;
-              // Dedup: only pay once per ride
-              const alreadyPaid = await storage.getRewardTransactionByRideAndType(
-                driverUser.referredByUserId,
-                ride.id,
-                "driver_referral_commission",
-                completingChauffeur.userId,
-              );
-              if (!alreadyPaid && referralCommission > 0) {
-                const referrer = await storage.getUser(driverUser.referredByUserId);
-                if (referrer) {
-                  const balanceBefore = referrer.rewardsBalance || 0;
-                  const balanceAfter = balanceBefore + referralCommission;
-                  await storage.updateUser(referrer.id, { rewardsBalance: balanceAfter });
-                  await storage.createRewardTransaction({
-                    userId: referrer.id,
-                    sourceUserId: completingChauffeur.userId,
-                    rideId: ride.id,
-                    type: "driver_referral_commission",
-                    amount: referralCommission,
-                    balanceBefore,
-                    balanceAfter,
-                    description: `2.5% referral commission from a trip completed by a driver you referred`,
-                    status: "completed",
-                    reference: `drv_ref_${ride.id}_${referrer.id.slice(0, 6)}`,
-                  });
-                  // Update referralEvent totals
-                  const refEvent = await storage.getReferralEventByReferredUserId(completingChauffeur.userId);
-                  if (refEvent) {
-                    await storage.updateReferralEvent(refEvent.id, {
-                      totalRewards: (refEvent.totalRewards || 0) + referralCommission,
-                      lastRewardAt: new Date(),
-                      status: "active",
-                    });
-                  }
-                  // Notify the referrer
-                  await storage.createNotification({
-                    userId: referrer.id,
-                    title: "Referral Earnings",
-                    body: `You earned R ${referralCommission.toFixed(2)} — 2.5% from a trip completed by a driver you referred.`,
-                    type: "reward",
-                  });
-                  if ((referrer as any).pushToken) {
-                    sendExpoPushNotification(
-                      [(referrer as any).pushToken],
-                      "💰 Referral Earnings",
-                      `You earned R ${referralCommission.toFixed(2)} from your referred driver's trip!`,
-                      { type: "reward:driver_referral", rideId: ride.id },
-                    );
-                  }
-                }
-              }
-            }
+            await creditReferralReward({
+              referredUserId: completingChauffeur.userId,
+              sourceUserId: completingChauffeur.userId,
+              rideId: ride.id,
+              grossFare: ride.price,
+              type: "driver_referral_commission",
+              description: "2.5% referral reward from a trip completed by a driver you referred",
+              notificationBody: "You earned R {amount} — 2.5% from a trip completed by a driver you referred.",
+              referencePrefix: "drv_ref",
+            });
+          }
+          if (ride.clientId) {
+            await creditReferralReward({
+              riderUserId: ride.clientId,
+              sourceUserId: ride.clientId,
+              rideId: ride.id,
+              grossFare: ride.price,
+              type: "rider_referral_commission",
+              description: "2.5% referral reward from a trip completed by a rider you referred",
+              notificationBody: "You earned R {amount} — 2.5% from a trip completed by a rider you referred.",
+              referencePrefix: "rdr_ref",
+            });
           }
         } catch (referralCommErr: any) {
-          console.error("driver referral commission failed (non-fatal):", referralCommErr.message);
+          console.error("referral commission failed (non-fatal):", referralCommErr.message);
         }
 
         try {
@@ -6009,6 +6126,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const earningsList = await storage.getEarningsByChauffeur(req.params.chauffeurId);
       return res.json(earningsList);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/earnings/chauffeur/:chauffeurId/annual-share", async (req: Request, res: Response) => {
+    try {
+      const yearParam = Number(req.query.year);
+      const year = Number.isFinite(yearParam) && yearParam > 2020 ? yearParam : new Date().getFullYear();
+      const [chauffeur, earningsList] = await Promise.all([
+        storage.getChauffeur(req.params.chauffeurId),
+        storage.getEarningsByChauffeur(req.params.chauffeurId),
+      ]);
+      const summary = summarizeAnnualDriverShare(earningsList, year);
+      const createdAt = chauffeur?.createdAt ? new Date(chauffeur.createdAt).getTime() : Date.now();
+      const activeMonths = Math.max(0, Math.floor((Date.now() - createdAt) / (1000 * 60 * 60 * 24 * 30)));
+      return res.json({
+        ...summary,
+        activeMonths,
+        eligibleByAccountAge: activeMonths >= DRIVER_SHARE_MIN_ACTIVE_MONTHS,
+        note: "Final December payout is subject to active driver status, consistent weekly trips, and service standards review.",
+      });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -6371,7 +6510,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalRevenue: Math.round(totalRevenue),
           totalPlatformCommission: Math.round(totalPlatformCommission),
           totalDriverEarnings: Math.round(totalDriverEarnings),
-          commissionRate: 15,
+          commissionRate: 25,
           totalChauffeurs: allChauffeurs.length,
           onlineChauffeurs: allChauffeurs.filter((c) => c.isOnline).length,
           pendingApprovals: pendingApprovals.length,

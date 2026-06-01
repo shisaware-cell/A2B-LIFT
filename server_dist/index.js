@@ -57,6 +57,8 @@ __export(schema_exports, {
   insertUserSchema: () => insertUserSchema,
   insertVehicleAssignmentSchema: () => insertVehicleAssignmentSchema,
   insertVehicleSchema: () => insertVehicleSchema,
+  liftClubBookings: () => liftClubBookings,
+  liftClubRoutes: () => liftClubRoutes,
   livenessSessions: () => livenessSessions,
   messages: () => messages,
   notifications: () => notifications,
@@ -263,6 +265,40 @@ var vehicleAssignments = (0, import_pg_core.pgTable)("vehicle_assignments", {
   status: (0, import_pg_core.text)("status").notNull().default("active"),
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
   removedAt: (0, import_pg_core.timestamp)("removed_at")
+});
+var liftClubRoutes = (0, import_pg_core.pgTable)("lift_club_routes", {
+  id: (0, import_pg_core.varchar)("id").primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
+  chauffeurId: (0, import_pg_core.varchar)("chauffeur_id").notNull().references(() => chauffeurs.id),
+  vehicleId: (0, import_pg_core.varchar)("vehicle_id").notNull().references(() => vehicles.id),
+  pickupArea: (0, import_pg_core.text)("pickup_area").notNull(),
+  destinationArea: (0, import_pg_core.text)("destination_area").notNull(),
+  pickupLat: (0, import_pg_core.real)("pickup_lat"),
+  pickupLng: (0, import_pg_core.real)("pickup_lng"),
+  destinationLat: (0, import_pg_core.real)("destination_lat"),
+  destinationLng: (0, import_pg_core.real)("destination_lng"),
+  departureWindow: (0, import_pg_core.text)("departure_window").notNull().default("Weekday mornings"),
+  weeklyPrice: (0, import_pg_core.real)("weekly_price").notNull(),
+  monthlyPrice: (0, import_pg_core.real)("monthly_price").notNull(),
+  totalSeats: (0, import_pg_core.integer)("total_seats").notNull().default(1),
+  bookedSeats: (0, import_pg_core.integer)("booked_seats").notNull().default(0),
+  status: (0, import_pg_core.text)("status").notNull().default("pending"),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+});
+var liftClubBookings = (0, import_pg_core.pgTable)("lift_club_bookings", {
+  id: (0, import_pg_core.varchar)("id").primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
+  routeId: (0, import_pg_core.varchar)("route_id").notNull().references(() => liftClubRoutes.id),
+  riderId: (0, import_pg_core.varchar)("rider_id").notNull().references(() => users.id),
+  passType: (0, import_pg_core.text)("pass_type").notNull(),
+  startDate: (0, import_pg_core.text)("start_date").notNull(),
+  endDate: (0, import_pg_core.text)("end_date").notNull(),
+  seatCount: (0, import_pg_core.integer)("seat_count").notNull().default(1),
+  amount: (0, import_pg_core.real)("amount").notNull(),
+  paymentStatus: (0, import_pg_core.text)("payment_status").notNull().default("pending"),
+  bookingStatus: (0, import_pg_core.text)("booking_status").notNull().default("pending"),
+  paystackReference: (0, import_pg_core.varchar)("paystack_reference"),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  confirmedAt: (0, import_pg_core.timestamp)("confirmed_at")
 });
 var documents = (0, import_pg_core.pgTable)("documents", {
   id: (0, import_pg_core.varchar)("id").primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
@@ -703,6 +739,110 @@ var DatabaseStorage = class {
     const [assignment] = await db.update(vehicleAssignments).set(data).where((0, import_drizzle_orm2.eq)(vehicleAssignments.id, id)).returning();
     return assignment;
   }
+  async enrichLiftClubRoute(route) {
+    const [chauffeur, vehicle] = await Promise.all([
+      this.getChauffeur(route.chauffeurId),
+      this.getVehicle(route.vehicleId)
+    ]);
+    if (!chauffeur || !vehicle) return void 0;
+    if (!chauffeur.isApproved) return void 0;
+    if (vehicle.status !== "approved") return void 0;
+    if (Number(vehicle.vehicleYear || 0) < 2015) return void 0;
+    const driver = chauffeur.userId ? await this.getUser(chauffeur.userId) : void 0;
+    return {
+      ...route,
+      driverName: driver?.name || "Verified A2B driver",
+      driverPhoto: chauffeur.profilePhoto || driver?.profilePhoto || null,
+      driverRating: driver?.rating || 5,
+      vehicleModel: `${vehicle.carMake || ""} ${vehicle.vehicleModel || ""}`.trim() || chauffeur.vehicleModel || vehicle.vehicleType,
+      vehicleType: vehicle.vehicleType,
+      vehicleYear: vehicle.vehicleYear,
+      vehicleColor: vehicle.carColor,
+      plateNumber: vehicle.plateNumber,
+      chauffeurUserId: chauffeur.userId
+    };
+  }
+  async searchLiftClubRoutes(filters = {}) {
+    const normalizedFrom = String(filters.from || "").trim().toLowerCase();
+    const normalizedTo = String(filters.to || "").trim().toLowerCase();
+    const rows = await db.select().from(liftClubRoutes).where((0, import_drizzle_orm2.eq)(liftClubRoutes.status, "active")).orderBy((0, import_drizzle_orm2.desc)(liftClubRoutes.createdAt));
+    const enriched = await Promise.all(rows.map((route) => this.enrichLiftClubRoute(route)));
+    return enriched.filter(Boolean).filter((route) => {
+      const fromOk = !normalizedFrom || String(route.pickupArea || "").toLowerCase().includes(normalizedFrom);
+      const toOk = !normalizedTo || String(route.destinationArea || "").toLowerCase().includes(normalizedTo);
+      return fromOk && toOk;
+    });
+  }
+  async getLiftClubRoute(id) {
+    const [route] = await db.select().from(liftClubRoutes).where((0, import_drizzle_orm2.eq)(liftClubRoutes.id, id));
+    return route ? this.enrichLiftClubRoute(route) : void 0;
+  }
+  async getLiftClubRouteByChauffeurId(chauffeurId) {
+    const [route] = await db.select().from(liftClubRoutes).where((0, import_drizzle_orm2.eq)(liftClubRoutes.chauffeurId, chauffeurId)).orderBy((0, import_drizzle_orm2.desc)(liftClubRoutes.updatedAt));
+    return route ? this.enrichLiftClubRoute(route) : void 0;
+  }
+  async upsertLiftClubRoute(data) {
+    const [existing] = await db.select().from(liftClubRoutes).where((0, import_drizzle_orm2.eq)(liftClubRoutes.chauffeurId, data.chauffeurId)).orderBy((0, import_drizzle_orm2.desc)(liftClubRoutes.updatedAt));
+    if (existing) {
+      const [route2] = await db.update(liftClubRoutes).set({
+        vehicleId: data.vehicleId,
+        pickupArea: data.pickupArea,
+        destinationArea: data.destinationArea,
+        pickupLat: data.pickupLat ?? null,
+        pickupLng: data.pickupLng ?? null,
+        destinationLat: data.destinationLat ?? null,
+        destinationLng: data.destinationLng ?? null,
+        departureWindow: data.departureWindow,
+        weeklyPrice: data.weeklyPrice,
+        monthlyPrice: data.monthlyPrice,
+        totalSeats: data.totalSeats,
+        bookedSeats: import_drizzle_orm2.sql`LEAST(${liftClubRoutes.bookedSeats}, ${Number(data.totalSeats)})`,
+        status: data.status || "active",
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where((0, import_drizzle_orm2.eq)(liftClubRoutes.id, existing.id)).returning();
+      return this.enrichLiftClubRoute(route2);
+    }
+    const [route] = await db.insert(liftClubRoutes).values(data).returning();
+    return this.enrichLiftClubRoute(route);
+  }
+  async updateLiftClubRouteStatus(chauffeurId, status) {
+    const [route] = await db.update(liftClubRoutes).set({ status, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm2.eq)(liftClubRoutes.chauffeurId, chauffeurId)).returning();
+    return route ? this.enrichLiftClubRoute(route) : void 0;
+  }
+  async createLiftClubBooking(data) {
+    const [booking] = await db.insert(liftClubBookings).values(data).returning();
+    return booking;
+  }
+  async confirmLiftClubBookingWithSeat(data) {
+    return db.transaction(async (tx) => {
+      const [updatedRoute] = await tx.update(liftClubRoutes).set({
+        bookedSeats: import_drizzle_orm2.sql`${liftClubRoutes.bookedSeats} + ${Number(data.seatCount || 1)}`,
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where((0, import_drizzle_orm2.and)(
+        (0, import_drizzle_orm2.eq)(liftClubRoutes.id, data.routeId),
+        (0, import_drizzle_orm2.eq)(liftClubRoutes.status, "active"),
+        import_drizzle_orm2.sql`${liftClubRoutes.bookedSeats} + ${Number(data.seatCount || 1)} <= ${liftClubRoutes.totalSeats}`
+      )).returning();
+      if (!updatedRoute) {
+        throw new Error("This lift club car is already full.");
+      }
+      const [booking] = await tx.insert(liftClubBookings).values({
+        ...data,
+        paymentStatus: data.paymentStatus || "paid",
+        bookingStatus: data.bookingStatus || "confirmed",
+        confirmedAt: data.confirmedAt || /* @__PURE__ */ new Date()
+      }).returning();
+      return booking;
+    });
+  }
+  async getLiftClubBookingsByUser(userId) {
+    const bookings = await db.select().from(liftClubBookings).where((0, import_drizzle_orm2.eq)(liftClubBookings.riderId, userId)).orderBy((0, import_drizzle_orm2.desc)(liftClubBookings.createdAt));
+    const routes = await Promise.all(bookings.map((booking) => this.getLiftClubRoute(booking.routeId).catch(() => void 0)));
+    return bookings.map((booking, index) => ({
+      ...booking,
+      route: routes[index] || null
+    }));
+  }
   async createDocument(data) {
     const [doc] = await db.insert(documents).values(data).returning();
     return doc;
@@ -1101,7 +1241,9 @@ var VEHICLE_CATEGORIES = {
 };
 var PRICING_CONFIG = {
   lateNightPremiumMultiplier: 1.3,
-  commissionRate: 0.15
+  commissionRate: 0.25,
+  platformFeeRate: 0.2,
+  driverAnnualShareRate: 0.05
 };
 function calculatePrice(distanceKm, categoryId, options) {
   const category = VEHICLE_CATEGORIES[categoryId] || VEHICLE_CATEGORIES.budget;
@@ -1126,10 +1268,14 @@ function calculatePrice(distanceKm, categoryId, options) {
 }
 function calculateChauffeurEarnings(totalPrice) {
   const commission = totalPrice * PRICING_CONFIG.commissionRate;
+  const platformFee = totalPrice * PRICING_CONFIG.platformFeeRate;
+  const driverAnnualShare = totalPrice * PRICING_CONFIG.driverAnnualShareRate;
   const chauffeurEarnings = totalPrice - commission;
   return {
     totalPrice,
     commission: Math.round(commission),
+    platformFee: Math.round(platformFee),
+    driverAnnualShare: Math.round(driverAnnualShare),
     chauffeurEarnings: Math.round(chauffeurEarnings)
   };
 }
@@ -1306,6 +1452,91 @@ var externalApiService = new ExternalApiService();
 // server/routes.ts
 var RIDE_MATCH_RADIUS_KM = 25;
 var CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1e3;
+var TOTAL_COMMISSION_RATE = 0.25;
+var DRIVER_ANNUAL_SHARE_RATE = 0.05;
+var REFERRAL_REWARD_RATE = 0.025;
+var DRIVER_SHARE_MIN_ACTIVE_MONTHS = 3;
+var DRIVER_SHARE_MIN_WEEKLY_TRIPS = 5;
+function getAnnualShareGrossFromEarning(earning) {
+  const amount = Math.abs(Number(earning?.amount || 0));
+  const commission = Math.abs(Number(earning?.commission || 0));
+  if (commission > 0) return commission / TOTAL_COMMISSION_RATE;
+  return amount > 0 ? amount / (1 - TOTAL_COMMISSION_RATE) : 0;
+}
+function summarizeAnnualDriverShare(earnings2, year = (/* @__PURE__ */ new Date()).getFullYear()) {
+  const start = new Date(year, 0, 1).getTime();
+  const end = new Date(year + 1, 0, 1).getTime();
+  const qualifying = earnings2.filter((earning) => {
+    const createdAt = new Date(earning.createdAt || Date.now()).getTime();
+    const type = String(earning.type || "");
+    return createdAt >= start && createdAt < end && !type.includes("lift_club") && (type === "cash" || type === "card" || type === "wallet" || type.startsWith("long_distance"));
+  });
+  const gross = qualifying.reduce((sum, earning) => sum + getAnnualShareGrossFromEarning(earning), 0);
+  return {
+    year,
+    qualifyingTrips: qualifying.length,
+    grossQualifyingFare: Math.round(gross * 100) / 100,
+    annualShare: Math.round(gross * DRIVER_ANNUAL_SHARE_RATE * 100) / 100,
+    platformFee: Math.round(gross * 0.2 * 100) / 100,
+    totalCommission: Math.round(gross * TOTAL_COMMISSION_RATE * 100) / 100,
+    rules: {
+      minimumActiveMonths: DRIVER_SHARE_MIN_ACTIVE_MONTHS,
+      minimumWeeklyTrips: DRIVER_SHARE_MIN_WEEKLY_TRIPS,
+      excludes: "Daily Lift Club trips and bookings",
+      payoutMonth: "December"
+    }
+  };
+}
+async function creditReferralReward(options) {
+  const sourceUserId = options.sourceUserId || options.referredUserId || options.riderUserId;
+  const sourceUser = sourceUserId ? await storage.getUser(sourceUserId) : void 0;
+  const referrerUserId = sourceUser?.referredByUserId;
+  if (!referrerUserId) return;
+  const reward = Math.round(options.grossFare * REFERRAL_REWARD_RATE * 100) / 100;
+  if (reward <= 0) return;
+  if (options.rideId) {
+    const alreadyPaid = await storage.getRewardTransactionByRideAndType(
+      referrerUserId,
+      options.rideId,
+      options.type,
+      sourceUserId || void 0
+    );
+    if (alreadyPaid) return;
+  }
+  const referrer = await storage.getUser(referrerUserId);
+  if (!referrer) return;
+  const balanceBefore = referrer.rewardsBalance || 0;
+  const balanceAfter = balanceBefore + reward;
+  await storage.updateUser(referrer.id, { rewardsBalance: balanceAfter });
+  await storage.createRewardTransaction({
+    userId: referrer.id,
+    sourceUserId,
+    rideId: options.rideId || null,
+    type: options.type,
+    amount: reward,
+    balanceBefore,
+    balanceAfter,
+    description: options.description,
+    status: "completed",
+    reference: `${options.referencePrefix}_${options.rideId || Date.now()}_${referrer.id.slice(0, 6)}`
+  });
+  if (sourceUserId) {
+    const refEvent = await storage.getReferralEventByReferredUserId(sourceUserId);
+    if (refEvent) {
+      await storage.updateReferralEvent(refEvent.id, {
+        totalRewards: (refEvent.totalRewards || 0) + reward,
+        lastRewardAt: /* @__PURE__ */ new Date(),
+        status: "active"
+      });
+    }
+  }
+  await storage.createNotification({
+    userId: referrer.id,
+    title: "Referral Earnings",
+    body: options.notificationBody.replace("{amount}", reward.toFixed(2)),
+    type: "reward"
+  });
+}
 function hasFreshChauffeurLocation(chauffeur) {
   if (chauffeur.lat == null || chauffeur.lng == null) return false;
   if (!chauffeur.locationUpdatedAt) return true;
@@ -2996,7 +3227,7 @@ async function registerRoutes(app2) {
       if (!originLat || !originLng || !destLat || !destLng) {
         return res.status(400).json({ message: "Origin and destination coordinates are required" });
       }
-      const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_API_KEY;
+      const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY || process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_API_KEY;
       if (!apiKey) {
         return res.status(500).json({ message: "Google Maps API key not configured" });
       }
@@ -4496,6 +4727,20 @@ async function registerRoutes(app2) {
         longDistanceSeatsAvailable: remainingSeats,
         availableForLongDistance: remainingSeats > 0
       });
+      const bookingFare = Number(chauffeur.longDistancePricePerSeat || 0) * seatsRequested;
+      const earningsCalc = calculateChauffeurEarnings(bookingFare);
+      if (bookingFare > 0) {
+        await storage.createEarning({
+          chauffeurId: chauffeur.id,
+          rideId: null,
+          amount: method === "cash" ? -earningsCalc.commission : earningsCalc.chauffeurEarnings,
+          commission: earningsCalc.commission,
+          type: `long_distance_${method}`
+        });
+        await storage.updateChauffeur(chauffeur.id, {
+          earningsTotal: (chauffeur.earningsTotal || 0) + (method === "cash" ? -earningsCalc.commission : earningsCalc.chauffeurEarnings)
+        });
+      }
       const riderFirstName = String(passengerName || rider.name || "Passenger").trim().split(" ")[0] || "Passenger";
       const routeFrom = chauffeur.longDistanceFrom || from;
       const routeTo = chauffeur.longDistanceTo || to;
@@ -4535,6 +4780,30 @@ async function registerRoutes(app2) {
         body: `${routeFrom} to ${routeTo} on ${travelDate} is confirmed with ${chauffeurUser?.name || "your driver"}. ${method === "cash" ? "Pay your driver in cash on the day." : "Your card payment has been recorded."}`,
         type: "long_distance"
       });
+      if (bookingFare > 0) {
+        try {
+          await creditReferralReward({
+            referredUserId: chauffeur.userId,
+            sourceUserId: chauffeur.userId,
+            grossFare: bookingFare,
+            type: "driver_referral_commission",
+            description: "2.5% referral reward from a long-distance booking by a driver you referred",
+            notificationBody: "You earned R {amount} \u2014 2.5% from a long-distance booking by a driver you referred.",
+            referencePrefix: "drv_ld_ref"
+          });
+          await creditReferralReward({
+            riderUserId: rider.id,
+            sourceUserId: rider.id,
+            grossFare: bookingFare,
+            type: "rider_referral_commission",
+            description: "2.5% referral reward from a long-distance booking by a rider you referred",
+            notificationBody: "You earned R {amount} \u2014 2.5% from a long-distance booking by a rider you referred.",
+            referencePrefix: "rdr_ld_ref"
+          });
+        } catch (referralErr) {
+          console.error("long-distance referral commission failed (non-fatal):", referralErr.message);
+        }
+      }
       return res.json({
         success: true,
         seatsRemaining: remainingSeats,
@@ -4543,6 +4812,204 @@ async function registerRoutes(app2) {
       });
     } catch (error) {
       return res.status(500).json({ message: error.message || "Unable to confirm long-distance booking" });
+    }
+  });
+  function addBusinessDays(start, businessDays) {
+    const result = new Date(start);
+    let added = 0;
+    while (added < businessDays) {
+      result.setDate(result.getDate() + 1);
+      const day = result.getDay();
+      if (day !== 0 && day !== 6) added += 1;
+    }
+    return result;
+  }
+  async function verifyLiftClubPaystack(reference, expectedAmount) {
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    if (!secretKey) {
+      console.warn("[lift-club] PAYSTACK_SECRET_KEY is missing; accepting client callback reference without server verification.");
+      return { ok: true, skipped: true };
+    }
+    const response = await import_axios.default.get(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
+      headers: { Authorization: `Bearer ${secretKey}` },
+      timeout: 1e4
+    });
+    const tx = response.data?.data;
+    const expectedCents = Math.round(Number(expectedAmount || 0) * 100);
+    const paidCents = Math.round(Number(tx?.amount || 0));
+    return {
+      ok: tx?.status === "success" && paidCents >= expectedCents,
+      skipped: false,
+      amount: paidCents / 100,
+      status: tx?.status
+    };
+  }
+  async function getApprovedLiftClubVehicleForChauffeur(userId, chauffeur) {
+    const activeVehicle = chauffeur.activeVehicleId ? await storage.getVehicle(chauffeur.activeVehicleId).catch(() => void 0) : void 0;
+    if (activeVehicle && activeVehicle.status === "approved" && Number(activeVehicle.vehicleYear || 0) >= 2015) {
+      return activeVehicle;
+    }
+    const profile = await ensureDriverOperatorForChauffeur(userId);
+    if (!profile) return null;
+    const ownedVehicles = await storage.getVehiclesByOwnerOperator(profile.id).catch(() => []);
+    const assignments = profile.type === "driver" ? await storage.getVehicleAssignments({ driverOperatorProfileId: profile.id, status: "active" }).catch(() => []) : [];
+    const assignedVehicles = await Promise.all(
+      assignments.map((assignment) => storage.getVehicle(assignment.vehicleId).catch(() => void 0))
+    );
+    return [...ownedVehicles, ...assignedVehicles.filter(Boolean)].find(
+      (vehicle) => vehicle.status === "approved" && Number(vehicle.vehicleYear || 0) >= 2015
+    ) || null;
+  }
+  app2.get("/api/lift-club/routes", async (req, res) => {
+    try {
+      const routes = await storage.searchLiftClubRoutes({
+        from: typeof req.query.from === "string" ? req.query.from : void 0,
+        to: typeof req.query.to === "string" ? req.query.to : void 0
+      });
+      return res.json(routes);
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Unable to load lift club routes" });
+    }
+  });
+  app2.get("/api/lift-club/my-route", requireAuth, async (req, res) => {
+    try {
+      const chauffeur = await storage.getChauffeurByUserId(req.auth.sub);
+      if (!chauffeur) return res.status(404).json({ message: "Chauffeur profile not found" });
+      const route = await storage.getLiftClubRouteByChauffeurId(chauffeur.id);
+      const vehicle = await getApprovedLiftClubVehicleForChauffeur(req.auth.sub, chauffeur);
+      return res.json({
+        route: route || null,
+        canPublish: Boolean(chauffeur.isApproved && vehicle),
+        isApproved: Boolean(chauffeur.isApproved),
+        vehicle: vehicle || null
+      });
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Unable to load lift club route" });
+    }
+  });
+  app2.post("/api/lift-club/my-route", requireAuth, async (req, res) => {
+    try {
+      const chauffeur = await storage.getChauffeurByUserId(req.auth.sub);
+      if (!chauffeur) return res.status(404).json({ message: "Chauffeur profile not found" });
+      if (!chauffeur.isApproved) return res.status(403).json({ message: "Your driver profile must be approved before publishing a lift club route." });
+      const available = req.body?.available !== false;
+      if (!available) {
+        const route2 = await storage.updateLiftClubRouteStatus(chauffeur.id, "inactive");
+        return res.json({ success: true, route: route2 || null, available: false });
+      }
+      const vehicle = await getApprovedLiftClubVehicleForChauffeur(req.auth.sub, chauffeur);
+      if (!vehicle) {
+        return res.status(403).json({ message: "An approved vehicle from 2015 onwards is required before publishing a lift club route." });
+      }
+      const pickupArea = String(req.body?.pickupArea || "").trim();
+      const destinationArea = String(req.body?.destinationArea || "").trim();
+      const departureWindow = String(req.body?.departureWindow || "Weekday mornings").trim();
+      const weeklyPrice = Number(req.body?.weeklyPrice);
+      const monthlyPrice = Number(req.body?.monthlyPrice);
+      const requestedSeats = Math.floor(Number(req.body?.totalSeats) || 0);
+      const vehicleCapacity = Math.max(1, Number(vehicle.passengerCapacity || chauffeur.passengerCapacity || 1));
+      const totalSeats = Math.max(1, Math.min(vehicleCapacity, requestedSeats || vehicleCapacity));
+      if (!pickupArea || !destinationArea) {
+        return res.status(400).json({ message: "Pickup area and workplace are required." });
+      }
+      if (pickupArea.toLowerCase() === destinationArea.toLowerCase()) {
+        return res.status(400).json({ message: "Pickup area and workplace must be different." });
+      }
+      if (!Number.isFinite(weeklyPrice) || weeklyPrice <= 0 || !Number.isFinite(monthlyPrice) || monthlyPrice <= 0) {
+        return res.status(400).json({ message: "Weekly and monthly prices must be greater than zero." });
+      }
+      const existingRoute = await storage.getLiftClubRouteByChauffeurId(chauffeur.id);
+      const hasBookedSeats = Number(existingRoute?.bookedSeats || 0) > 0;
+      const routeChanged = existingRoute && (String(existingRoute.pickupArea || "").trim().toLowerCase() !== pickupArea.toLowerCase() || String(existingRoute.destinationArea || "").trim().toLowerCase() !== destinationArea.toLowerCase());
+      if (hasBookedSeats && routeChanged) {
+        return res.status(409).json({ message: "This lift club already has booked riders. Turn it off or contact support before changing the route areas." });
+      }
+      const route = await storage.upsertLiftClubRoute({
+        chauffeurId: chauffeur.id,
+        vehicleId: vehicle.id,
+        pickupArea,
+        destinationArea,
+        pickupLat: Number.isFinite(Number(req.body?.pickupLat)) ? Number(req.body.pickupLat) : null,
+        pickupLng: Number.isFinite(Number(req.body?.pickupLng)) ? Number(req.body.pickupLng) : null,
+        destinationLat: Number.isFinite(Number(req.body?.destinationLat)) ? Number(req.body.destinationLat) : null,
+        destinationLng: Number.isFinite(Number(req.body?.destinationLng)) ? Number(req.body.destinationLng) : null,
+        departureWindow,
+        weeklyPrice,
+        monthlyPrice,
+        totalSeats,
+        status: "active"
+      });
+      return res.json({ success: true, route, available: true });
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Unable to save lift club route" });
+    }
+  });
+  app2.get("/api/lift-club/my-bookings", requireAuth, async (req, res) => {
+    try {
+      const bookings = await storage.getLiftClubBookingsByUser(req.auth.sub);
+      return res.json(bookings);
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Unable to load lift club bookings" });
+    }
+  });
+  app2.post("/api/lift-club/bookings", requireAuth, async (req, res) => {
+    try {
+      const { routeId, passType, paystackReference } = req.body || {};
+      const normalizedPassType = passType === "monthly" ? "monthly" : passType === "weekly" ? "weekly" : null;
+      if (!routeId || !normalizedPassType || !paystackReference) {
+        return res.status(400).json({ message: "routeId, passType, and Paystack reference are required." });
+      }
+      const [rider, route] = await Promise.all([
+        storage.getUser(req.auth.sub),
+        storage.getLiftClubRoute(String(routeId))
+      ]);
+      if (!rider) return res.status(404).json({ message: "Rider not found." });
+      if (!route || route.status !== "active") return res.status(404).json({ message: "Lift club route not found." });
+      if (route.chauffeurUserId === rider.id) return res.status(400).json({ message: "You cannot book your own lift club car." });
+      if (Number(route.vehicleYear || 0) < 2015) return res.status(409).json({ message: "This vehicle is not eligible for Daily Lift Club." });
+      const seatsLeft = Number(route.totalSeats || 0) - Number(route.bookedSeats || 0);
+      if (seatsLeft <= 0) return res.status(409).json({ message: "This lift club car is already full." });
+      const amount = normalizedPassType === "monthly" ? Number(route.monthlyPrice || 0) : Number(route.weeklyPrice || 0);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ message: "This lift club pass is not priced correctly." });
+      }
+      const verification = await verifyLiftClubPaystack(String(paystackReference), amount);
+      if (!verification.ok) {
+        return res.status(402).json({ message: "Paystack payment could not be verified." });
+      }
+      const startDate = /* @__PURE__ */ new Date();
+      const endDate = normalizedPassType === "weekly" ? addBusinessDays(startDate, 5) : addBusinessDays(startDate, 22);
+      const booking = await storage.confirmLiftClubBookingWithSeat({
+        routeId: route.id,
+        riderId: rider.id,
+        passType: normalizedPassType,
+        startDate: startDate.toISOString().slice(0, 10),
+        endDate: endDate.toISOString().slice(0, 10),
+        seatCount: 1,
+        amount,
+        paymentStatus: "paid",
+        bookingStatus: "confirmed",
+        paystackReference: String(paystackReference),
+        confirmedAt: /* @__PURE__ */ new Date()
+      });
+      await storage.createNotification({
+        userId: rider.id,
+        title: "Lift club seat confirmed",
+        body: `${route.pickupArea} to ${route.destinationArea} is confirmed for your ${normalizedPassType} weekday pass.`,
+        type: "lift_club"
+      });
+      if (route.chauffeurUserId) {
+        await storage.createNotification({
+          userId: route.chauffeurUserId,
+          title: "New lift club rider",
+          body: `${rider.name || "A rider"} booked a ${normalizedPassType} seat for ${route.pickupArea} to ${route.destinationArea}.`,
+          type: "lift_club"
+        });
+      }
+      return res.json({ booking, seatsRemaining: seatsLeft - 1 });
+    } catch (error) {
+      const status = String(error?.message || "").includes("already full") ? 409 : 500;
+      return res.status(status).json({ message: error.message || "Unable to confirm lift club booking" });
     }
   });
   app2.get("/api/long-distance/my-availability", requireAuth, async (req, res) => {
@@ -4873,14 +5340,18 @@ async function registerRoutes(app2) {
   });
   app2.post("/api/upload-document", authOptional, async (req, res) => {
     try {
-      const { base64Data, userId, docType } = req.body;
+      const { base64Data, userId, docType, mimeType, fileExtension } = req.body;
       if (!base64Data || !userId || !docType) {
         return res.status(400).json({ message: "base64Data, userId, and docType are required" });
       }
       const SUPABASE_URL2 = process.env.SUPABASE_URL || "https://zzwkieiktbhptvgsqerd.supabase.co";
       const SUPABASE_ANON_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
       const BUCKET = "driver-documents";
-      const fileName = `${userId}/${docType}_${Date.now()}.jpg`;
+      const contentType = typeof mimeType === "string" && mimeType.includes("/") ? mimeType : "image/jpeg";
+      const extension = typeof fileExtension === "string" && /^[a-zA-Z0-9]{1,10}$/.test(fileExtension) ? fileExtension.toLowerCase() : contentType === "application/pdf" ? "pdf" : "jpg";
+      const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, "_") || "user";
+      const safeDocType = String(docType).replace(/[^a-zA-Z0-9_-]/g, "_") || "document";
+      const fileName = `${safeUserId}/${safeDocType}_${Date.now()}.${extension}`;
       const buffer = Buffer.from(base64Data, "base64");
       const uploadRes = await fetch(
         `${SUPABASE_URL2}/storage/v1/object/${BUCKET}/${fileName}`,
@@ -4889,7 +5360,7 @@ async function registerRoutes(app2) {
           headers: {
             Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
             apikey: SUPABASE_ANON_KEY,
-            "Content-Type": "image/jpeg",
+            "Content-Type": contentType,
             "x-upsert": "true"
           },
           body: buffer
@@ -5673,64 +6144,33 @@ async function registerRoutes(app2) {
           console.error("earnings record failed (non-fatal):", earningsErr.message);
         }
         try {
-          const DRIVER_REFERRAL_RATE = 0.025;
           const completingChauffeur = await storage.getChauffeur(ride.chauffeurId);
           if (completingChauffeur?.userId) {
-            const driverUser = await storage.getUser(completingChauffeur.userId);
-            if (driverUser?.referredByUserId) {
-              const referralCommission = Math.round(ride.price * DRIVER_REFERRAL_RATE * 100) / 100;
-              const alreadyPaid = await storage.getRewardTransactionByRideAndType(
-                driverUser.referredByUserId,
-                ride.id,
-                "driver_referral_commission",
-                completingChauffeur.userId
-              );
-              if (!alreadyPaid && referralCommission > 0) {
-                const referrer = await storage.getUser(driverUser.referredByUserId);
-                if (referrer) {
-                  const balanceBefore = referrer.rewardsBalance || 0;
-                  const balanceAfter = balanceBefore + referralCommission;
-                  await storage.updateUser(referrer.id, { rewardsBalance: balanceAfter });
-                  await storage.createRewardTransaction({
-                    userId: referrer.id,
-                    sourceUserId: completingChauffeur.userId,
-                    rideId: ride.id,
-                    type: "driver_referral_commission",
-                    amount: referralCommission,
-                    balanceBefore,
-                    balanceAfter,
-                    description: `2.5% referral commission from a trip completed by a driver you referred`,
-                    status: "completed",
-                    reference: `drv_ref_${ride.id}_${referrer.id.slice(0, 6)}`
-                  });
-                  const refEvent = await storage.getReferralEventByReferredUserId(completingChauffeur.userId);
-                  if (refEvent) {
-                    await storage.updateReferralEvent(refEvent.id, {
-                      totalRewards: (refEvent.totalRewards || 0) + referralCommission,
-                      lastRewardAt: /* @__PURE__ */ new Date(),
-                      status: "active"
-                    });
-                  }
-                  await storage.createNotification({
-                    userId: referrer.id,
-                    title: "Referral Earnings",
-                    body: `You earned R ${referralCommission.toFixed(2)} \u2014 2.5% from a trip completed by a driver you referred.`,
-                    type: "reward"
-                  });
-                  if (referrer.pushToken) {
-                    sendExpoPushNotification(
-                      [referrer.pushToken],
-                      "\u{1F4B0} Referral Earnings",
-                      `You earned R ${referralCommission.toFixed(2)} from your referred driver's trip!`,
-                      { type: "reward:driver_referral", rideId: ride.id }
-                    );
-                  }
-                }
-              }
-            }
+            await creditReferralReward({
+              referredUserId: completingChauffeur.userId,
+              sourceUserId: completingChauffeur.userId,
+              rideId: ride.id,
+              grossFare: ride.price,
+              type: "driver_referral_commission",
+              description: "2.5% referral reward from a trip completed by a driver you referred",
+              notificationBody: "You earned R {amount} \u2014 2.5% from a trip completed by a driver you referred.",
+              referencePrefix: "drv_ref"
+            });
+          }
+          if (ride.clientId) {
+            await creditReferralReward({
+              riderUserId: ride.clientId,
+              sourceUserId: ride.clientId,
+              rideId: ride.id,
+              grossFare: ride.price,
+              type: "rider_referral_commission",
+              description: "2.5% referral reward from a trip completed by a rider you referred",
+              notificationBody: "You earned R {amount} \u2014 2.5% from a trip completed by a rider you referred.",
+              referencePrefix: "rdr_ref"
+            });
           }
         } catch (referralCommErr) {
-          console.error("driver referral commission failed (non-fatal):", referralCommErr.message);
+          console.error("referral commission failed (non-fatal):", referralCommErr.message);
         }
         try {
           await storage.createNotification({
@@ -6024,6 +6464,27 @@ async function registerRoutes(app2) {
     try {
       const earningsList = await storage.getEarningsByChauffeur(req.params.chauffeurId);
       return res.json(earningsList);
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.get("/api/earnings/chauffeur/:chauffeurId/annual-share", async (req, res) => {
+    try {
+      const yearParam = Number(req.query.year);
+      const year = Number.isFinite(yearParam) && yearParam > 2020 ? yearParam : (/* @__PURE__ */ new Date()).getFullYear();
+      const [chauffeur, earningsList] = await Promise.all([
+        storage.getChauffeur(req.params.chauffeurId),
+        storage.getEarningsByChauffeur(req.params.chauffeurId)
+      ]);
+      const summary = summarizeAnnualDriverShare(earningsList, year);
+      const createdAt = chauffeur?.createdAt ? new Date(chauffeur.createdAt).getTime() : Date.now();
+      const activeMonths = Math.max(0, Math.floor((Date.now() - createdAt) / (1e3 * 60 * 60 * 24 * 30)));
+      return res.json({
+        ...summary,
+        activeMonths,
+        eligibleByAccountAge: activeMonths >= DRIVER_SHARE_MIN_ACTIVE_MONTHS,
+        note: "Final December payout is subject to active driver status, consistent weekly trips, and service standards review."
+      });
     } catch (error) {
       return res.status(500).json({ message: error.message });
     }
@@ -6335,7 +6796,7 @@ async function registerRoutes(app2) {
           totalRevenue: Math.round(totalRevenue),
           totalPlatformCommission: Math.round(totalPlatformCommission),
           totalDriverEarnings: Math.round(totalDriverEarnings),
-          commissionRate: 15,
+          commissionRate: 25,
           totalChauffeurs: allChauffeurs.length,
           onlineChauffeurs: allChauffeurs.filter((c) => c.isOnline).length,
           pendingApprovals: pendingApprovals.length,

@@ -40,7 +40,7 @@ import Colors from "@/constants/colors";
 import A2BMap from "@/components/A2BMap";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const DRIVER_SHARE = 0.85;
+const DRIVER_SHARE = 0.75;
 const ROUTE_REFRESH_MIN_DISTANCE_KM = 0.2;
 const ROUTE_REFRESH_MAX_AGE_MS = 5 * 60 * 1000;
 const RIDE_ALERT_SUPPRESSION_MS = 30 * 60 * 1000;
@@ -2147,7 +2147,7 @@ export default function ChauffeurDashboard() {
                 <Text style={styles.payPopupTitle}>Collect Cash Payment</Text>
                 <Text style={styles.payPopupAmount}>R {getRideClientFare(completedTrip).toFixed(0)}</Text>
                 <Text style={styles.payPopupBody}>
-                  Please collect R {getRideClientFare(completedTrip).toFixed(0)} from {completedTrip?.clientFirstName || (completedTrip?.clientName ? String(completedTrip.clientName).split(" ")[0] : "the client")} before they exit the vehicle. Your net after 15% commission is R {getRideFare(completedTrip).toFixed(0)}.
+                  Please collect R {getRideClientFare(completedTrip).toFixed(0)} from {completedTrip?.clientFirstName || (completedTrip?.clientName ? String(completedTrip.clientName).split(" ")[0] : "the client")} before they exit the vehicle. Your net after 25% commission is R {getRideFare(completedTrip).toFixed(0)}.
                 </Text>
               </>
             ) : (
@@ -2158,7 +2158,7 @@ export default function ChauffeurDashboard() {
                 <Text style={styles.payPopupTitle}>Card Payment</Text>
                 <Text style={styles.payPopupAmount}>R {getRideFare(completedTrip).toFixed(0)}</Text>
                 <Text style={styles.payPopupBody}>
-                  Your net after 15% commission is R {getRideFare(completedTrip).toFixed(0)}, which will reflect in your wallet shortly.
+                  Your net after 25% commission is R {getRideFare(completedTrip).toFixed(0)}, which will reflect in your wallet shortly.
                 </Text>
               </>
             )}

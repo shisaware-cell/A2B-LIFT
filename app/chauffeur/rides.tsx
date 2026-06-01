@@ -16,7 +16,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 
-const DRIVER_SHARE = 0.85;
+const DRIVER_SHARE = 0.75;
 
 function getGrossFare(ride: any) {
   return Number(ride?.actualFare || ride?.price || 0);
