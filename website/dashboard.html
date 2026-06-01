@@ -58,7 +58,8 @@
     .ld-mini-form { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 12px; }
     .ld-mini-form label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--grey-400); display: block; margin-bottom: 6px; }
     .ld-mini-form input { width: 100%; padding: 11px 14px; border: 1.5px solid var(--grey-200); border-radius: var(--radius-sm); font-size: 14px; font-family: var(--font); outline: none; }
-    .ld-mini-form input:focus { border-color: var(--black); }
+    .ld-mini-form select { width: 100%; padding: 11px 14px; border: 1.5px solid var(--grey-200); border-radius: var(--radius-sm); font-size: 14px; font-family: var(--font); outline: none; background: var(--white); }
+    .ld-mini-form input:focus, .ld-mini-form select:focus { border-color: var(--black); }
     .referral-box { background: linear-gradient(135deg, #0a0a0a, #1a1a1a); color: var(--white); border-radius: var(--radius); padding: 28px; display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 24px; }
     .referral-box h3 { font-weight: 700; font-size: 16px; margin-bottom: 4px; }
     .referral-box p { font-size: 13px; color: rgba(255,255,255,0.55); }
@@ -147,6 +148,9 @@
         <div class="dash-nav-item" onclick="showPage('longdistance')" id="nav-longdistance">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 12H19M12 5l7 7-7 7"/></svg>Long Distance
         </div>
+        <div class="dash-nav-item" onclick="showPage('liftclub')" id="nav-liftclub">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 17h10"/><path d="M5 12h14"/><path d="M8 7h8"/><circle cx="7" cy="19" r="2"/><circle cx="17" cy="19" r="2"/></svg>Lift Club
+        </div>
         <div class="dash-nav-item" onclick="showPage('referral')" id="nav-referral">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Referrals
         </div>
@@ -221,6 +225,29 @@
         </div>
         <div id="ldTabResults"></div>
         <a href="long-distance.html" class="btn btn-ghost" style="margin-top:16px;display:inline-flex;">Open full search page →</a>
+      </div>
+
+      <!-- LIFT CLUB -->
+      <div class="dash-page" id="page-liftclub">
+        <h1 class="dash-page-title">Daily Lift Club</h1>
+        <div class="ld-mini-search">
+          <h3>Find a weekday seat to work</h3>
+          <div class="ld-mini-form">
+            <div><label>From</label><input type="text" id="lcDashFrom" placeholder="e.g. Randburg" /></div>
+            <div><label>Workplace</label><input type="text" id="lcDashTo" placeholder="e.g. Sandton" /></div>
+            <div><label>Pass</label><select id="lcDashPass"><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div>
+            <button class="btn btn-primary" style="align-self:flex-end;padding:11px 20px;" onclick="goLiftClub()">Search</button>
+          </div>
+        </div>
+        <div class="wallet-transactions">
+          <div class="wallet-tx-header">My active lift club bookings</div>
+          <div id="liftClubBookingsList"></div>
+        </div>
+        <div class="availability-card" style="margin-top:24px;">
+          <h3>Want to run a daily lift club?</h3>
+          <p style="font-size:14px;color:var(--grey-500);line-height:1.7;margin-bottom:18px;">Drivers use the existing A2B registration, document upload, vehicle approval, and admin vetting flow before routes can be listed publicly.</p>
+          <a href="driver-register.html" class="btn btn-primary btn-sm">Register through driver approval</a>
+        </div>
       </div>
 
       <!-- REFERRAL -->
@@ -348,7 +375,7 @@
     }
 
     function initDashboardAddressAutosuggest() {
-      const fields = ['ovFrom', 'ovTo', 'ldAvFrom', 'ldAvTo', 'ldTabFrom', 'ldTabTo'];
+      const fields = ['ovFrom', 'ovTo', 'ldAvFrom', 'ldAvTo', 'ldTabFrom', 'ldTabTo', 'lcDashFrom', 'lcDashTo'];
       fields.forEach((id) => attachBackendAutocomplete(id, { cityOnly: true }));
     }
 
@@ -444,6 +471,17 @@
       if (date) p.set('date', date);
       if (p.toString()) url += '?' + p.toString();
       window.location.href = url;
+    }
+
+    function goLiftClub() {
+      const from = document.getElementById('lcDashFrom').value.trim();
+      const to = document.getElementById('lcDashTo').value.trim();
+      const pass = document.getElementById('lcDashPass').value;
+      const params = new URLSearchParams();
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+      if (pass) params.set('pass', pass);
+      window.location.href = `lift-club.html${params.toString() ? '?' + params.toString() : ''}`;
     }
 
     function showNotification(message, type = 'success') {
@@ -595,6 +633,7 @@
       }
       await loadTrips(user);
       await loadWallet();
+      await loadLiftClubBookings();
     }
 
     async function loadTrips(user) {
@@ -644,6 +683,38 @@
             <div class="${(tx.type === 'credit' || tx.amount > 0) ? 'wallet-tx-credit' : 'wallet-tx-debit'}">${tx.amount > 0 ? '+' : ''}R${Math.abs(tx.amount || 0).toFixed(2)}</div>
           </div>`).join('') || '<div class="empty-state"><p>No transactions yet</p></div>';
       } catch(e) {}
+    }
+
+    async function loadLiftClubBookings() {
+      const token = localStorage.getItem('a2b_token');
+      const el = document.getElementById('liftClubBookingsList');
+      if (!el) return;
+      try {
+        const res = await fetch(`${API}/api/lift-club/my-bookings`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) throw new Error();
+        const bookings = await res.json();
+        if (!Array.isArray(bookings) || !bookings.length) {
+          el.innerHTML = '<div class="empty-state"><p>No lift club bookings yet</p></div>';
+          return;
+        }
+        el.innerHTML = bookings.map((booking) => {
+          const route = booking.route || {};
+          const status = booking.bookingStatus === 'confirmed' ? 'completed' : 'pending';
+          const title = route.pickupArea && route.destinationArea
+            ? `${route.pickupArea} → ${route.destinationArea}`
+            : `${booking.passType || 'Lift club'} pass`;
+          return `
+            <div class="wallet-tx-item">
+              <div>
+                <div style="font-weight:600">${title}</div>
+                <div style="font-size:12px;color:var(--grey-400)">${booking.startDate || 'Start date'} to ${booking.endDate || 'End date'} · ${booking.passType || 'weekday'} · R${Number(booking.amount || 0).toFixed(2)}</div>
+              </div>
+              <span class="trip-status trip-status--${status}"><span class="trip-status-dot"></span>${booking.bookingStatus || 'pending'}</span>
+            </div>`;
+        }).join('');
+      } catch(e) {
+        el.innerHTML = '<div class="empty-state"><p>Unable to load lift club bookings.</p></div>';
+      }
     }
 
     async function loadDriverAvailability() {
