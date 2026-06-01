@@ -520,7 +520,7 @@
 
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC_CIf3H2FMP6aXZ3hfXTfLv_EWyDUGDWs&libraries=places&callback=initMap" async defer></script>
   <script src="https://js.paystack.co/v1/inline.js"></script>
-  <script src="main.js"></script>
+  <script src="main.js?v=20260601-address"></script>
   <script>
     const API = 'https://api.a2blift.com';
     let map, markers = [], selectedDriver = null;
@@ -542,6 +542,10 @@
     document.getElementById('ldDate').min = new Date().toISOString().split('T')[0];
 
     function attachBackendAutocomplete(inputId, { cityOnly = false } = {}) {
+      if (window.A2BAddressAutocomplete) {
+        window.A2BAddressAutocomplete.attach(inputId, { cityOnly });
+        return;
+      }
       const input = document.getElementById(inputId);
       if (!input || input.dataset.autocompleteFallbackBound === '1') return;
       input.dataset.autocompleteFallbackBound = '1';

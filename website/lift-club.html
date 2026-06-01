@@ -102,7 +102,6 @@
         <p class="lift-hero-sub">Search approved A2B drivers with weekday seats to business hubs like Sandton, Midrand, Rosebank, Fourways, Pretoria, and Johannesburg CBD. Book a weekly or monthly weekday pass and keep your commute predictable.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
           <span class="lift-pill lift-pill--dark">Verified drivers</span>
-          <span class="lift-pill lift-pill--dark">2015+ vehicles only</span>
           <span class="lift-pill lift-pill--dark">Seat count protected</span>
           <span class="lift-pill lift-pill--dark">Paystack booking</span>
         </div>
@@ -276,13 +275,18 @@
     </div>
   </footer>
 
-  <script src="main.js"></script>
+  <script src="main.js?v=20260601-address"></script>
   <script src="https://js.paystack.co/v1/inline.js"></script>
   <script>
     const API = 'https://api.a2blift.com';
     let liftRoutes = [];
     let selectedRoute = null;
     let selectedPass = 'weekly';
+    let liftMap = null;
+    let liftGeocoder = null;
+    let liftDirectionsService = null;
+    let liftDirectionsRenderer = null;
+    let liftMarkers = [];
 
     function safeText(value) {
       return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
@@ -333,12 +337,12 @@
         const data = res.ok ? await res.json() : [];
         liftRoutes = Array.isArray(data) ? data : data.routes || [];
         renderLiftResults();
-        renderLiftMapFallback();
+        renderLiftMap();
       } catch (error) {
         liftRoutes = [];
         resultsEl.innerHTML = '<div class="lift-card"><div class="lift-card-title">Unable to load lift club cars</div><div class="lift-card-meta">Please try again shortly, or contact support if this continues.</div></div>';
         setLiftStatus('Routes unavailable', 'The website could not reach the lift club service right now.');
-        renderLiftMapFallback();
+        renderLiftMap();
       }
     }
 
@@ -375,8 +379,148 @@
       }).join('');
     }
 
+    function initLiftClubAddressAutosuggest() {
+      if (window.A2BAddressAutocomplete) {
+        window.A2BAddressAutocomplete.attach('liftFrom', { cityOnly: true });
+        window.A2BAddressAutocomplete.attach('liftTo', { cityOnly: true });
+      }
+    }
+
+    function initLiftClubMap() {
+      if (!window.google?.maps) {
+        renderLiftMapFallback();
+        return;
+      }
+
+      const mapEl = document.getElementById('liftMap');
+      mapEl.classList.remove('lift-map-fallback');
+      mapEl.classList.add('lift-map');
+
+      liftMap = new google.maps.Map(mapEl, {
+        center: { lat: -26.2041, lng: 28.0473 },
+        zoom: 10,
+        styles: [
+          { featureType: 'all', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+          { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+        ],
+        disableDefaultUI: true,
+        zoomControl: true,
+        mapTypeControl: false,
+      });
+      liftGeocoder = new google.maps.Geocoder();
+      liftDirectionsService = new google.maps.DirectionsService();
+      liftDirectionsRenderer = new google.maps.DirectionsRenderer({
+        map: liftMap,
+        suppressMarkers: false,
+        polylineOptions: { strokeColor: '#0A0A0A', strokeWeight: 4 },
+      });
+
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            liftMap.setCenter(here);
+            liftMap.setZoom(11);
+            new google.maps.Marker({
+              position: here,
+              map: liftMap,
+              title: 'Your location',
+              icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: 9,
+                fillColor: '#0A0A0A',
+                fillOpacity: 1,
+                strokeColor: '#ffffff',
+                strokeWeight: 3,
+              },
+            });
+          },
+          () => {}
+        );
+      }
+
+      renderLiftMap();
+    }
+
+    function liftLatLng(route, type) {
+      const lat = Number(type === 'pickup' ? route.pickupLat : route.destinationLat);
+      const lng = Number(type === 'pickup' ? route.pickupLng : route.destinationLng);
+      return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+    }
+
+    function clearLiftMarkers() {
+      liftMarkers.forEach((marker) => marker.setMap(null));
+      liftMarkers = [];
+    }
+
+    function renderLiftMap() {
+      if (!liftMap || !window.google?.maps) {
+        renderLiftMapFallback();
+        return;
+      }
+
+      clearLiftMarkers();
+      liftDirectionsRenderer?.setDirections({ routes: [] });
+
+      const from = document.getElementById('liftFrom').value.trim();
+      const to = document.getElementById('liftTo').value.trim();
+      const bounds = new google.maps.LatLngBounds();
+      let hasBounds = false;
+
+      liftRoutes.forEach((route, index) => {
+        const pickup = liftLatLng(route, 'pickup');
+        const destination = liftLatLng(route, 'destination');
+        const position = pickup || destination;
+        if (!position) return;
+        const marker = new google.maps.Marker({
+          position,
+          map: liftMap,
+          title: `${route.pickupArea || 'Pickup'} to ${route.destinationArea || 'Workplace'}`,
+          label: { text: String(index + 1), color: 'white', fontSize: '12px', fontWeight: 'bold' },
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 16,
+            fillColor: remainingSeats(route) > 0 ? '#0A0A0A' : '#777777',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 2,
+          },
+        });
+        liftMarkers.push(marker);
+        bounds.extend(position);
+        hasBounds = true;
+      });
+
+      if (from && to && liftDirectionsService && liftDirectionsRenderer) {
+        liftDirectionsService.route({
+          origin: `${from}, South Africa`,
+          destination: `${to}, South Africa`,
+          travelMode: google.maps.TravelMode.DRIVING,
+        }, (response, status) => {
+          if (status === 'OK' && response.routes.length) {
+            liftDirectionsRenderer.setDirections(response);
+          } else if (hasBounds) {
+            liftMap.fitBounds(bounds, 80);
+          }
+        });
+        return;
+      }
+
+      if (hasBounds) {
+        liftMap.fitBounds(bounds, 80);
+      } else if (from && liftGeocoder) {
+        liftGeocoder.geocode({ address: `${from}, South Africa` }, (results, status) => {
+          if (status === 'OK' && results?.[0]?.geometry?.location) {
+            liftMap.setCenter(results[0].geometry.location);
+            liftMap.setZoom(11);
+          }
+        });
+      }
+    }
+
     function renderLiftMapFallback() {
       const map = document.getElementById('liftMap');
+      if (!map || map.classList.contains('lift-map')) return;
       const from = document.getElementById('liftFrom').value.trim() || 'Pickup area';
       const to = document.getElementById('liftTo').value.trim() || 'Workplace';
       const pins = liftRoutes.slice(0, 4).map((route) => `
@@ -472,8 +616,10 @@
       if (event.target === this) closeLiftBooking();
     });
 
+    initLiftClubAddressAutosuggest();
     loadLiftClubConfig();
     initLiftClubQuery();
   </script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC_CIf3H2FMP6aXZ3hfXTfLv_EWyDUGDWs&libraries=places&callback=initLiftClubMap&loading=async" async defer></script>
 </body>
 </html>
