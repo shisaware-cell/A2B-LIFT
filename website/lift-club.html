@@ -12,6 +12,35 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
   <style>
+    .lift-hero { min-height: 760px; padding: calc(var(--nav-h) + 70px) 0 80px; position: relative; overflow: hidden; background: var(--black); color: var(--white); display: flex; align-items: flex-end; }
+    .lift-hero-bg { position: absolute; inset: 0; background-image: url('assets/images/lift-club-hero.jpg'); background-size: cover; background-position: center; }
+    .lift-hero-bg::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(0,0,0,.92) 0%, rgba(0,0,0,.76) 38%, rgba(0,0,0,.26) 72%, rgba(0,0,0,.2) 100%); }
+    .lift-hero .container { position: relative; z-index: 1; width: 100%; }
+    .lift-hero-content { max-width: 720px; }
+    .lift-hero-title { font-size: clamp(44px, 6.2vw, 86px); font-weight: 800; line-height: .98; letter-spacing: -.04em; margin-bottom: 24px; }
+    .lift-hero-sub { font-size: 18px; color: rgba(255,255,255,.72); max-width: 560px; line-height: 1.75; margin-bottom: 34px; }
+    .lift-hero-actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 24px; }
+    .lift-search-panel { margin-top: -74px; position: relative; z-index: 4; }
+    .lift-search-panel .lift-search-bar { border: 1px solid rgba(0,0,0,.08); }
+    .lift-trust-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 24px; }
+    .lift-trust-card { background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius); padding: 20px; }
+    .lift-trust-card strong { display: block; font-size: 15px; margin-bottom: 6px; }
+    .lift-trust-card p { color: var(--grey-600); font-size: 13px; line-height: 1.65; }
+    .lift-info-band { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 56px; align-items: center; }
+    .lift-info-image { border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-lg); background: var(--grey-100); }
+    .lift-info-image img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+    .lift-info-copy .heading { margin-bottom: 22px; }
+    .lift-info-copy p { color: var(--grey-600); font-size: 16px; line-height: 1.8; margin-bottom: 22px; }
+    .lift-process { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 34px; }
+    .lift-process-card { background: var(--grey-50); border: 1px solid var(--grey-200); border-radius: var(--radius); padding: 24px; }
+    .lift-process-num { display: inline-flex; width: 34px; height: 34px; border-radius: 50%; background: var(--black); color: var(--white); align-items: center; justify-content: center; font-size: 12px; font-weight: 800; margin-bottom: 16px; }
+    .lift-process-card h3 { font-size: 17px; margin-bottom: 8px; }
+    .lift-process-card p { color: var(--grey-600); font-size: 14px; line-height: 1.7; }
+    .lift-pass-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 26px; }
+    .lift-pass-card { border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06); border-radius: var(--radius); padding: 24px; }
+    .lift-pass-card span { color: rgba(255,255,255,.45); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .lift-pass-card h3 { font-size: 24px; margin: 8px 0; }
+    .lift-pass-card p { color: rgba(255,255,255,.62); line-height: 1.7; font-size: 14px; }
     .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:2000; align-items:center; justify-content:center; padding:16px; }
     .modal-overlay.open { display:flex; }
     .modal-box { background:var(--white); border-radius:var(--radius-lg); padding:32px; width:100%; max-width:460px; box-shadow:var(--shadow-lg); position:relative; }
@@ -22,7 +51,8 @@
     .lift-note { margin-top:14px; font-size:12px; color:var(--grey-500); line-height:1.6; }
     .lift-driver-cta { display:grid; grid-template-columns:1fr auto; gap:20px; align-items:center; background:var(--black); color:var(--white); border-radius:var(--radius-lg); padding:30px; margin-top:36px; }
     .lift-driver-cta p { color:rgba(255,255,255,.62); margin-top:6px; max-width:660px; }
-    @media(max-width:720px){ .lift-driver-cta { grid-template-columns:1fr; } }
+    @media(max-width:920px){ .lift-hero { min-height: 680px; } .lift-info-band, .lift-trust-row, .lift-process, .lift-pass-grid { grid-template-columns: 1fr; } }
+    @media(max-width:720px){ .lift-driver-cta { grid-template-columns:1fr; } .lift-hero { min-height: 640px; padding-bottom: 64px; } .lift-hero-bg::after { background: linear-gradient(180deg, rgba(0,0,0,.72), rgba(0,0,0,.92)); } .lift-search-panel { margin-top: -36px; } }
   </style>
 </head>
 <body>
@@ -63,22 +93,31 @@
     </div>
   </div>
 
-  <section class="page-hero">
+  <section class="lift-hero">
+    <div class="lift-hero-bg" role="img" aria-label="Verified lift club vehicles collecting commuters outside a city office district"></div>
     <div class="container">
-      <p class="label">Daily Lift Club</p>
-      <h1 class="page-hero-title">Find a verified lift club to work.</h1>
-      <p class="page-hero-sub">Search approved A2B drivers with weekday seats to business hubs. Weekly and monthly passes exclude weekends.</p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;">
-        <span class="lift-pill lift-pill--dark">Verified drivers</span>
-        <span class="lift-pill lift-pill--dark">2015+ vehicles only</span>
-        <span class="lift-pill lift-pill--dark">Paystack booking</span>
+      <div class="lift-hero-content">
+        <p class="label label--light">Daily Lift Club</p>
+        <h1 class="lift-hero-title">Find a verified lift club to work.</h1>
+        <p class="lift-hero-sub">Search approved A2B drivers with weekday seats to business hubs like Sandton, Midrand, Rosebank, Fourways, Pretoria, and Johannesburg CBD. Book a weekly or monthly weekday pass and keep your commute predictable.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <span class="lift-pill lift-pill--dark">Verified drivers</span>
+          <span class="lift-pill lift-pill--dark">2015+ vehicles only</span>
+          <span class="lift-pill lift-pill--dark">Seat count protected</span>
+          <span class="lift-pill lift-pill--dark">Paystack booking</span>
+        </div>
+        <div class="lift-hero-actions">
+          <a href="#liftSearch" class="btn btn-white">Search available cars</a>
+          <a href="driver-register.html" class="btn btn-ghost" style="color:rgba(255,255,255,.82);border-color:rgba(255,255,255,.24);">Register to drive</a>
+        </div>
       </div>
     </div>
   </section>
 
-  <section class="section section--grey" style="padding-top:48px;">
+  <section class="section section--grey" id="liftSearch" style="padding-top:0;">
     <div class="container">
-      <div class="lift-search-bar" style="margin-top:-96px;">
+      <div class="lift-search-panel">
+      <div class="lift-search-bar">
         <div>
           <label for="liftFrom">From</label>
           <input id="liftFrom" type="text" placeholder="e.g. Randburg" />
@@ -96,6 +135,14 @@
         </div>
         <button class="btn btn-primary" style="border-radius:var(--radius-sm);justify-content:center;" onclick="searchLiftClub()">Search cars</button>
       </div>
+      </div>
+
+      <div class="lift-trust-row">
+        <div class="lift-trust-card"><strong>Drivers are vetted first</strong><p>Lift club drivers use the same A2B driver approval and admin verification flow as the app.</p></div>
+        <div class="lift-trust-card"><strong>Cars must qualify</strong><p>Only approved vehicles from 2015 onwards can be listed for public daily lift club routes.</p></div>
+        <div class="lift-trust-card"><strong>Seats cannot overbook</strong><p>Each vehicle shows booked seats and remaining seats. Full cars are disabled automatically.</p></div>
+        <div class="lift-trust-card"><strong>Pay before confirmation</strong><p>Weekly and monthly passes are confirmed after Paystack payment verification.</p></div>
+      </div>
 
       <div class="lift-results-layout">
         <div>
@@ -109,7 +156,41 @@
           <div id="liftMap" class="lift-map-fallback"></div>
         </div>
       </div>
+    </div>
+  </section>
 
+  <section class="section">
+    <div class="container">
+      <div class="lift-info-band">
+        <div class="lift-info-image">
+          <img src="assets/images/lift-club-planning.jpg" alt="A phone showing a verified lift club route, driver card, and seat availability" loading="lazy" />
+        </div>
+        <div class="lift-info-copy">
+          <p class="label">How daily lift club works</p>
+          <h2 class="heading heading--sm">A weekday commute you can plan around.</h2>
+          <p>Daily Lift Club is for people who travel to the same work areas on weekdays and want a stable, verified car instead of searching for transport every morning. Search your pickup area, choose your workplace area, then compare cars, driver verification, pricing, and remaining seats.</p>
+          <p>When you book, your pass covers weekdays only. Weekly passes cover 5 workdays. Monthly passes cover weekday commute access for the selected period. Weekends are excluded by design.</p>
+          <a href="#liftSearch" class="btn btn-primary">Find a lift club seat</a>
+        </div>
+      </div>
+
+      <div class="lift-process">
+        <div class="lift-process-card"><span class="lift-process-num">01</span><h3>Search your work route</h3><p>Enter your current area and workplace. The website shows matching approved cars and route details.</p></div>
+        <div class="lift-process-card"><span class="lift-process-num">02</span><h3>Choose weekly or monthly</h3><p>Pick the pass that fits your commute. Prices are shown before you pay.</p></div>
+        <div class="lift-process-card"><span class="lift-process-num">03</span><h3>Reserve your seat</h3><p>Pay with Paystack. Once confirmed, your seat count is locked and the car updates for everyone else.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--dark">
+    <div class="container">
+      <p class="label label--light">Pass options</p>
+      <h2 class="heading heading--light" style="margin-bottom:20px;">Built for real work weeks,<br /><em>not once-off trips.</em></h2>
+      <p style="color:rgba(255,255,255,.62);max-width:660px;line-height:1.8;margin-bottom:8px;">Lift Club is different from long distance routes. It is a recurring weekday commute product, with limited seats and verified drivers. The moment a 5-seater is fully booked, that car stops accepting new riders.</p>
+      <div class="lift-pass-grid">
+        <div class="lift-pass-card"><span>Weekly pass</span><h3>5 weekdays</h3><p>Best for riders testing a new commute route or working hybrid weeks. Weekends are excluded.</p></div>
+        <div class="lift-pass-card"><span>Monthly pass</span><h3>Weekday access</h3><p>Best for regular commuters who want a predictable ride to the same work area every week.</p></div>
+      </div>
       <div class="lift-driver-cta">
         <div>
           <h2 style="font-size:24px;font-weight:800;letter-spacing:-.02em;">Have a car and want to run a lift club?</h2>
@@ -134,15 +215,64 @@
     </div>
   </div>
 
+  <!-- FOOTER -->
   <footer class="footer">
     <div class="container">
-      <div class="footer-grid">
-        <div class="footer-brand"><a href="index.html" class="logo logo--light"><img src="assets/images/icon.png" alt="A2B Lift" class="logo-img" /><span class="logo-text">A2B<strong>Lift</strong></span></a><p>Premium rides and long-distance travel across South Africa.</p></div>
-        <div class="footer-col"><h4>Passengers</h4><a href="rides.html">Book a ride</a><a href="lift-club.html">Daily lift club</a><a href="long-distance.html">Long distance</a><a href="airport-transfers.html">Airport transfers</a></div>
-        <div class="footer-col"><h4>Drivers</h4><a href="driver-register.html">Register to drive</a><a href="earn.html">How earnings work</a><a href="support.html#drivers">Driver guide</a></div>
-        <div class="footer-col"><h4>Company</h4><a href="about.html">About</a><a href="safety.html">Safety</a><a href="blog.html">Blog</a><a href="support.html">Support</a></div>
+      <div class="footer-top">
+        <div class="footer-brand">
+          <a href="index.html" class="logo logo--light">
+            <img src="assets/images/icon.png" alt="A2B Lift" class="logo-img" />
+            <span class="logo-text">A2B<strong>Lift</strong></span>
+          </a>
+          <p>Premium rides and long-distance travel across South Africa.</p>
+          <div class="social-row">
+            <a href="#" class="social-btn" aria-label="Facebook">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
+            </a>
+            <a href="#" class="social-btn" aria-label="Instagram">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+            </a>
+            <a href="#" class="social-btn" aria-label="X / Twitter">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+            </a>
+            <a href="#" class="social-btn" aria-label="TikTok">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 0 0-.79-.05 6.34 6.34 0 0 0-6.34 6.34 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.69a8.2 8.2 0 0 0 4.78 1.53V6.78a4.85 4.85 0 0 1-1.01-.09z"/></svg>
+            </a>
+          </div>
+        </div>
+        <div class="footer-col">
+          <h4>Passengers</h4>
+          <a href="rides.html">Book a ride</a>
+          <a href="lift-club.html">Daily lift club</a>
+          <a href="long-distance.html">Long distance</a>
+          <a href="airport-transfers.html">Airport transfers</a>
+          <a href="support.html">Help &amp; support</a>
+        </div>
+        <div class="footer-col">
+          <h4>Drivers</h4>
+          <a href="driver-register.html">Register to drive</a>
+          <a href="earn.html">How earnings work</a>
+          <a href="referral.html">Referral programme</a>
+          <a href="support.html#drivers">Driver guide</a>
+        </div>
+        <div class="footer-col">
+          <h4>Company</h4>
+          <a href="about.html">About us</a>
+          <a href="safety.html">Safety</a>
+          <a href="blog.html">Blog</a>
+          <a href="support.html">Support</a>
+          <a href="support.html#privacy">Privacy policy</a>
+          <a href="support.html#terms">Terms &amp; conditions</a>
+        </div>
       </div>
-      <div class="footer-bottom"><p>&copy; 2026 A2B Lift. All rights reserved.</p></div>
+      <div class="footer-bottom">
+        <p>&copy; 2026 A2B Lift. All rights reserved.</p>
+        <div class="footer-legal">
+          <a href="support.html#privacy">Privacy</a>
+          <a href="support.html#terms">Terms</a>
+          <a href="support.html">Cookies</a>
+        </div>
+      </div>
     </div>
   </footer>
 
