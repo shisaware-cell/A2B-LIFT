@@ -130,6 +130,9 @@ export interface IStorage {
   // Daily Lift Club
   searchLiftClubRoutes(filters?: { from?: string; to?: string }): Promise<any[]>;
   getLiftClubRoute(id: string): Promise<any | undefined>;
+  getLiftClubRouteByChauffeurId(chauffeurId: string): Promise<any | undefined>;
+  upsertLiftClubRoute(data: any): Promise<any>;
+  updateLiftClubRouteStatus(chauffeurId: string, status: string): Promise<any | undefined>;
   createLiftClubBooking(data: any): Promise<LiftClubBooking>;
   confirmLiftClubBookingWithSeat(data: any): Promise<LiftClubBooking>;
   getLiftClubBookingsByUser(userId: string): Promise<any[]>;
@@ -633,6 +636,59 @@ export class DatabaseStorage implements IStorage {
 
   async getLiftClubRoute(id: string): Promise<any | undefined> {
     const [route] = await db.select().from(liftClubRoutes).where(eq(liftClubRoutes.id, id));
+    return route ? this.enrichLiftClubRoute(route) : undefined;
+  }
+
+  async getLiftClubRouteByChauffeurId(chauffeurId: string): Promise<any | undefined> {
+    const [route] = await db
+      .select()
+      .from(liftClubRoutes)
+      .where(eq(liftClubRoutes.chauffeurId, chauffeurId))
+      .orderBy(desc(liftClubRoutes.updatedAt));
+    return route ? this.enrichLiftClubRoute(route) : undefined;
+  }
+
+  async upsertLiftClubRoute(data: any): Promise<any> {
+    const [existing] = await db
+      .select()
+      .from(liftClubRoutes)
+      .where(eq(liftClubRoutes.chauffeurId, data.chauffeurId))
+      .orderBy(desc(liftClubRoutes.updatedAt));
+
+    if (existing) {
+      const [route] = await db
+        .update(liftClubRoutes)
+        .set({
+          vehicleId: data.vehicleId,
+          pickupArea: data.pickupArea,
+          destinationArea: data.destinationArea,
+          pickupLat: data.pickupLat ?? null,
+          pickupLng: data.pickupLng ?? null,
+          destinationLat: data.destinationLat ?? null,
+          destinationLng: data.destinationLng ?? null,
+          departureWindow: data.departureWindow,
+          weeklyPrice: data.weeklyPrice,
+          monthlyPrice: data.monthlyPrice,
+          totalSeats: data.totalSeats,
+          bookedSeats: sql`LEAST(${liftClubRoutes.bookedSeats}, ${Number(data.totalSeats)})` as any,
+          status: data.status || "active",
+          updatedAt: new Date(),
+        } as any)
+        .where(eq(liftClubRoutes.id, existing.id))
+        .returning();
+      return this.enrichLiftClubRoute(route);
+    }
+
+    const [route] = await db.insert(liftClubRoutes).values(data).returning();
+    return this.enrichLiftClubRoute(route);
+  }
+
+  async updateLiftClubRouteStatus(chauffeurId: string, status: string): Promise<any | undefined> {
+    const [route] = await db
+      .update(liftClubRoutes)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(liftClubRoutes.chauffeurId, chauffeurId))
+      .returning();
     return route ? this.enrichLiftClubRoute(route) : undefined;
   }
 

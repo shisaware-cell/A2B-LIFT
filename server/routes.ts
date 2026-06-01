@@ -4068,6 +4068,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     };
   }
 
+  async function getApprovedLiftClubVehicleForChauffeur(userId: string, chauffeur: any) {
+    const activeVehicle = chauffeur.activeVehicleId
+      ? await storage.getVehicle(chauffeur.activeVehicleId).catch(() => undefined)
+      : undefined;
+    if (
+      activeVehicle &&
+      activeVehicle.status === "approved" &&
+      Number(activeVehicle.vehicleYear || 0) >= 2015
+    ) {
+      return activeVehicle;
+    }
+
+    const profile = await ensureDriverOperatorForChauffeur(userId);
+    if (!profile) return null;
+    const ownedVehicles = await storage.getVehiclesByOwnerOperator(profile.id).catch(() => []);
+    const assignments = profile.type === "driver"
+      ? await storage.getVehicleAssignments({ driverOperatorProfileId: profile.id, status: "active" }).catch(() => [])
+      : [];
+    const assignedVehicles = await Promise.all(
+      assignments.map((assignment: any) => storage.getVehicle(assignment.vehicleId).catch(() => undefined)),
+    );
+    return [...ownedVehicles, ...assignedVehicles.filter(Boolean)].find((vehicle: any) =>
+      vehicle.status === "approved" &&
+      Number(vehicle.vehicleYear || 0) >= 2015
+    ) || null;
+  }
+
   // ─── Daily Lift Club: public search + paid seat bookings ─────────────────
   app.get("/api/lift-club/routes", async (req: Request, res: Response) => {
     try {
@@ -4078,6 +4105,91 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json(routes);
     } catch (error: any) {
       return res.status(500).json({ message: error.message || "Unable to load lift club routes" });
+    }
+  });
+
+  app.get("/api/lift-club/my-route", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const chauffeur = await storage.getChauffeurByUserId(req.auth!.sub);
+      if (!chauffeur) return res.status(404).json({ message: "Chauffeur profile not found" });
+      const route = await storage.getLiftClubRouteByChauffeurId(chauffeur.id);
+      const vehicle = await getApprovedLiftClubVehicleForChauffeur(req.auth!.sub, chauffeur);
+      return res.json({
+        route: route || null,
+        canPublish: Boolean(chauffeur.isApproved && vehicle),
+        isApproved: Boolean(chauffeur.isApproved),
+        vehicle: vehicle || null,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || "Unable to load lift club route" });
+    }
+  });
+
+  app.post("/api/lift-club/my-route", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const chauffeur = await storage.getChauffeurByUserId(req.auth!.sub);
+      if (!chauffeur) return res.status(404).json({ message: "Chauffeur profile not found" });
+      if (!chauffeur.isApproved) return res.status(403).json({ message: "Your driver profile must be approved before publishing a lift club route." });
+
+      const available = req.body?.available !== false;
+      if (!available) {
+        const route = await storage.updateLiftClubRouteStatus(chauffeur.id, "inactive");
+        return res.json({ success: true, route: route || null, available: false });
+      }
+
+      const vehicle = await getApprovedLiftClubVehicleForChauffeur(req.auth!.sub, chauffeur);
+      if (!vehicle) {
+        return res.status(403).json({ message: "An approved vehicle from 2015 onwards is required before publishing a lift club route." });
+      }
+
+      const pickupArea = String(req.body?.pickupArea || "").trim();
+      const destinationArea = String(req.body?.destinationArea || "").trim();
+      const departureWindow = String(req.body?.departureWindow || "Weekday mornings").trim();
+      const weeklyPrice = Number(req.body?.weeklyPrice);
+      const monthlyPrice = Number(req.body?.monthlyPrice);
+      const requestedSeats = Math.floor(Number(req.body?.totalSeats) || 0);
+      const vehicleCapacity = Math.max(1, Number(vehicle.passengerCapacity || chauffeur.passengerCapacity || 1));
+      const totalSeats = Math.max(1, Math.min(vehicleCapacity, requestedSeats || vehicleCapacity));
+
+      if (!pickupArea || !destinationArea) {
+        return res.status(400).json({ message: "Pickup area and workplace are required." });
+      }
+      if (pickupArea.toLowerCase() === destinationArea.toLowerCase()) {
+        return res.status(400).json({ message: "Pickup area and workplace must be different." });
+      }
+      if (!Number.isFinite(weeklyPrice) || weeklyPrice <= 0 || !Number.isFinite(monthlyPrice) || monthlyPrice <= 0) {
+        return res.status(400).json({ message: "Weekly and monthly prices must be greater than zero." });
+      }
+
+      const existingRoute = await storage.getLiftClubRouteByChauffeurId(chauffeur.id);
+      const hasBookedSeats = Number(existingRoute?.bookedSeats || 0) > 0;
+      const routeChanged = existingRoute && (
+        String(existingRoute.pickupArea || "").trim().toLowerCase() !== pickupArea.toLowerCase() ||
+        String(existingRoute.destinationArea || "").trim().toLowerCase() !== destinationArea.toLowerCase()
+      );
+      if (hasBookedSeats && routeChanged) {
+        return res.status(409).json({ message: "This lift club already has booked riders. Turn it off or contact support before changing the route areas." });
+      }
+
+      const route = await storage.upsertLiftClubRoute({
+        chauffeurId: chauffeur.id,
+        vehicleId: vehicle.id,
+        pickupArea,
+        destinationArea,
+        pickupLat: Number.isFinite(Number(req.body?.pickupLat)) ? Number(req.body.pickupLat) : null,
+        pickupLng: Number.isFinite(Number(req.body?.pickupLng)) ? Number(req.body.pickupLng) : null,
+        destinationLat: Number.isFinite(Number(req.body?.destinationLat)) ? Number(req.body.destinationLat) : null,
+        destinationLng: Number.isFinite(Number(req.body?.destinationLng)) ? Number(req.body.destinationLng) : null,
+        departureWindow,
+        weeklyPrice,
+        monthlyPrice,
+        totalSeats,
+        status: "active",
+      });
+
+      return res.json({ success: true, route, available: true });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || "Unable to save lift club route" });
     }
   });
 

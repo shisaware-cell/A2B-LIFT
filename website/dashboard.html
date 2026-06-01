@@ -245,8 +245,23 @@
         </div>
         <div class="availability-card" style="margin-top:24px;">
           <h3>Want to run a daily lift club?</h3>
-          <p style="font-size:14px;color:var(--grey-500);line-height:1.7;margin-bottom:18px;">Drivers use the existing A2B registration, document upload, vehicle approval, and admin vetting flow before routes can be listed publicly.</p>
-          <a href="driver-register.html" class="btn btn-primary btn-sm">Register through driver approval</a>
+          <p style="font-size:14px;color:var(--grey-500);line-height:1.7;margin-bottom:18px;">Registration and admin vetting happen first. Once your driver profile and 2015+ vehicle are approved, publish your weekday lift club route here.</p>
+          <div class="toggle-row">
+            <div><div style="font-weight:600;font-size:15px;">Available for Daily Lift Club</div><div id="lcAvailabilityHint" style="font-size:13px;color:var(--grey-400)">Approved drivers can publish weekly and monthly commute seats.</div></div>
+            <div class="toggle-switch" id="lcAvailToggle" onclick="toggleLiftClubAvailability()"></div>
+          </div>
+          <div id="lcRouteForm" style="display:none;">
+            <div class="ld-form-grid">
+              <div><label>Pickup area</label><input type="text" id="lcAvFrom" placeholder="e.g. Randburg" /></div>
+              <div><label>Workplace</label><input type="text" id="lcAvTo" placeholder="e.g. Sandton" /></div>
+              <div><label>Departure window</label><input type="text" id="lcAvWindow" placeholder="e.g. 06:30 - 07:30" /></div>
+              <div><label>Weekly pass (R)</label><input type="number" id="lcAvWeekly" placeholder="e.g. 450" min="1" /></div>
+              <div><label>Monthly pass (R)</label><input type="number" id="lcAvMonthly" placeholder="e.g. 1800" min="1" /></div>
+              <div><label>Seats available</label><input type="number" id="lcAvSeats" placeholder="e.g. 4" min="1" max="8" /></div>
+            </div>
+            <button class="btn btn-primary" style="margin-top:20px;" onclick="saveLiftClubAvailability()">Save lift club route</button>
+          </div>
+          <div id="lcRouteStatus" style="font-size:13px;color:var(--grey-500);line-height:1.7;margin-top:12px;"></div>
         </div>
       </div>
 
@@ -312,6 +327,7 @@
     const API = 'https://api.a2blift.com';
     let currentUser = null;
     let availabilityOn = false;
+    let liftClubAvailabilityOn = false;
 
     function attachBackendAutocomplete(inputId, { cityOnly = false } = {}) {
       if (window.A2BAddressAutocomplete) {
@@ -379,7 +395,7 @@
     }
 
     function initDashboardAddressAutosuggest() {
-      const fields = ['ovFrom', 'ovTo', 'ldAvFrom', 'ldAvTo', 'ldTabFrom', 'ldTabTo', 'lcDashFrom', 'lcDashTo'];
+      const fields = ['ovFrom', 'ovTo', 'ldAvFrom', 'ldAvTo', 'ldTabFrom', 'ldTabTo', 'lcDashFrom', 'lcDashTo', 'lcAvFrom', 'lcAvTo'];
       fields.forEach((id) => attachBackendAutocomplete(id, { cityOnly: true }));
     }
 
@@ -584,6 +600,48 @@
       } catch(e) { console.error(e); }
     }
 
+    async function toggleLiftClubAvailability() {
+      liftClubAvailabilityOn = !liftClubAvailabilityOn;
+      document.getElementById('lcAvailToggle').classList.toggle('on', liftClubAvailabilityOn);
+      document.getElementById('lcRouteForm').style.display = liftClubAvailabilityOn ? 'block' : 'none';
+      if (!liftClubAvailabilityOn) await saveLiftClubAvailabilityState(false, {});
+    }
+
+    async function saveLiftClubAvailability() {
+      const pickupArea = document.getElementById('lcAvFrom').value.trim();
+      const destinationArea = document.getElementById('lcAvTo').value.trim();
+      const departureWindow = document.getElementById('lcAvWindow').value.trim() || 'Weekday mornings';
+      const weeklyPrice = Number(document.getElementById('lcAvWeekly').value);
+      const monthlyPrice = Number(document.getElementById('lcAvMonthly').value);
+      const totalSeats = Number(document.getElementById('lcAvSeats').value) || 1;
+      if (!pickupArea || !destinationArea) { showNotification('Please fill in pickup area and workplace.', 'error'); return; }
+      if (!weeklyPrice || !monthlyPrice) { showNotification('Please add weekly and monthly prices.', 'error'); return; }
+      await saveLiftClubAvailabilityState(true, { pickupArea, destinationArea, departureWindow, weeklyPrice, monthlyPrice, totalSeats });
+    }
+
+    async function saveLiftClubAvailabilityState(available, data) {
+      const token = localStorage.getItem('a2b_token');
+      try {
+        const res = await fetch(`${API}/api/lift-club/my-route`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ available, ...data }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(payload.message || 'Unable to save lift club route.');
+        liftClubAvailabilityOn = available;
+        document.getElementById('lcAvailToggle').classList.toggle('on', available);
+        document.getElementById('lcRouteForm').style.display = available ? 'block' : 'none';
+        document.getElementById('lcRouteStatus').textContent = available
+          ? 'Your Daily Lift Club route is live and searchable after admin-approved vehicle checks.'
+          : 'Your Daily Lift Club route is turned off.';
+        showNotification(available ? 'Daily Lift Club route is live!' : 'Daily Lift Club route turned off.', 'success');
+      } catch(e) {
+        showNotification(e?.message || 'Unable to save lift club route.', 'error');
+        await loadLiftClubAvailability();
+      }
+    }
+
     function renderTripsTable(trips, limit) {
       const shown = limit ? trips.slice(0, limit) : trips;
       if (!shown.length) return '<div class="empty-state"><p>No trips yet</p></div>';
@@ -634,6 +692,7 @@
         document.getElementById('driverSep').style.display = 'block';
         document.getElementById('nav-availability').style.display = 'flex';
         loadDriverAvailability();
+        loadLiftClubAvailability();
       }
       await loadTrips(user);
       await loadWallet();
@@ -719,6 +778,38 @@
       } catch(e) {
         el.innerHTML = '<div class="empty-state"><p>Unable to load lift club bookings.</p></div>';
       }
+    }
+
+    async function loadLiftClubAvailability() {
+      const token = localStorage.getItem('a2b_token');
+      if (!token) return;
+      try {
+        const res = await fetch(`${API}/api/lift-club/my-route`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) return;
+        const data = await res.json();
+        const route = data.route || null;
+        liftClubAvailabilityOn = route?.status === 'active';
+        document.getElementById('lcAvailToggle').classList.toggle('on', liftClubAvailabilityOn);
+        document.getElementById('lcRouteForm').style.display = liftClubAvailabilityOn ? 'block' : 'none';
+        document.getElementById('lcAvailabilityHint').textContent = data.canPublish
+          ? 'Publish or update your weekly and monthly commute seats.'
+          : data.isApproved
+            ? 'An approved 2015+ vehicle is required before this can go live.'
+            : 'Your driver profile must be approved before this can go live.';
+        document.getElementById('lcRouteStatus').textContent = route
+          ? `${route.pickupArea || 'Pickup'} to ${route.destinationArea || 'Workplace'} · ${route.bookedSeats || 0}/${route.totalSeats || 0} booked · ${route.status}`
+          : 'No Daily Lift Club route published yet.';
+        if (route) {
+          document.getElementById('lcAvFrom').value = route.pickupArea || '';
+          document.getElementById('lcAvTo').value = route.destinationArea || '';
+          document.getElementById('lcAvWindow').value = route.departureWindow || '';
+          document.getElementById('lcAvWeekly').value = route.weeklyPrice || '';
+          document.getElementById('lcAvMonthly').value = route.monthlyPrice || '';
+          document.getElementById('lcAvSeats').value = route.totalSeats || '';
+        } else if (data.vehicle?.passengerCapacity) {
+          document.getElementById('lcAvSeats').value = data.vehicle.passengerCapacity;
+        }
+      } catch(e) {}
     }
 
     async function loadDriverAvailability() {

@@ -287,6 +287,7 @@
     let liftDirectionsService = null;
     let liftDirectionsRenderer = null;
     let liftMarkers = [];
+    let liftMapRenderToken = 0;
 
     function safeText(value) {
       return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
@@ -338,12 +339,21 @@
         liftRoutes = Array.isArray(data) ? data : data.routes || [];
         renderLiftResults();
         renderLiftMap();
+        scrollLiftResultsIntoView();
       } catch (error) {
         liftRoutes = [];
         resultsEl.innerHTML = '<div class="lift-card"><div class="lift-card-title">Unable to load lift club cars</div><div class="lift-card-meta">Please try again shortly, or contact support if this continues.</div></div>';
         setLiftStatus('Routes unavailable', 'The website could not reach the lift club service right now.');
         renderLiftMap();
+        scrollLiftResultsIntoView();
       }
+    }
+
+    function scrollLiftResultsIntoView() {
+      const target = document.querySelector('.lift-results-layout');
+      if (!target) return;
+      const top = target.getBoundingClientRect().top + window.pageYOffset - 96;
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
     }
 
     function renderLiftResults() {
@@ -453,12 +463,28 @@
       liftMarkers = [];
     }
 
-    function renderLiftMap() {
+    function geocodeLiftPlace(place) {
+      const query = String(place || '').trim();
+      if (!query || !liftGeocoder) return Promise.resolve(null);
+      return new Promise((resolve) => {
+        liftGeocoder.geocode({ address: `${query}, South Africa` }, (results, status) => {
+          if (status === 'OK' && results?.[0]?.geometry?.location) {
+            const loc = results[0].geometry.location;
+            resolve({ lat: loc.lat(), lng: loc.lng() });
+          } else {
+            resolve(null);
+          }
+        });
+      });
+    }
+
+    async function renderLiftMap() {
       if (!liftMap || !window.google?.maps) {
         renderLiftMapFallback();
         return;
       }
 
+      const renderToken = ++liftMapRenderToken;
       clearLiftMarkers();
       liftDirectionsRenderer?.setDirections({ routes: [] });
 
@@ -467,9 +493,19 @@
       const bounds = new google.maps.LatLngBounds();
       let hasBounds = false;
 
-      liftRoutes.forEach((route, index) => {
+      const routePoints = await Promise.all(liftRoutes.slice(0, 12).map(async (route, index) => {
         const pickup = liftLatLng(route, 'pickup');
         const destination = liftLatLng(route, 'destination');
+        return {
+          route,
+          index,
+          pickup: pickup || await geocodeLiftPlace(route.pickupArea),
+          destination: destination || await geocodeLiftPlace(route.destinationArea),
+        };
+      }));
+      if (renderToken !== liftMapRenderToken) return;
+
+      routePoints.forEach(({ route, index, pickup, destination }) => {
         const position = pickup || destination;
         if (!position) return;
         const marker = new google.maps.Marker({
@@ -488,6 +524,7 @@
         });
         liftMarkers.push(marker);
         bounds.extend(position);
+        if (destination) bounds.extend(destination);
         hasBounds = true;
       });
 
@@ -499,10 +536,13 @@
         }, (response, status) => {
           if (status === 'OK' && response.routes.length) {
             liftDirectionsRenderer.setDirections(response);
+            const routeBounds = response.routes[0]?.bounds;
+            if (routeBounds) liftMap.fitBounds(routeBounds, 80);
           } else if (hasBounds) {
             liftMap.fitBounds(bounds, 80);
           }
         });
+        if (hasBounds) liftMap.fitBounds(bounds, 80);
         return;
       }
 
