@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Daily Lift Club — A2B Lift</title>
+  <meta name="description" content="Find verified weekday lift club cars to work. Search daily commute seats, compare availability, and book weekly or monthly passes with A2B Lift." />
+  <link rel="icon" type="image/png" href="assets/images/favicon.png?v=20260505b" />
+  <link rel="shortcut icon" href="assets/images/favicon.png?v=20260505b" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:2000; align-items:center; justify-content:center; padding:16px; }
+    .modal-overlay.open { display:flex; }
+    .modal-box { background:var(--white); border-radius:var(--radius-lg); padding:32px; width:100%; max-width:460px; box-shadow:var(--shadow-lg); position:relative; }
+    .modal-box h3 { font-size:22px; font-weight:800; letter-spacing:-.02em; margin-bottom:6px; }
+    .modal-box p { font-size:14px; color:var(--grey-600); line-height:1.7; }
+    .modal-close { position:absolute; top:14px; right:14px; width:34px; height:34px; border-radius:50%; background:var(--grey-100); color:var(--grey-600); font-size:18px; display:flex; align-items:center; justify-content:center; }
+    .modal-close:hover { background:var(--grey-200); }
+    .lift-note { margin-top:14px; font-size:12px; color:var(--grey-500); line-height:1.6; }
+    .lift-driver-cta { display:grid; grid-template-columns:1fr auto; gap:20px; align-items:center; background:var(--black); color:var(--white); border-radius:var(--radius-lg); padding:30px; margin-top:36px; }
+    .lift-driver-cta p { color:rgba(255,255,255,.62); margin-top:6px; max-width:660px; }
+    @media(max-width:720px){ .lift-driver-cta { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="index.html" class="logo">
+        <img src="assets/images/icon.png" alt="A2B Lift" class="logo-img" />
+        <span class="logo-text">A2B<strong>Lift</strong></span>
+      </a>
+      <nav class="nav-links" id="navLinks">
+        <a href="rides.html">Rides</a>
+        <a href="long-distance.html">Long Distance</a>
+        <a href="lift-club.html" class="active">Daily Lift Club</a>
+        <a href="earn.html">Earn</a>
+        <a href="safety.html">Safety</a>
+        <a href="blog.html">Blog</a>
+      </nav>
+      <div class="nav-actions">
+        <a href="login.html" class="btn btn-ghost btn-sm">Log in</a>
+        <a href="driver-register.html" class="btn btn-primary btn-sm">Become a driver</a>
+      </div>
+      <button class="hamburger" id="hamburger" aria-label="Toggle menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <div class="mobile-nav" id="mobileNav">
+    <a href="rides.html">Rides</a>
+    <a href="long-distance.html">Long Distance</a>
+    <a href="lift-club.html" class="active">Daily Lift Club</a>
+    <a href="earn.html">Earn</a>
+    <a href="safety.html">Safety</a>
+    <a href="blog.html">Blog</a>
+    <div class="mobile-cta">
+      <a href="login.html" class="btn btn-ghost">Log in</a>
+      <a href="driver-register.html" class="btn btn-primary">Become a driver</a>
+    </div>
+  </div>
+
+  <section class="page-hero">
+    <div class="container">
+      <p class="label">Daily Lift Club</p>
+      <h1 class="page-hero-title">Find a verified lift club to work.</h1>
+      <p class="page-hero-sub">Search approved A2B drivers with weekday seats to business hubs. Weekly and monthly passes exclude weekends.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <span class="lift-pill lift-pill--dark">Verified drivers</span>
+        <span class="lift-pill lift-pill--dark">2015+ vehicles only</span>
+        <span class="lift-pill lift-pill--dark">Paystack booking</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--grey" style="padding-top:48px;">
+    <div class="container">
+      <div class="lift-search-bar" style="margin-top:-96px;">
+        <div>
+          <label for="liftFrom">From</label>
+          <input id="liftFrom" type="text" placeholder="e.g. Randburg" />
+        </div>
+        <div>
+          <label for="liftTo">Workplace</label>
+          <input id="liftTo" type="text" placeholder="e.g. Sandton" />
+        </div>
+        <div>
+          <label for="liftPass">Pass</label>
+          <select id="liftPass">
+            <option value="weekly">Weekly, 5 weekdays</option>
+            <option value="monthly">Monthly weekdays</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" style="border-radius:var(--radius-sm);justify-content:center;" onclick="searchLiftClub()">Search cars</button>
+      </div>
+
+      <div class="lift-results-layout">
+        <div>
+          <div id="liftStatus" class="lift-status">
+            <strong>Search verified routes</strong>
+            <span>Enter your pickup area and workplace to find approved commute cars. Seats are confirmed only after Paystack payment succeeds.</span>
+          </div>
+          <div id="liftResults" class="lift-results-list" style="margin-top:18px;"></div>
+        </div>
+        <div class="lift-map-shell">
+          <div id="liftMap" class="lift-map-fallback"></div>
+        </div>
+      </div>
+
+      <div class="lift-driver-cta">
+        <div>
+          <h2 style="font-size:24px;font-weight:800;letter-spacing:-.02em;">Have a car and want to run a lift club?</h2>
+          <p>Register through the existing A2B driver flow. We verify the driver, documents, and vehicle through admin before any commute route can appear publicly.</p>
+        </div>
+        <a href="driver-register.html" class="btn btn-white">Register to drive</a>
+      </div>
+    </div>
+  </section>
+
+  <div class="modal-overlay" id="liftBookModal">
+    <div class="modal-box">
+      <button class="modal-close" onclick="closeLiftBooking()">×</button>
+      <h3 id="liftModalTitle">Book lift club seat</h3>
+      <p id="liftModalSub">Choose your pass and pay securely with Paystack.</p>
+      <div class="lift-pass-toggle">
+        <button class="lift-pass-option active" id="weeklyPassBtn" onclick="selectLiftPass('weekly')"><strong>Weekly</strong><span>5 weekdays</span></button>
+        <button class="lift-pass-option" id="monthlyPassBtn" onclick="selectLiftPass('monthly')"><strong>Monthly</strong><span>Weekdays only</span></button>
+      </div>
+      <button class="btn btn-primary" id="liftPayBtn" style="width:100%;justify-content:center;" onclick="payForLiftClub()">Pay with Paystack</button>
+      <div class="lift-note">Your seat is reserved only after payment is verified. If the car becomes full before confirmation, A2B support will assist with another car or refund.</div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand"><a href="index.html" class="logo logo--light"><img src="assets/images/icon.png" alt="A2B Lift" class="logo-img" /><span class="logo-text">A2B<strong>Lift</strong></span></a><p>Premium rides and long-distance travel across South Africa.</p></div>
+        <div class="footer-col"><h4>Passengers</h4><a href="rides.html">Book a ride</a><a href="lift-club.html">Daily lift club</a><a href="long-distance.html">Long distance</a><a href="airport-transfers.html">Airport transfers</a></div>
+        <div class="footer-col"><h4>Drivers</h4><a href="driver-register.html">Register to drive</a><a href="earn.html">How earnings work</a><a href="support.html#drivers">Driver guide</a></div>
+        <div class="footer-col"><h4>Company</h4><a href="about.html">About</a><a href="safety.html">Safety</a><a href="blog.html">Blog</a><a href="support.html">Support</a></div>
+      </div>
+      <div class="footer-bottom"><p>&copy; 2026 A2B Lift. All rights reserved.</p></div>
+    </div>
+  </footer>
+
+  <script src="main.js"></script>
+  <script src="https://js.paystack.co/v1/inline.js"></script>
+  <script>
+    const API = 'https://api.a2blift.com';
+    let liftRoutes = [];
+    let selectedRoute = null;
+    let selectedPass = 'weekly';
+
+    function safeText(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
+    }
+
+    function remainingSeats(route) {
+      return Math.max(0, Number(route.totalSeats || 0) - Number(route.bookedSeats || 0));
+    }
+
+    function setLiftStatus(title, message) {
+      document.getElementById('liftStatus').innerHTML = `<strong>${safeText(title)}</strong><span>${safeText(message)}</span>`;
+    }
+
+    async function loadLiftClubConfig() {
+      try {
+        const res = await fetch(`${API}/api/config`);
+        if (res.ok) {
+          const cfg = await res.json();
+          window.PAYSTACK_PUBLIC_KEY = cfg.paystackPublicKey || '';
+        }
+      } catch (error) {}
+    }
+
+    function initLiftClubQuery() {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('from')) document.getElementById('liftFrom').value = params.get('from');
+      if (params.get('to')) document.getElementById('liftTo').value = params.get('to');
+      if (params.get('pass')) {
+        selectedPass = params.get('pass') === 'monthly' ? 'monthly' : 'weekly';
+        document.getElementById('liftPass').value = selectedPass;
+      }
+      if (params.get('from') || params.get('to')) searchLiftClub();
+      else renderLiftMapFallback();
+    }
+
+    async function searchLiftClub() {
+      const from = document.getElementById('liftFrom').value.trim();
+      const to = document.getElementById('liftTo').value.trim();
+      selectedPass = document.getElementById('liftPass').value === 'monthly' ? 'monthly' : 'weekly';
+      const resultsEl = document.getElementById('liftResults');
+      const params = new URLSearchParams();
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+      resultsEl.innerHTML = '<div class="lift-card"><div class="lift-card-title">Searching verified cars...</div><div class="lift-card-meta">Checking approved weekday routes.</div></div>';
+      setLiftStatus('Searching lift club routes', 'Only approved drivers with verified 2015+ vehicles are shown.');
+      try {
+        const res = await fetch(`${API}/api/lift-club/routes?${params.toString()}`);
+        const data = res.ok ? await res.json() : [];
+        liftRoutes = Array.isArray(data) ? data : data.routes || [];
+        renderLiftResults();
+        renderLiftMapFallback();
+      } catch (error) {
+        liftRoutes = [];
+        resultsEl.innerHTML = '<div class="lift-card"><div class="lift-card-title">Unable to load lift club cars</div><div class="lift-card-meta">Please try again shortly, or contact support if this continues.</div></div>';
+        setLiftStatus('Routes unavailable', 'The website could not reach the lift club service right now.');
+        renderLiftMapFallback();
+      }
+    }
+
+    function renderLiftResults() {
+      const el = document.getElementById('liftResults');
+      if (!liftRoutes.length) {
+        el.innerHTML = '<div class="lift-card"><div class="lift-card-title">No lift club cars found yet</div><div class="lift-card-meta">Try a nearby pickup area or workplace. New verified cars appear here after admin approval.</div></div>';
+        setLiftStatus('No matching cars yet', 'A2B will list only verified drivers and vehicles here.');
+        return;
+      }
+      const available = liftRoutes.filter((route) => remainingSeats(route) > 0).length;
+      setLiftStatus(`${liftRoutes.length} verified car${liftRoutes.length === 1 ? '' : 's'} found`, `${available} still accepting ${selectedPass} bookings.`);
+      el.innerHTML = liftRoutes.map(route => {
+        const seatsLeft = remainingSeats(route);
+        const full = seatsLeft <= 0;
+        const price = selectedPass === 'monthly' ? route.monthlyPrice : route.weeklyPrice;
+        const vehicle = `${route.vehicleModel || route.vehicleType || 'Vehicle'}${route.vehicleYear ? ' · ' + route.vehicleYear : ''}`;
+        return `<article class="lift-card ${full ? 'full' : ''}">
+          <div class="lift-card-top">
+            <div>
+              <div class="lift-card-title">${safeText(route.pickupArea || 'Pickup area')} to ${safeText(route.destinationArea || 'Workplace')}</div>
+              <div class="lift-card-meta">${safeText(route.driverName || 'Verified A2B driver')} · ${safeText(vehicle)}</div>
+            </div>
+            <span class="lift-pill ${full ? 'lift-pill--full' : 'lift-pill--open'}">${full ? 'Full' : seatsLeft + ' seats left'}</span>
+          </div>
+          <div class="lift-card-grid">
+            <div class="lift-card-stat"><span>Weekly</span><strong>R${Number(route.weeklyPrice || 0).toFixed(0)}</strong></div>
+            <div class="lift-card-stat"><span>Monthly</span><strong>R${Number(route.monthlyPrice || 0).toFixed(0)}</strong></div>
+            <div class="lift-card-stat"><span>Departure</span><strong>${safeText(route.departureWindow || 'Weekday mornings')}</strong></div>
+            <div class="lift-card-stat"><span>Capacity</span><strong>${Number(route.bookedSeats || 0)}/${Number(route.totalSeats || 0)} booked</strong></div>
+          </div>
+          <button class="btn btn-primary btn-sm" ${full ? 'disabled' : ''} onclick="openLiftBooking('${safeText(route.id)}')">${full ? 'Car full' : 'Book ' + selectedPass + ' pass · R' + Number(price || 0).toFixed(0)}</button>
+        </article>`;
+      }).join('');
+    }
+
+    function renderLiftMapFallback() {
+      const map = document.getElementById('liftMap');
+      const from = document.getElementById('liftFrom').value.trim() || 'Pickup area';
+      const to = document.getElementById('liftTo').value.trim() || 'Workplace';
+      const pins = liftRoutes.slice(0, 4).map((route) => `
+        <div class="lift-map-pin">
+          <strong>${safeText(route.pickupArea || from)} to ${safeText(route.destinationArea || to)}</strong>
+          <span>${remainingSeats(route) > 0 ? remainingSeats(route) + ' seats left' : 'Full'} · ${safeText(route.vehicleModel || 'Verified vehicle')}</span>
+        </div>
+      `).join('');
+      map.innerHTML = `
+        <div>
+          <span class="lift-pill">Map preview</span>
+          <h3 style="font-size:22px;font-weight:800;letter-spacing:-.02em;margin-top:12px;">${safeText(from)} to ${safeText(to)}</h3>
+          <p style="font-size:14px;color:var(--grey-600);line-height:1.7;margin-top:6px;">Matching routes will appear here with pickup and workplace points as the lift club network grows.</p>
+        </div>
+        <div style="display:grid;gap:10px;">${pins || '<div class="lift-map-pin"><strong>No pins yet</strong><span>Search a route to load verified cars.</span></div>'}</div>
+      `;
+    }
+
+    function openLiftBooking(routeId) {
+      selectedRoute = liftRoutes.find(route => String(route.id) === String(routeId));
+      if (!selectedRoute || remainingSeats(selectedRoute) <= 0) return;
+      document.getElementById('liftBookModal').classList.add('open');
+      updateLiftBookingModal();
+    }
+
+    function closeLiftBooking() {
+      document.getElementById('liftBookModal').classList.remove('open');
+    }
+
+    function selectLiftPass(passType) {
+      selectedPass = passType === 'monthly' ? 'monthly' : 'weekly';
+      document.getElementById('liftPass').value = selectedPass;
+      document.getElementById('weeklyPassBtn').classList.toggle('active', selectedPass === 'weekly');
+      document.getElementById('monthlyPassBtn').classList.toggle('active', selectedPass === 'monthly');
+      updateLiftBookingModal();
+      renderLiftResults();
+    }
+
+    function updateLiftBookingModal() {
+      if (!selectedRoute) return;
+      const amount = selectedPass === 'monthly' ? selectedRoute.monthlyPrice : selectedRoute.weeklyPrice;
+      document.getElementById('liftModalTitle').textContent = `${selectedRoute.pickupArea || 'Pickup'} to ${selectedRoute.destinationArea || 'Workplace'}`;
+      document.getElementById('liftModalSub').textContent = `${selectedRoute.driverName || 'Verified A2B driver'} · ${selectedPass} pass · R${Number(amount || 0).toFixed(0)}`;
+      document.getElementById('liftPayBtn').textContent = `Pay R${Number(amount || 0).toFixed(0)} with Paystack`;
+    }
+
+    async function payForLiftClub() {
+      const token = localStorage.getItem('a2b_token');
+      if (!selectedRoute) return;
+      if (!token) {
+        localStorage.setItem('a2b_pending_lift_club', JSON.stringify({ routeId: selectedRoute.id, passType: selectedPass }));
+        window.location.href = `login.html?next=${encodeURIComponent('lift-club.html')}`;
+        return;
+      }
+      if (typeof PaystackPop === 'undefined' || !window.PAYSTACK_PUBLIC_KEY) {
+        alert('Paystack is unavailable. Please try again shortly.');
+        return;
+      }
+      const user = JSON.parse(localStorage.getItem('a2b_user') || '{}');
+      const amount = selectedPass === 'monthly' ? selectedRoute.monthlyPrice : selectedRoute.weeklyPrice;
+      PaystackPop.setup({
+        key: window.PAYSTACK_PUBLIC_KEY,
+        email: user.email || user.username || 'user@a2blift.co.za',
+        amount: Math.round(Number(amount || 0) * 100),
+        currency: 'ZAR',
+        ref: `LIFTCLUB_${selectedRoute.id}_${Date.now()}`,
+        metadata: { routeId: selectedRoute.id, passType: selectedPass, userId: user.id },
+        callback: async function(response) {
+          try {
+            await confirmLiftClubBooking(response.reference);
+          } catch (error) {
+            alert(error?.message || 'Payment succeeded, but the booking could not be confirmed. Please contact support with your reference.');
+          }
+        },
+      }).openIframe();
+    }
+
+    async function confirmLiftClubBooking(reference) {
+      const token = localStorage.getItem('a2b_token');
+      const res = await fetch(`${API}/api/lift-club/bookings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ routeId: selectedRoute.id, passType: selectedPass, paystackReference: reference }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload.message || 'Unable to confirm lift club booking.');
+      closeLiftBooking();
+      alert('Lift club seat booked. You can view it in your dashboard.');
+      await searchLiftClub();
+    }
+
+    document.getElementById('liftBookModal').addEventListener('click', function(event) {
+      if (event.target === this) closeLiftBooking();
+    });
+
+    loadLiftClubConfig();
+    initLiftClubQuery();
+  </script>
+</body>
+</html>

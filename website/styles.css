@@ -229,6 +229,44 @@ ul, ol { list-style:none; }
 .store-btn img { width:150px; height:45px; max-width:100%; object-fit:contain; flex-shrink:0; }
 .store-btn--dark:hover { opacity:0.9; }
 
+/* ── DAILY LIFT CLUB ── */
+.lift-pill { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; background:var(--grey-100); color:var(--grey-600); font-size:12px; font-weight:700; }
+.lift-pill--dark { background:rgba(255,255,255,0.12); color:rgba(255,255,255,0.86); }
+.lift-pill--full { background:#fef2f2; color:#dc2626; }
+.lift-pill--open { background:#f0fdf4; color:#16a34a; }
+.lift-search-bar { background:var(--white); border-radius:var(--radius-lg); box-shadow:var(--shadow-lg); padding:24px; display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:12px; align-items:end; position:relative; z-index:10; }
+.lift-search-bar label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--grey-400); display:block; margin-bottom:6px; }
+.lift-search-bar input, .lift-search-bar select { width:100%; padding:12px 14px; border:1.5px solid var(--grey-200); border-radius:var(--radius-sm); font-size:15px; font-family:var(--font); color:var(--grey-900); outline:none; background:var(--white); }
+.lift-search-bar input:focus, .lift-search-bar select:focus { border-color:var(--black); }
+.lift-results-layout { display:grid; grid-template-columns:420px minmax(0,1fr); gap:24px; align-items:start; margin-top:32px; }
+.lift-results-list { display:flex; flex-direction:column; gap:12px; }
+.lift-card { background:var(--white); border:1.5px solid var(--grey-200); border-radius:var(--radius); padding:18px; transition:border-color var(--t), box-shadow var(--t); }
+.lift-card:hover { border-color:var(--black); box-shadow:var(--shadow); }
+.lift-card.full { opacity:.72; }
+.lift-card-top { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:12px; }
+.lift-card-title { font-size:16px; font-weight:800; line-height:1.25; }
+.lift-card-meta { color:var(--grey-600); font-size:13px; margin-top:4px; }
+.lift-card-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:14px 0; }
+.lift-card-stat { padding:10px 12px; border-radius:10px; background:var(--grey-50); border:1px solid var(--grey-200); }
+.lift-card-stat span { display:block; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--grey-400); margin-bottom:2px; }
+.lift-card-stat strong { display:block; font-size:15px; }
+.lift-map-shell { position:sticky; top:calc(var(--nav-h) + 16px); min-height:560px; border-radius:var(--radius); overflow:hidden; border:1.5px solid var(--grey-200); background:var(--grey-100); }
+.lift-map { width:100%; height:560px; }
+.lift-map-fallback { height:560px; padding:24px; display:flex; flex-direction:column; justify-content:space-between; background:linear-gradient(135deg,#f8f8f8,#ececec); }
+.lift-map-pin { background:var(--white); border:1px solid var(--grey-200); border-radius:12px; padding:12px 14px; box-shadow:var(--shadow-sm); max-width:260px; }
+.lift-map-pin strong { display:block; font-size:14px; margin-bottom:4px; }
+.lift-map-pin span { display:block; font-size:12px; color:var(--grey-600); }
+.lift-pass-toggle { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:16px 0; }
+.lift-pass-option { border:1.5px solid var(--grey-200); border-radius:12px; padding:14px; text-align:left; cursor:pointer; background:var(--white); font-family:var(--font); }
+.lift-pass-option.active { border-color:var(--black); background:var(--grey-50); }
+.lift-pass-option strong, .lift-pass-option span { display:block; }
+.lift-pass-option span { color:var(--grey-500); font-size:12px; margin-top:2px; }
+.lift-status { margin-top:18px; padding:16px 18px; border-radius:var(--radius); border:1.5px solid var(--grey-200); background:var(--white); }
+.lift-status strong { display:block; font-size:14px; margin-bottom:4px; }
+.lift-status span { font-size:14px; color:var(--grey-600); line-height:1.6; }
+@media(max-width:900px){ .lift-search-bar { grid-template-columns:1fr 1fr; } .lift-results-layout { grid-template-columns:1fr; } .lift-map-shell { position:relative; top:auto; min-height:360px; } .lift-map, .lift-map-fallback { height:360px; } }
+@media(max-width:640px){ .lift-search-bar, .lift-card-grid { grid-template-columns:1fr; } }
+
 /* ── SERVICES GRID ── */
 .service-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
 .service-card {
