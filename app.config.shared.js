@@ -11,7 +11,7 @@ const defaultPascalProjectId = "eb3b8747-40b2-4aad-b118-e64339bfeea0";
 const defaultClientProjectId = "9932543b-f023-4dec-8213-5d0fe99ad749";
 const defaultClientSlug = "a2b-lift-client-eas-mFdHJz";
 
-const currentAndroidVersionCode = 91;
+const currentAndroidVersionCode = 92;
 function normalizeAssetPrefix(assetPrefix = ".") {
   return String(assetPrefix || ".").replace(/\/$/, "");
 }
