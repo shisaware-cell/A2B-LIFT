@@ -11,6 +11,8 @@ import {
   partnerProfiles,
   vehicles,
   vehicleAssignments,
+  liftClubRoutes,
+  liftClubBookings,
   documents,
   rideRatings,
   earnings,
@@ -36,6 +38,8 @@ import {
   type PartnerProfile,
   type Vehicle,
   type VehicleAssignment,
+  type LiftClubRoute,
+  type LiftClubBooking,
   type Document,
   type RideRating,
   type Earning,
@@ -122,6 +126,13 @@ export interface IStorage {
   }): Promise<VehicleAssignment[]>;
   createVehicleAssignment(data: any): Promise<VehicleAssignment>;
   updateVehicleAssignment(id: string, data: Partial<VehicleAssignment>): Promise<VehicleAssignment | undefined>;
+
+  // Daily Lift Club
+  searchLiftClubRoutes(filters?: { from?: string; to?: string }): Promise<any[]>;
+  getLiftClubRoute(id: string): Promise<any | undefined>;
+  createLiftClubBooking(data: any): Promise<LiftClubBooking>;
+  confirmLiftClubBookingWithSeat(data: any): Promise<LiftClubBooking>;
+  getLiftClubBookingsByUser(userId: string): Promise<any[]>;
 
   createDocument(data: any): Promise<Document>;
   getDocumentsByApplication(applicationId: string): Promise<Document[]>;
@@ -576,6 +587,101 @@ export class DatabaseStorage implements IStorage {
       .where(eq(vehicleAssignments.id, id))
       .returning();
     return assignment;
+  }
+
+  private async enrichLiftClubRoute(route: LiftClubRoute): Promise<any | undefined> {
+    const [chauffeur, vehicle] = await Promise.all([
+      this.getChauffeur(route.chauffeurId),
+      this.getVehicle(route.vehicleId),
+    ]);
+    if (!chauffeur || !vehicle) return undefined;
+    if (!chauffeur.isApproved) return undefined;
+    if (vehicle.status !== "approved") return undefined;
+    if (Number(vehicle.vehicleYear || 0) < 2015) return undefined;
+    const driver = chauffeur.userId ? await this.getUser(chauffeur.userId) : undefined;
+    return {
+      ...route,
+      driverName: driver?.name || "Verified A2B driver",
+      driverPhoto: chauffeur.profilePhoto || driver?.profilePhoto || null,
+      driverRating: driver?.rating || 5,
+      vehicleModel: `${vehicle.carMake || ""} ${vehicle.vehicleModel || ""}`.trim() || chauffeur.vehicleModel || vehicle.vehicleType,
+      vehicleType: vehicle.vehicleType,
+      vehicleYear: vehicle.vehicleYear,
+      vehicleColor: vehicle.carColor,
+      plateNumber: vehicle.plateNumber,
+      chauffeurUserId: chauffeur.userId,
+    };
+  }
+
+  async searchLiftClubRoutes(filters: { from?: string; to?: string } = {}): Promise<any[]> {
+    const normalizedFrom = String(filters.from || "").trim().toLowerCase();
+    const normalizedTo = String(filters.to || "").trim().toLowerCase();
+    const rows = await db
+      .select()
+      .from(liftClubRoutes)
+      .where(eq(liftClubRoutes.status, "active"))
+      .orderBy(desc(liftClubRoutes.createdAt));
+    const enriched = await Promise.all(rows.map((route) => this.enrichLiftClubRoute(route)));
+    return enriched
+      .filter(Boolean)
+      .filter((route: any) => {
+        const fromOk = !normalizedFrom || String(route.pickupArea || "").toLowerCase().includes(normalizedFrom);
+        const toOk = !normalizedTo || String(route.destinationArea || "").toLowerCase().includes(normalizedTo);
+        return fromOk && toOk;
+      });
+  }
+
+  async getLiftClubRoute(id: string): Promise<any | undefined> {
+    const [route] = await db.select().from(liftClubRoutes).where(eq(liftClubRoutes.id, id));
+    return route ? this.enrichLiftClubRoute(route) : undefined;
+  }
+
+  async createLiftClubBooking(data: any): Promise<LiftClubBooking> {
+    const [booking] = await db.insert(liftClubBookings).values(data).returning();
+    return booking;
+  }
+
+  async confirmLiftClubBookingWithSeat(data: any): Promise<LiftClubBooking> {
+    return db.transaction(async (tx) => {
+      const [updatedRoute] = await tx
+        .update(liftClubRoutes)
+        .set({
+          bookedSeats: sql`${liftClubRoutes.bookedSeats} + ${Number(data.seatCount || 1)}`,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(liftClubRoutes.id, data.routeId),
+          eq(liftClubRoutes.status, "active"),
+          sql`${liftClubRoutes.bookedSeats} + ${Number(data.seatCount || 1)} <= ${liftClubRoutes.totalSeats}`,
+        ))
+        .returning();
+      if (!updatedRoute) {
+        throw new Error("This lift club car is already full.");
+      }
+      const [booking] = await tx
+        .insert(liftClubBookings)
+        .values({
+          ...data,
+          paymentStatus: data.paymentStatus || "paid",
+          bookingStatus: data.bookingStatus || "confirmed",
+          confirmedAt: data.confirmedAt || new Date(),
+        })
+        .returning();
+      return booking;
+    });
+  }
+
+  async getLiftClubBookingsByUser(userId: string): Promise<any[]> {
+    const bookings = await db
+      .select()
+      .from(liftClubBookings)
+      .where(eq(liftClubBookings.riderId, userId))
+      .orderBy(desc(liftClubBookings.createdAt));
+    const routes = await Promise.all(bookings.map((booking) => this.getLiftClubRoute(booking.routeId).catch(() => undefined)));
+    return bookings.map((booking, index) => ({
+      ...booking,
+      route: routes[index] || null,
+    }));
   }
 
   async createDocument(data: any): Promise<Document> {

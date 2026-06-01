@@ -247,6 +247,54 @@ export const vehicleAssignments = pgTable("vehicle_assignments", {
   removedAt: timestamp("removed_at"),
 });
 
+export const liftClubRoutes = pgTable("lift_club_routes", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  chauffeurId: varchar("chauffeur_id")
+    .notNull()
+    .references(() => chauffeurs.id),
+  vehicleId: varchar("vehicle_id")
+    .notNull()
+    .references(() => vehicles.id),
+  pickupArea: text("pickup_area").notNull(),
+  destinationArea: text("destination_area").notNull(),
+  pickupLat: real("pickup_lat"),
+  pickupLng: real("pickup_lng"),
+  destinationLat: real("destination_lat"),
+  destinationLng: real("destination_lng"),
+  departureWindow: text("departure_window").notNull().default("Weekday mornings"),
+  weeklyPrice: real("weekly_price").notNull(),
+  monthlyPrice: real("monthly_price").notNull(),
+  totalSeats: integer("total_seats").notNull().default(1),
+  bookedSeats: integer("booked_seats").notNull().default(0),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const liftClubBookings = pgTable("lift_club_bookings", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  routeId: varchar("route_id")
+    .notNull()
+    .references(() => liftClubRoutes.id),
+  riderId: varchar("rider_id")
+    .notNull()
+    .references(() => users.id),
+  passType: text("pass_type").notNull(),
+  startDate: text("start_date").notNull(),
+  endDate: text("end_date").notNull(),
+  seatCount: integer("seat_count").notNull().default(1),
+  amount: real("amount").notNull(),
+  paymentStatus: text("payment_status").notNull().default("pending"),
+  bookingStatus: text("booking_status").notNull().default("pending"),
+  paystackReference: varchar("paystack_reference"),
+  createdAt: timestamp("created_at").defaultNow(),
+  confirmedAt: timestamp("confirmed_at"),
+});
+
 export const documents = pgTable("documents", {
   id: varchar("id")
     .primaryKey()
@@ -509,6 +557,8 @@ export type OperatorProfile = typeof operatorProfiles.$inferSelect;
 export type PartnerProfile = typeof partnerProfiles.$inferSelect;
 export type Vehicle = typeof vehicles.$inferSelect;
 export type VehicleAssignment = typeof vehicleAssignments.$inferSelect;
+export type LiftClubRoute = typeof liftClubRoutes.$inferSelect;
+export type LiftClubBooking = typeof liftClubBookings.$inferSelect;
 export type Document = typeof documents.$inferSelect;
 export type RideRating = typeof rideRatings.$inferSelect;
 export type Earning = typeof earnings.$inferSelect;

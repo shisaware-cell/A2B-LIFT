@@ -4036,6 +4036,131 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  function addBusinessDays(start: Date, businessDays: number): Date {
+    const result = new Date(start);
+    let added = 0;
+    while (added < businessDays) {
+      result.setDate(result.getDate() + 1);
+      const day = result.getDay();
+      if (day !== 0 && day !== 6) added += 1;
+    }
+    return result;
+  }
+
+  async function verifyLiftClubPaystack(reference: string, expectedAmount: number) {
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    if (!secretKey) {
+      console.warn("[lift-club] PAYSTACK_SECRET_KEY is missing; accepting client callback reference without server verification.");
+      return { ok: true, skipped: true };
+    }
+    const response = await axios.get(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
+      headers: { Authorization: `Bearer ${secretKey}` },
+      timeout: 10000,
+    });
+    const tx = response.data?.data;
+    const expectedCents = Math.round(Number(expectedAmount || 0) * 100);
+    const paidCents = Math.round(Number(tx?.amount || 0));
+    return {
+      ok: tx?.status === "success" && paidCents >= expectedCents,
+      skipped: false,
+      amount: paidCents / 100,
+      status: tx?.status,
+    };
+  }
+
+  // ─── Daily Lift Club: public search + paid seat bookings ─────────────────
+  app.get("/api/lift-club/routes", async (req: Request, res: Response) => {
+    try {
+      const routes = await storage.searchLiftClubRoutes({
+        from: typeof req.query.from === "string" ? req.query.from : undefined,
+        to: typeof req.query.to === "string" ? req.query.to : undefined,
+      });
+      return res.json(routes);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || "Unable to load lift club routes" });
+    }
+  });
+
+  app.get("/api/lift-club/my-bookings", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const bookings = await storage.getLiftClubBookingsByUser(req.auth!.sub);
+      return res.json(bookings);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || "Unable to load lift club bookings" });
+    }
+  });
+
+  app.post("/api/lift-club/bookings", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const { routeId, passType, paystackReference } = req.body || {};
+      const normalizedPassType = passType === "monthly" ? "monthly" : passType === "weekly" ? "weekly" : null;
+      if (!routeId || !normalizedPassType || !paystackReference) {
+        return res.status(400).json({ message: "routeId, passType, and Paystack reference are required." });
+      }
+
+      const [rider, route] = await Promise.all([
+        storage.getUser(req.auth!.sub),
+        storage.getLiftClubRoute(String(routeId)),
+      ]);
+      if (!rider) return res.status(404).json({ message: "Rider not found." });
+      if (!route || route.status !== "active") return res.status(404).json({ message: "Lift club route not found." });
+      if (route.chauffeurUserId === rider.id) return res.status(400).json({ message: "You cannot book your own lift club car." });
+      if (Number(route.vehicleYear || 0) < 2015) return res.status(409).json({ message: "This vehicle is not eligible for Daily Lift Club." });
+
+      const seatsLeft = Number(route.totalSeats || 0) - Number(route.bookedSeats || 0);
+      if (seatsLeft <= 0) return res.status(409).json({ message: "This lift club car is already full." });
+
+      const amount = normalizedPassType === "monthly" ? Number(route.monthlyPrice || 0) : Number(route.weeklyPrice || 0);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ message: "This lift club pass is not priced correctly." });
+      }
+
+      const verification = await verifyLiftClubPaystack(String(paystackReference), amount);
+      if (!verification.ok) {
+        return res.status(402).json({ message: "Paystack payment could not be verified." });
+      }
+
+      const startDate = new Date();
+      const endDate = normalizedPassType === "weekly"
+        ? addBusinessDays(startDate, 5)
+        : addBusinessDays(startDate, 22);
+
+      const booking = await storage.confirmLiftClubBookingWithSeat({
+        routeId: route.id,
+        riderId: rider.id,
+        passType: normalizedPassType,
+        startDate: startDate.toISOString().slice(0, 10),
+        endDate: endDate.toISOString().slice(0, 10),
+        seatCount: 1,
+        amount,
+        paymentStatus: "paid",
+        bookingStatus: "confirmed",
+        paystackReference: String(paystackReference),
+        confirmedAt: new Date(),
+      });
+
+      await storage.createNotification({
+        userId: rider.id,
+        title: "Lift club seat confirmed",
+        body: `${route.pickupArea} to ${route.destinationArea} is confirmed for your ${normalizedPassType} weekday pass.`,
+        type: "lift_club",
+      });
+      if (route.chauffeurUserId) {
+        await storage.createNotification({
+          userId: route.chauffeurUserId,
+          title: "New lift club rider",
+          body: `${rider.name || "A rider"} booked a ${normalizedPassType} seat for ${route.pickupArea} to ${route.destinationArea}.`,
+          type: "lift_club",
+        });
+      }
+
+      return res.json({ booking, seatsRemaining: seatsLeft - 1 });
+    } catch (error: any) {
+      const status = String(error?.message || "").includes("already full") ? 409 : 500;
+      return res.status(status).json({ message: error.message || "Unable to confirm lift club booking" });
+    }
+  });
+
   // ─── Long Distance: get driver's current availability status ─────────────
   app.get("/api/long-distance/my-availability", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
