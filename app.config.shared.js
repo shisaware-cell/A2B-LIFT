@@ -152,6 +152,7 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
             targetSdkVersion: 35,
             minSdkVersion: 24,
             ndkVersion: "27.1.12297006",
+            useLegacyPackaging: true,
           },
         },
       ],
