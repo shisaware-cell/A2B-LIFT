@@ -3454,7 +3454,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const chauffeur = await storage.getChauffeurByUserId(req.params.userId);
       if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
-      return res.json(chauffeur);
+      const application = await storage.getDriverApplicationByUserId(req.params.userId).catch(() => undefined);
+      return res.json({
+        ...chauffeur,
+        applicationStatus: application?.status || (chauffeur.isApproved ? "approved" : "pending"),
+        applicationNotes: application?.notes || null,
+        waitlistReason: application?.status === "waitlisted" ? application?.notes || null : null,
+      });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -3490,6 +3496,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         storage.getRatingsByChauffeur(req.params.id),
         storage.getEarningsByChauffeur(req.params.id).catch(() => []),
       ]);
+      const application = chauffeur.userId
+        ? await storage.getDriverApplicationByUserId(chauffeur.userId).catch(() => undefined)
+        : undefined;
       const computedRating =
         ratings.length > 0
           ? parseFloat((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1))
@@ -3510,7 +3519,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .filter((r: any) => r.status === "trip_completed" && r.paymentMethod === "cash" && r.completedAt && new Date(r.completedAt) >= todayStart)
         .reduce((s: number, r: any) => s + calculateChauffeurEarnings(r.price || 0).chauffeurEarnings, 0);
       const todayEarnings = Math.round(todayCardEarnings + todayCashFares);
-      return res.json({ ...chauffeur, computedRating, totalRatings: ratings.length, cardEarningsTotal, todayEarnings });
+      return res.json({
+        ...chauffeur,
+        computedRating,
+        totalRatings: ratings.length,
+        cardEarningsTotal,
+        todayEarnings,
+        applicationStatus: application?.status || (chauffeur.isApproved ? "approved" : "pending"),
+        applicationNotes: application?.notes || null,
+        waitlistReason: application?.status === "waitlisted" ? application?.notes || null : null,
+      });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -3715,6 +3733,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (app) {
             await storage.updateDriverApplication(app.id, {
               status: "approved",
+              notes: null,
               reviewedAt: new Date(),
               reviewerAdminId: req.auth!.sub,
             });
@@ -3769,6 +3788,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/chauffeurs/:id/waitlist", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
+    try {
+      const { reason } = req.body;
+      if (!reason?.trim()) return res.status(400).json({ message: "Waitlist reason is required" });
+      const chauffeur = await storage.getChauffeur(req.params.id);
+      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
+      await storage.updateChauffeur(req.params.id, { isApproved: false, isOnline: false });
+      if (chauffeur.userId) {
+        const app = await storage.getDriverApplicationByUserId(chauffeur.userId);
+        if (app) {
+          await storage.updateDriverApplication(app.id, {
+            status: "waitlisted",
+            notes: reason.trim(),
+            reviewedAt: new Date(),
+            reviewerAdminId: req.auth!.sub,
+          });
+        } else {
+          await storage.createDriverApplication({
+            userId: chauffeur.userId,
+            chauffeurId: chauffeur.id,
+            status: "waitlisted",
+            notes: reason.trim(),
+            reviewedAt: new Date(),
+            reviewerAdminId: req.auth!.sub,
+          } as any);
+        }
+        await notifyUserEvent({
+          userId: chauffeur.userId,
+          type: "waitlisted",
+          title: "Driver profile waitlisted",
+          body: `Your A2B driver profile has been waitlisted. Reason: ${reason.trim()}`,
+        });
+      }
+      return res.json({ success: true });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/chauffeurs/:id/reactivate", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
+    try {
+      const chauffeur = await storage.getChauffeur(req.params.id);
+      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
+      await storage.updateChauffeur(req.params.id, { isApproved: true, isOnline: false });
+      if (chauffeur.userId) {
+        const app = await storage.getDriverApplicationByUserId(chauffeur.userId);
+        if (app) {
+          await storage.updateDriverApplication(app.id, {
+            status: "approved",
+            notes: null,
+            reviewedAt: new Date(),
+            reviewerAdminId: req.auth!.sub,
+          });
+        }
+        await notifyUserEvent({
+          userId: chauffeur.userId,
+          type: "approval",
+          title: "Driver profile reactivated",
+          body: "Your A2B driver profile has been reactivated. You can go online after selecting an approved vehicle.",
+        });
+      }
+      return res.json({ success: true });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
   // Get documents for a specific chauffeur (admin)
   app.get("/api/chauffeurs/:id/documents", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
     try {
@@ -3787,6 +3873,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
       const nextOnline = !chauffeur.isOnline;
       if (nextOnline) {
+        const application = await storage.getDriverApplicationByUserId(chauffeur.userId).catch(() => undefined);
+        if (application?.status === "waitlisted") {
+          await storage.updateChauffeur(req.params.id, { isOnline: false });
+          return res.status(403).json({ message: application.notes || "Your driver profile is waitlisted. Please contact support before going online." });
+        }
         const profile = await ensureDriverOperatorForChauffeur(chauffeur.userId);
         if (profile?.type === "partner") {
           return res.status(403).json({ message: "Partners cannot go online as drivers." });
@@ -3819,12 +3910,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Enrich with user details (name, username, phone)
       const enriched = await Promise.all(
         allChauffeurs.map(async (c) => {
-          const user = c.userId ? await storage.getUser(c.userId) : null;
+          const [user, application] = c.userId
+            ? await Promise.all([
+                storage.getUser(c.userId).catch(() => null),
+                storage.getDriverApplicationByUserId(c.userId).catch(() => undefined),
+              ])
+            : [null, undefined];
           return {
             ...c,
             userName: user?.name || "—",
             userPhone: user?.phone || c.phone || "—",
             userEmail: user?.username || "—",
+            applicationStatus: application?.status || (c.isApproved ? "approved" : "pending"),
+            applicationNotes: application?.notes || null,
+            waitlistReason: application?.status === "waitlisted" ? application?.notes || null : null,
           };
         })
       );
@@ -4683,6 +4782,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireRole(["admin"]),
     async (req: AuthedRequest, res: Response) => {
       const { status, notes } = req.body;
+      if (!["pending", "approved", "rejected", "waitlisted"].includes(String(status || ""))) {
+        return res.status(400).json({ message: "Invalid driver application status" });
+      }
+      if (status === "waitlisted" && !String(notes || "").trim()) {
+        return res.status(400).json({ message: "Waitlist reason is required" });
+      }
       const updated = await storage.updateDriverApplication(req.params.id, {
         status,
         notes,
@@ -4698,23 +4803,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (status === "rejected") {
           await storage.updateChauffeur(updated.chauffeurId, { isApproved: false, isOnline: false, activeVehicleId: null });
         }
+        if (status === "waitlisted") {
+          await storage.updateChauffeur(updated.chauffeurId, { isApproved: false, isOnline: false });
+        }
       }
       const profile = await storage.getOperatorProfileByUserId(updated.userId).catch(() => undefined);
       if (profile?.type === "driver") {
         await storage.updateOperatorProfile(profile.id, {
           status,
-          rejectionReason: status === "rejected" ? String(notes || "").trim() : null,
+          rejectionReason: status === "rejected" || status === "waitlisted" ? String(notes || "").trim() : null,
           reviewedAt: new Date(),
           reviewerAdminId: req.auth!.sub,
         });
       }
-      if (status === "approved" || status === "rejected") {
+      if (status === "approved" || status === "rejected" || status === "waitlisted") {
         await notifyUserEvent({
           userId: updated.userId,
-          type: status === "approved" ? "operator_approved" : "operator_rejected",
-          title: status === "approved" ? "Application approved" : "Application not approved",
+          type: status === "approved" ? "operator_approved" : status === "waitlisted" ? "waitlisted" : "operator_rejected",
+          title: status === "approved" ? "Application approved" : status === "waitlisted" ? "Driver profile waitlisted" : "Application not approved",
           body: status === "approved"
             ? "Your driver profile has been approved. Add or select an approved vehicle before going online."
+            : status === "waitlisted"
+              ? `Your driver profile has been waitlisted.${notes ? ` Reason: ${String(notes).trim()}.` : ""}`
             : `Your driver application was not approved.${notes ? ` Reason: ${String(notes).trim()}.` : ""}`,
           data: { driverApplicationId: updated.id, operatorProfileId: profile?.id },
         });
@@ -6491,6 +6601,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const allWithdrawals = await storage.getAllWithdrawals();
         const allReports = await storage.getAllSafetyReports();
         const allEarnings = await storage.getAllEarnings();
+        const driverApplications = await storage.getDriverApplications().catch(() => []);
+        const applicationStatusByUserId = new Map(driverApplications.map((app: any) => [app.userId, app.status]));
 
         const completedRides = allRides.filter((r) => r.status === "trip_completed");
         const totalRevenue = completedRides.reduce((sum, r) => sum + (r.price || 0), 0);
@@ -6499,7 +6611,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const activeRides = allRides.filter(
           (r) => !["trip_completed", "cancelled"].includes(r.status as string),
         );
-        const pendingApprovals = allChauffeurs.filter((c) => !c.isApproved);
+        const pendingApprovals = allChauffeurs.filter((c) => !c.isApproved && applicationStatusByUserId.get(c.userId) !== "waitlisted");
         const pendingWithdrawals = allWithdrawals.filter((w) => w.status === "pending");
         const openReports = allReports.filter((r) => r.status === "open");
 

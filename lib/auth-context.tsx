@@ -10,7 +10,7 @@ import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Application from "expo-application";
 import * as Linking from "expo-linking";
-import { apiRequest } from "@/lib/query-client";
+import { apiRequest, isUnauthorizedError } from "@/lib/query-client";
 
 interface AuthUser {
   id: string;
@@ -52,6 +52,7 @@ interface AuthContextValue {
   setUser: (user: AuthUser | null) => void;
   setPendingReferralCode: (code: string | null) => Promise<void>;
   refreshUser: () => Promise<void>;
+  clearSession: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -114,6 +115,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [pendingReferralCode, setPendingReferralCodeState] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  async function clearLocalSession() {
+    setUser(null);
+    setAccessToken(null);
+    await AsyncStorage.removeItem("a2b_user");
+    await AsyncStorage.removeItem("a2b_chauffeur");
+    await AsyncStorage.removeItem("a2b_last_mode");
+    await AsyncStorage.removeItem("a2b_current_ride");
+    await AsyncStorage.removeItem("a2b_token");
+    await AsyncStorage.removeItem("a2b_needs_role_select");
+    await AsyncStorage.removeItem("a2b_needs_operator_choice");
+  }
+
   useEffect(() => {
     loadUser();
   }, []);
@@ -175,7 +188,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(freshUser);
         await AsyncStorage.setItem("a2b_user", JSON.stringify(freshUser));
       }
-    } catch {}
+    } catch (error) {
+      if (isUnauthorizedError(error)) {
+        await clearLocalSession();
+      }
+    }
   }
 
   function normalizeAuthPayload(payload: LoginResponse): {
@@ -232,15 +249,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
-    setUser(null);
-    setAccessToken(null);
-    await AsyncStorage.removeItem("a2b_user");
-    await AsyncStorage.removeItem("a2b_chauffeur");
-    await AsyncStorage.removeItem("a2b_last_mode");
-    await AsyncStorage.removeItem("a2b_current_ride");
-    await AsyncStorage.removeItem("a2b_token");
-    await AsyncStorage.removeItem("a2b_needs_role_select");
-    await AsyncStorage.removeItem("a2b_needs_operator_choice");
+    await clearLocalSession();
     // Best-effort server logout (clears cookie on web)
     apiRequest("POST", "/api/auth/logout").catch(() => {});
   }
@@ -265,7 +274,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(meData);
         await AsyncStorage.setItem("a2b_user", JSON.stringify(meData));
         return;
-      } catch {
+      } catch (error) {
+        if (isUnauthorizedError(error)) {
+          await clearLocalSession();
+          return;
+        }
         // ignore and fall back
       }
 
@@ -290,6 +303,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser,
       setPendingReferralCode,
       refreshUser,
+      clearSession: clearLocalSession,
     }),
     [user, accessToken, isLoading, pendingReferralCode],
   );

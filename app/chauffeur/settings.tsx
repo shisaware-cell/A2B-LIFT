@@ -143,6 +143,7 @@ export default function ChauffeurSettingsScreen() {
     const appStatus = (application as any)?.status;
     if (appStatus === "approved") return "approved";
     if (appStatus === "rejected") return "rejected";
+    if (appStatus === "waitlisted") return "pending";
     if (application && appStatus === "pending") return "pending";
     return doc.status as "pending" | "approved" | "rejected";
   }
@@ -296,20 +297,6 @@ export default function ChauffeurSettingsScreen() {
           <Text style={styles.menuText}>Referral & Rewards</Text>
           <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
         </Pressable>
-
-        <Pressable
-          style={({ pressed }) => [styles.menuItem, pressed && { opacity: 0.7 }]}
-          onPress={async () => {
-            await AsyncStorage.setItem("a2b_last_mode", "client");
-            router.replace("/client");
-          }}
-        >
-          <View style={styles.menuIconCircle}>
-            <Ionicons name="swap-horizontal" size={20} color={Colors.white} />
-          </View>
-          <Text style={styles.menuText}>Switch to Client Mode</Text>
-          <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-        </Pressable>
       </View>
 
       <Pressable
@@ -459,16 +446,18 @@ export default function ChauffeurSettingsScreen() {
                 <View style={[styles.statusBadgeLarge, 
                   application.status === "approved" ? styles.statusApprovedLarge :
                   application.status === "rejected" ? styles.statusRejectedLarge :
+                  application.status === "waitlisted" ? styles.statusWaitlistedLarge :
                   styles.statusPendingLarge
                 ]}>
                   <Ionicons 
-                    name={application.status === "approved" ? "checkmark-circle" : application.status === "rejected" ? "close-circle" : "time"} 
+                    name={application.status === "approved" ? "checkmark-circle" : application.status === "rejected" ? "close-circle" : application.status === "waitlisted" ? "pause-circle" : "time"} 
                     size={32} 
                     color={Colors.white} 
                   />
                   <Text style={styles.statusTextLarge}>
                     {application.status === "approved" ? "Approved" : 
                      application.status === "rejected" ? "Rejected" : 
+                     application.status === "waitlisted" ? "Waitlisted" :
                      "Pending Review"}
                   </Text>
                 </View>
@@ -486,6 +475,11 @@ export default function ChauffeurSettingsScreen() {
                 {!application.reviewedAt && (
                   <Text style={styles.pendingText}>
                     Your application is being reviewed. We'll notify you once a decision is made.
+                  </Text>
+                )}
+                {application.status === "waitlisted" && (
+                  <Text style={styles.pendingText}>
+                    Your driver profile is temporarily paused. Complete the requested action and contact support for reactivation.
                   </Text>
                 )}
               </View>
@@ -696,6 +690,7 @@ const styles = StyleSheet.create({
   statusBadgeLarge: { alignItems: "center", gap: 8, padding: 24, borderRadius: 16, width: "100%" },
   statusApprovedLarge: { backgroundColor: "rgba(76,175,80,0.2)" },
   statusRejectedLarge: { backgroundColor: "rgba(244,67,54,0.2)" },
+  statusWaitlistedLarge: { backgroundColor: "rgba(255,183,77,0.24)" },
   statusPendingLarge: { backgroundColor: "rgba(255,183,77,0.2)" },
   statusTextLarge: { fontSize: 18, fontFamily: "Inter_700Bold", color: Colors.white },
   notesCard: { backgroundColor: Colors.surface, borderRadius: 12, padding: 14, width: "100%", borderWidth: 1, borderColor: Colors.border },

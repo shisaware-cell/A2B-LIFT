@@ -51,6 +51,11 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+export function isUnauthorizedError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /^401\b/.test(message) || message.toLowerCase().includes("unauthorized");
+}
+
 async function getAuthHeader(): Promise<Record<string, string>> {
   try {
     const token = await AsyncStorage.getItem("a2b_token");

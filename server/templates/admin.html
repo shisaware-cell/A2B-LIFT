@@ -101,6 +101,7 @@ tbody tr:hover { background:#fafaf8; }
 .b-approved::before,.b-yes::before,.b-online::before,.b-completed::before,.b-paid::before { background:var(--green); }
 .b-rejected,.b-no,.b-cancelled,.b-failed { background:var(--red-bg); color:var(--red); }
 .b-rejected::before,.b-no::before,.b-cancelled::before,.b-failed::before { background:var(--red); }
+.b-waitlisted { background:#fff1d6; color:#9a5b00; } .b-waitlisted::before { background:#d48100; }
 .b-offline { background:#f5f5f0; color:var(--muted); } .b-offline::before { background:var(--muted-light); }
 .b-card { background:var(--blue-bg); color:var(--blue); } .b-card::before { background:var(--blue); }
 .b-wallet { background:var(--green-bg); color:var(--green); } .b-wallet::before { background:var(--green); }
@@ -337,6 +338,7 @@ tbody tr:hover { background:#fafaf8; }
           <button class="ftab active" onclick="fChauf('all',this)">All</button>
           <button class="ftab" onclick="fChauf('online',this)">Online</button>
           <button class="ftab" onclick="fChauf('approved',this)">Approved</button>
+          <button class="ftab" onclick="fChauf('waitlisted',this)">Waitlisted</button>
           <button class="ftab" onclick="fChauf('pending',this)">Pending Approval</button>
         </div>
       </div>
@@ -351,6 +353,7 @@ tbody tr:hover { background:#fafaf8; }
           <button class="ftab active" onclick="fApps('all',this)">All</button>
           <button class="ftab" onclick="fApps('pending',this)">Pending</button>
           <button class="ftab" onclick="fApps('approved',this)">Approved</button>
+          <button class="ftab" onclick="fApps('waitlisted',this)">Waitlisted</button>
           <button class="ftab" onclick="fApps('rejected',this)">Rejected</button>
         </div>
       </div>
@@ -700,20 +703,30 @@ function renderFilteredChauf() {
   let list = allChauf;
   if (chaufFilter === 'online') list = allChauf.filter(c => c.isOnline);
   if (chaufFilter === 'approved') list = allChauf.filter(c => c.isApproved);
-  if (chaufFilter === 'pending') list = allChauf.filter(c => !c.isApproved);
+  if (chaufFilter === 'waitlisted') list = allChauf.filter(c => c.applicationStatus === 'waitlisted');
+  if (chaufFilter === 'pending') list = allChauf.filter(c => !c.isApproved && c.applicationStatus !== 'waitlisted');
   renderChauffeurTable('chauf-table', list, true);
+}
+
+function chaufStatus(c) {
+  const status = c.applicationStatus || (c.isApproved ? 'approved' : 'pending');
+  if (status === 'waitlisted') return { label: 'Waitlisted', cls: 'b-waitlisted' };
+  if (c.isApproved || status === 'approved') return { label: 'Approved', cls: 'b-approved' };
+  if (status === 'rejected') return { label: 'Rejected', cls: 'b-rejected' };
+  return { label: 'Pending', cls: 'b-pending' };
 }
 
 function renderChauffeurTable(tableId, data, showActions) {
   const w = document.getElementById(tableId);
   if (!data.length) { w.innerHTML = emptyState('🚗', 'No chauffeurs', 'Drivers who complete registration appear here'); return; }
   w.innerHTML = `<table>
-    <thead><tr><th>Driver</th><th>Vehicle</th><th>Plate</th><th>Type</th><th>Capacity</th><th>Online</th><th>Approved</th><th>Actions</th></tr></thead>
-    <tbody>${data.map(c => `<tr>
+    <thead><tr><th>Driver</th><th>Vehicle</th><th>Plate</th><th>Type</th><th>Capacity</th><th>Online</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody>${data.map(c => { const st = chaufStatus(c); return `<tr>
       <td>
         <div style="font-weight:600">${c.userName || '—'}</div>
         <div style="font-size:11px;color:var(--muted)">${c.userEmail || ''}</div>
         <div style="font-size:11px;color:var(--muted)">${c.phone || c.userPhone || ''}</div>
+        ${c.applicationStatus === 'waitlisted' && c.waitlistReason ? `<div style="font-size:11px;color:#9a5b00;margin-top:4px">Reason: ${escapeHtml(c.waitlistReason)}</div>` : ''}
       </td>
       <td>
         <div style="font-weight:600">${[c.carMake, c.vehicleModel].filter(Boolean).join(' ') || '—'}</div>
@@ -723,29 +736,46 @@ function renderChauffeurTable(tableId, data, showActions) {
       <td style="font-size:13px">${c.vehicleType || '—'}</td>
       <td style="font-size:12px">👥 ${c.passengerCapacity || 4} · 🧳 ${c.luggageCapacity || 2}</td>
       <td><span class="badge ${c.isOnline ? 'b-online' : 'b-offline'}">${c.isOnline ? 'Online' : 'Offline'}</span></td>
-      <td><span class="badge ${c.isApproved ? 'b-approved' : 'b-pending'}">${c.isApproved ? 'Yes' : 'No'}</span></td>
+      <td><span class="badge ${st.cls}">${st.label}</span></td>
       <td><div class="action-cell">
-        ${!c.isApproved ? `<button class="btn-sm btn-approve" onclick="approveChauf('${c.id}')">✓ Approve</button>` : ''}
-        ${!c.isApproved ? `<button class="btn-sm btn-reject" onclick="rejectChauf('${c.id}')">✕ Reject</button>` : ''}
+        ${c.applicationStatus === 'waitlisted' ? `<button class="btn-sm btn-approve" onclick="reactivateChauf('${c.id}')">✓ Reactivate</button>` : ''}
+        ${!c.isApproved && c.applicationStatus !== 'waitlisted' ? `<button class="btn-sm btn-approve" onclick="approveChauf('${c.id}')">✓ Approve</button>` : ''}
+        ${c.applicationStatus !== 'waitlisted' ? `<button class="btn-sm btn-detail" onclick="waitlistChauf('${c.id}')">⏸ Waitlist</button>` : ''}
+        ${!c.isApproved && c.applicationStatus !== 'waitlisted' ? `<button class="btn-sm btn-reject" onclick="rejectChauf('${c.id}')">✕ Reject</button>` : ''}
         <button class="btn-sm btn-detail" onclick="chaufDetail('${c.id}')">Details</button>
         <button class="btn-sm btn-detail" onclick="editChauf('${c.id}')">✏ Edit</button>
         <button class="btn-sm btn-detail" onclick="viewDocs('${c.id}','${(c.userName||'Driver').replace(/'/g,"\\'")}')">📄 Docs</button>
         <button class="btn-sm btn-reject" onclick="deleteChauf('${c.id}','${(c.userName||'Driver').replace(/'/g,"\\'")}')">🗑 Delete</button>
       </div></td>
-    </tr>`).join('')}
+    </tr>`; }).join('')}
     </tbody></table>`;
 }
 
 function approveChauf(id) { showChauffeurConfirm(id, 'approve'); }
 function rejectChauf(id) { showChauffeurConfirm(id, 'reject'); }
+function waitlistChauf(id) { showChauffeurConfirm(id, 'waitlist'); }
+function reactivateChauf(id) { showChauffeurConfirm(id, 'reactivate'); }
 
 function showChauffeurConfirm(id, action) {
   const c = allChauf.find(x => x.id === id); if (!c) return;
   const isApprove = action === 'approve';
-  document.getElementById('m-title').textContent = isApprove ? '✓ Approve Driver' : '✕ Reject Driver';
+  const isReject = action === 'reject';
+  const isWaitlist = action === 'waitlist';
+  const isReactivate = action === 'reactivate';
+  document.getElementById('m-title').textContent = isApprove
+    ? '✓ Approve Driver'
+    : isWaitlist
+      ? '⏸ Waitlist Driver'
+      : isReactivate
+        ? '✓ Reactivate Driver'
+        : '✕ Reject Driver';
   document.getElementById('m-sub').textContent = isApprove
     ? 'Review all details before approving. The driver will be notified immediately.'
-    : 'Review details and provide a rejection reason. The driver will be notified immediately.';
+    : isWaitlist
+      ? 'Waitlisted drivers are forced offline and cannot receive trips until reactivated.'
+      : isReactivate
+        ? 'The driver will be restored to approved status but remains offline until they go online.'
+        : 'Review details and provide a rejection reason. The driver will be notified immediately.';
   document.getElementById('m-body').innerHTML = `
     <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
       ${c.profilePhoto ? `<img src="${c.profilePhoto}" style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid var(--border);flex-shrink:0" onerror="this.style.display='none'" />` : `<div style="width:64px;height:64px;border-radius:50%;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0">🧑‍✈️</div>`}
@@ -762,13 +792,20 @@ function showChauffeurConfirm(id, action) {
       <div class="info-row"><div class="info-label">Category</div><div class="info-val" style="text-transform:capitalize">${c.vehicleType || '—'}</div></div>
       <div class="info-row"><div class="info-label">Capacity</div><div class="info-val">${c.passengerCapacity || 4} passengers · ${c.luggageCapacity || 2} bags</div></div>
       <div class="info-row"><div class="info-label">Registered</div><div class="info-val">${fmt(c.createdAt)}</div></div>
-      ${!isApprove ? `<div style="margin-top:8px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Rejection Reason <span style="color:var(--red)">*</span></label><textarea id="chauf-reject-reason" class="f-input" style="width:100%;min-height:80px;resize:vertical;box-sizing:border-box" placeholder="Explain why this application was not approved…"></textarea></div>` : ''}
+      ${isReject ? `<div style="margin-top:8px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Rejection Reason <span style="color:var(--red)">*</span></label><textarea id="chauf-reject-reason" class="f-input" style="width:100%;min-height:80px;resize:vertical;box-sizing:border-box" placeholder="Explain why this application was not approved…"></textarea></div>` : ''}
+      ${isWaitlist ? `<div style="margin-top:8px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Waitlist Reason <span style="color:var(--red)">*</span></label><textarea id="chauf-waitlist-reason" class="f-input" style="width:100%;min-height:110px;resize:vertical;box-sizing:border-box" placeholder="Example: Your profile has been waitlisted because your rating dropped below the required level, you have been inactive, or retraining is required."></textarea></div>` : ''}
     </div>`;
   document.getElementById('m-foot').innerHTML = isApprove
     ? `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
        <button class="btn-lg btn-green" onclick="doApproveChauf('${id}')">✓ Confirm Approval</button>`
-    : `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
-       <button class="btn-lg" style="background:var(--red);color:#fff;border:none;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer" onclick="doRejectChauf('${id}')">✕ Confirm Rejection</button>`;
+    : isWaitlist
+      ? `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+         <button class="btn-lg" style="background:#9a5b00;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer" onclick="doWaitlistChauf('${id}')">⏸ Confirm Waitlist</button>`
+      : isReactivate
+        ? `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+           <button class="btn-lg btn-green" onclick="doReactivateChauf('${id}')">✓ Confirm Reactivation</button>`
+        : `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+           <button class="btn-lg" style="background:var(--red);color:#fff;border:none;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer" onclick="doRejectChauf('${id}')">✕ Confirm Rejection</button>`;
   openModal();
 }
 
@@ -798,6 +835,35 @@ async function doRejectChauf(id) {
     if (!res.ok) throw new Error(await res.text());
     toast('🚫 Driver rejected. Notification sent.', 'err');
     loadChauf();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function doWaitlistChauf(id) {
+  const reason = document.getElementById('chauf-waitlist-reason')?.value.trim();
+  if (!reason) {
+    const el = document.getElementById('chauf-waitlist-reason');
+    if (el) { el.style.borderColor = 'var(--red)'; el.focus(); }
+    return;
+  }
+  closeModal();
+  try {
+    const res = await apiFetch('/api/chauffeurs/' + id + '/waitlist', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast('⏸ Driver waitlisted and taken offline.', 'ok');
+    loadChauf(); loadApps();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function doReactivateChauf(id) {
+  closeModal();
+  try {
+    const res = await apiFetch('/api/chauffeurs/' + id + '/reactivate', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    if (!res.ok) throw new Error(await res.text());
+    toast('✅ Driver reactivated.', 'ok');
+    loadChauf(); loadApps();
   } catch(e) { toast('❌ ' + e.message, 'err'); }
 }
 
@@ -973,13 +1039,15 @@ function renderAppsTable(tableId, data) {
     <tbody>${data.map(a => `<tr>
       <td style="font-size:12px;font-family:var(--mono)">${(a.userId||'').slice(0,12)}…</td>
       <td style="font-size:12px;font-family:var(--mono)">${a.chauffeurId ? (a.chauffeurId.slice(0,12)+'…') : '—'}</td>
-      <td><span class="badge ${a.status==='approved'?'b-approved':a.status==='rejected'?'b-offline':'b-pending'}">${a.status||'pending'}</span></td>
+      <td><span class="badge ${a.status==='approved'?'b-approved':a.status==='rejected'?'b-rejected':a.status==='waitlisted'?'b-waitlisted':'b-pending'}">${a.status||'pending'}</span></td>
       <td style="font-size:12px">${fmt(a.submittedAt)}</td>
       <td style="font-size:12px">${a.reviewedAt ? fmt(a.reviewedAt) : '—'}</td>
       <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${a.notes||'—'}</td>
       <td><div class="action-cell">
         ${a.status==='pending' ? `<button class="btn-sm btn-approve" onclick="approveApp('${a.id}','${a.chauffeurId||''}')">✓ Approve</button>` : ''}
         ${a.status==='pending' ? `<button class="btn-sm btn-reject" onclick="rejectApp('${a.id}')">✕ Reject</button>` : ''}
+        ${a.status!=='waitlisted' ? `<button class="btn-sm btn-detail" onclick="waitlistApp('${a.id}')">⏸ Waitlist</button>` : ''}
+        ${a.status==='waitlisted' ? `<button class="btn-sm btn-approve" onclick="approveApp('${a.id}','${a.chauffeurId||''}')">✓ Reactivate</button>` : ''}
         <button class="btn-sm btn-detail" onclick="appDetail('${a.id}')">Details</button>
         <button class="btn-sm btn-detail" onclick="editAppNotes('${a.id}')">✏ Edit</button>
         <button class="btn-sm btn-reject" onclick="deleteApp('${a.id}')">🗑 Delete</button>
@@ -990,6 +1058,7 @@ function renderAppsTable(tableId, data) {
 
 function approveApp(id, chauffeurId) { showAppConfirm(id, chauffeurId, 'approve'); }
 function rejectApp(id, chauffeurId) { showAppConfirm(id, chauffeurId, 'reject'); }
+function waitlistApp(id) { showAppConfirm(id, '', 'waitlist'); }
 
 function appDetail(id) {
   const a = allApps.find(x => x.id === id); if (!a) return;
@@ -998,7 +1067,7 @@ function appDetail(id) {
   document.getElementById('m-sub').textContent = a.userId || '';
   document.getElementById('m-body').innerHTML = `
     <div class="info-grid">
-      <div class="info-row"><div class="info-label">Status</div><div class="info-val"><span class="badge ${a.status==='approved'?'b-approved':a.status==='rejected'?'b-offline':'b-pending'}">${a.status || 'pending'}</span></div></div>
+      <div class="info-row"><div class="info-label">Status</div><div class="info-val"><span class="badge ${a.status==='approved'?'b-approved':a.status==='rejected'?'b-rejected':a.status==='waitlisted'?'b-waitlisted':'b-pending'}">${a.status || 'pending'}</span></div></div>
       <div class="info-row"><div class="info-label">Submitted</div><div class="info-val">${fmtFull(a.submittedAt)}</div></div>
       <div class="info-row"><div class="info-label">Reviewed</div><div class="info-val">${a.reviewedAt ? fmtFull(a.reviewedAt) : '—'}</div></div>
       <div class="info-row"><div class="info-label">Notes</div><div class="info-val">${escapeHtml(a.notes || '—')}</div></div>
@@ -1017,9 +1086,12 @@ function showAppConfirm(id, chauffeurId, action) {
   const a = allApps.find(x => x.id === id); if (!a) return;
   const c = allChauf.find(x => x.id === (chauffeurId || a.chauffeurId));
   const isApprove = action === 'approve';
-  document.getElementById('m-title').textContent = isApprove ? '✓ Approve Application' : '✕ Reject Application';
+  const isWaitlist = action === 'waitlist';
+  document.getElementById('m-title').textContent = isApprove ? '✓ Approve Application' : isWaitlist ? '⏸ Waitlist Application' : '✕ Reject Application';
   document.getElementById('m-sub').textContent = isApprove
     ? 'Review all driver details before approving. Driver will be notified immediately.'
+    : isWaitlist
+      ? 'Waitlisted drivers are taken offline and cannot receive trip requests until reactivated.'
     : 'Review details and provide a rejection reason. Driver will be notified immediately.';
   document.getElementById('m-body').innerHTML = `
     ${c ? `<div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
@@ -1038,16 +1110,16 @@ function showAppConfirm(id, chauffeurId, action) {
       <div class="info-row"><div class="info-label">Capacity</div><div class="info-val">${c.passengerCapacity || 4} passengers · ${c.luggageCapacity || 2} bags</div></div>
     </div>` : `<div class="info-grid"><div class="info-row"><div class="info-label">Application ID</div><div class="info-val" style="font-family:var(--mono);font-size:12px">${id}</div></div><div class="info-row"><div class="info-label">Submitted</div><div class="info-val">${fmt(a.submittedAt)}</div></div></div>`}
     <div class="info-grid" style="margin-top:8px">
-      <div class="info-row"><div class="info-label">Status</div><div class="info-val"><span class="badge ${a.status==='approved'?'b-approved':a.status==='rejected'?'b-offline':'b-pending'}">${a.status||'pending'}</span></div></div>
+      <div class="info-row"><div class="info-label">Status</div><div class="info-val"><span class="badge ${a.status==='approved'?'b-approved':a.status==='rejected'?'b-rejected':a.status==='waitlisted'?'b-waitlisted':'b-pending'}">${a.status||'pending'}</span></div></div>
       <div class="info-row"><div class="info-label">Submitted</div><div class="info-val">${fmt(a.submittedAt)}</div></div>
     </div>
-    ${!isApprove ? `<div style="margin-top:12px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Rejection Reason <span style="color:var(--red)">*</span></label><textarea id="app-reject-reason" class="f-input" style="width:100%;min-height:80px;resize:vertical;box-sizing:border-box" placeholder="Explain why this application was not approved…"></textarea></div>` : ''}
+    ${!isApprove ? `<div style="margin-top:12px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">${isWaitlist ? 'Waitlist' : 'Rejection'} Reason <span style="color:var(--red)">*</span></label><textarea id="app-reject-reason" class="f-input" style="width:100%;min-height:90px;resize:vertical;box-sizing:border-box" placeholder="${isWaitlist ? 'Explain what the driver must fix before reactivation…' : 'Explain why this application was not approved…'}"></textarea></div>` : ''}
   `;
   document.getElementById('m-foot').innerHTML = isApprove
     ? `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
        <button class="btn-lg btn-green" onclick="doApproveApp('${id}','${chauffeurId||''}')">✓ Confirm Approval</button>`
     : `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
-       <button class="btn-lg" style="background:var(--red);color:#fff;border:none;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer" onclick="doRejectApp('${id}')">✕ Confirm Rejection</button>`;
+       <button class="btn-lg" style="background:${isWaitlist ? '#9a5b00' : 'var(--red)'};color:#fff;border:none;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer" onclick="${isWaitlist ? `doWaitlistApp('${id}')` : `doRejectApp('${id}')`}">${isWaitlist ? '⏸ Confirm Waitlist' : '✕ Confirm Rejection'}</button>`;
   openModal();
 }
 
@@ -1084,6 +1156,25 @@ async function doRejectApp(id) {
     if (!res.ok) throw new Error(await res.text());
     toast('🚫 Application rejected. Driver notified.', 'err');
     loadApps();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function doWaitlistApp(id) {
+  const notes = document.getElementById('app-reject-reason')?.value.trim();
+  if (!notes) {
+    const el = document.getElementById('app-reject-reason');
+    if (el) { el.style.borderColor = 'var(--red)'; el.focus(); }
+    return;
+  }
+  closeModal();
+  try {
+    const res = await apiFetch('/api/admin/driver-applications/' + id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'waitlisted', notes }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast('⏸ Application waitlisted. Driver taken offline.', 'ok');
+    loadApps(); loadChauf();
   } catch(e) { toast('❌ ' + e.message, 'err'); }
 }
 

@@ -1609,6 +1609,7 @@ export default function ChauffeurDashboard() {
 
   // ─── Pending approval ─────────────────────────────────────────────────────
   if (!chauffeur.isApproved) {
+    const isWaitlisted = chauffeur.applicationStatus === "waitlisted";
     return (
       <View style={[styles.pendingContainer, { paddingTop: insets.top + 20 }]}>
         <View style={[styles.floatEarnings, { top: insets.top + 16 }]}>
@@ -1616,9 +1617,19 @@ export default function ChauffeurDashboard() {
           <Text style={styles.earningsAmount}>R {todayEarnings}</Text>
         </View>
         <View style={styles.pendingInner}>
-          <Ionicons name="hourglass" size={60} color={Colors.warning} />
-          <Text style={styles.pendingTitle}>Pending Approval</Text>
-          <Text style={styles.pendingDesc}>Your registration is under review. You'll be notified once approved and can start accepting rides.</Text>
+          <Ionicons name={isWaitlisted ? "pause-circle" : "hourglass"} size={60} color={isWaitlisted ? Colors.warning : Colors.warning} />
+          <Text style={styles.pendingTitle}>{isWaitlisted ? "Profile Waitlisted" : "Pending Approval"}</Text>
+          <Text style={styles.pendingDesc}>
+            {isWaitlisted
+              ? "Your driver profile has been temporarily waitlisted. You cannot receive trip requests until A2B reactivates your profile."
+              : "Your registration is under review. You'll be notified once approved and can start accepting rides."}
+          </Text>
+          {isWaitlisted && chauffeur.waitlistReason ? (
+            <View style={styles.waitlistReasonCard}>
+              <Text style={styles.waitlistReasonLabel}>Reason</Text>
+              <Text style={styles.waitlistReasonText}>{chauffeur.waitlistReason}</Text>
+            </View>
+          ) : null}
           <Pressable style={styles.pendingBtn} onPress={() => refreshChauffeur(chauffeur.id)}>
             <Ionicons name="refresh" size={16} color={Colors.white} />
             <Text style={styles.pendingBtnText}>Check Status</Text>
@@ -2267,6 +2278,9 @@ const styles = StyleSheet.create({
   pendingInner: { alignItems: "center", gap: 16 },
   pendingTitle: { fontSize: 22, fontFamily: "Inter_700Bold", color: Colors.white, marginTop: 8 },
   pendingDesc: { fontSize: 14, fontFamily: "Inter_400Regular", color: Colors.textMuted, textAlign: "center", lineHeight: 22 },
+  waitlistReasonCard: { width: "100%", borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", backgroundColor: "rgba(255,255,255,0.07)", padding: 14 },
+  waitlistReasonLabel: { fontSize: 11, fontFamily: "Inter_700Bold", color: Colors.warning, textTransform: "uppercase", marginBottom: 6 },
+  waitlistReasonText: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.white, lineHeight: 19 },
   partnerActions: { width: "100%", gap: 10, alignItems: "center" },
   pendingBtn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.accent, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12, marginTop: 8 },
   pendingBtnText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.white },

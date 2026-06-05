@@ -10,8 +10,8 @@ const defaultPamolProjectId = "f282a582-7512-48d6-b563-13aa571d9115";
 const defaultPascalProjectId = "eb3b8747-40b2-4aad-b118-e64339bfeea0";
 const defaultClientProjectId = "9932543b-f023-4dec-8213-5d0fe99ad749";
 const defaultClientSlug = "a2b-lift-client-eas-mFdHJz";
-
 const currentAndroidVersionCode = 96;
+
 function normalizeAssetPrefix(assetPrefix = ".") {
   return String(assetPrefix || ".").replace(/\/$/, "");
 }
@@ -34,12 +34,12 @@ function getVariantConfig(variant) {
       variant,
       owner,
       projectId,
-      name: "A2B LIFT Client",
+      name: "A2B LIFT",
       slug: process.env.EXPO_PUBLIC_EAS_SLUG_CLIENT || defaultClientSlug,
       scheme: "a2bliftclient",
       iosBundleIdentifier: "com.a2blift.client",
       androidPackage: "com.a2blift.client",
-      androidVersionCode: 1,
+      androidVersionCode: currentAndroidVersionCode,
       iosBuildNumber: "1",
       runtimeVersion: "1.0.0-client",
       notificationChannel: "client-alerts",
@@ -51,7 +51,7 @@ function getVariantConfig(variant) {
     variant: "driver",
     owner,
     projectId: getDriverProjectId(owner),
-    name: "A2B LIFT DRIVER",
+    name: "A2B DRIVER",
     slug: "a2b-lift",
     scheme: "a2blift",
     iosBundleIdentifier: "com.a2blift",

@@ -27,7 +27,7 @@ import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "@/lib/auth-context";
 import { ensureGoogleMapsWebPlaces } from "@/lib/google-maps-web";
-import { apiRequest, queryClient } from "@/lib/query-client";
+import { apiRequest, isUnauthorizedError, queryClient } from "@/lib/query-client";
 import {
   getBestAvailablePosition,
   isRecentLocation,
@@ -844,7 +844,7 @@ function carColorToHex(color: string): string {
 export default function ClientHomeScreen() {
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, clearSession } = useAuth();
   const { on, off } = useSocket();
   const bottomPanelOffset = Math.max(12, tabBarHeight - insets.bottom + 12);
   const bottomPanelPadding = insets.bottom + 20;
@@ -1295,6 +1295,45 @@ export default function ClientHomeScreen() {
             }
           } catch (error) {
             logAutocompleteDebug("web-google-fallback-error", {
+              query,
+              target,
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+        } else {
+          try {
+            const nativePredictions = await buildNativeLocationSuggestions(query);
+            const filteredNativePredictions = filterAddressPredictions(query, nativePredictions);
+            const renderedFilteredNativePredictions = buildRenderedLocationSuggestions(query, filteredNativePredictions);
+            const renderedRawNativePredictions = buildRenderedLocationSuggestions(query, nativePredictions);
+            logAutocompleteDebug("native-fallback", {
+              query,
+              target,
+              rawCount: nativePredictions.length,
+              filteredCount: filteredNativePredictions.length,
+              renderedFilteredCount: renderedFilteredNativePredictions.length,
+              renderedRawCount: renderedRawNativePredictions.length,
+              rawTop: summarizeAutocompletePredictions(nativePredictions),
+              filteredTop: summarizeAutocompletePredictions(filteredNativePredictions),
+              renderedFilteredTop: summarizeAutocompletePredictions(renderedFilteredNativePredictions),
+              renderedRawTop: summarizeAutocompletePredictions(renderedRawNativePredictions),
+            });
+
+            if (filteredNativePredictions.length > 0) {
+              applyLocationSuggestions(requestId, query, target, "native-fallback-filtered", renderedFilteredNativePredictions);
+              return;
+            }
+
+            if (nativePredictions.length > 0) {
+              logAutocompleteDebug("native-fallback-no-token-match", {
+                query,
+                target,
+                rawCount: nativePredictions.length,
+                rawTop: summarizeAutocompletePredictions(nativePredictions),
+              });
+            }
+          } catch (error) {
+            logAutocompleteDebug("native-fallback-error", {
               query,
               target,
               message: error instanceof Error ? error.message : String(error),
@@ -1877,7 +1916,11 @@ export default function ClientHomeScreen() {
       const res = await apiRequest("GET", "/api/payments/cards");
       const cards = await res.json();
       setSavedCards(Array.isArray(cards) ? cards : []);
-    } catch {
+    } catch (error) {
+      if (isUnauthorizedError(error)) {
+        await handleUnauthorizedRideRequest();
+        return;
+      }
       setSavedCards([]);
     }
     setShowPaymentPicker(true);
@@ -1912,6 +1955,16 @@ export default function ClientHomeScreen() {
     });
     const payload = await res.json();
     return payload.ride ?? payload;
+  }
+
+  async function handleUnauthorizedRideRequest() {
+    await clearSession();
+    setShowPaymentPicker(false);
+    Alert.alert(
+      "Session expired",
+      "Please log in again before requesting a ride.",
+      [{ text: "Log in", onPress: () => router.replace("/login") }],
+    );
   }
 
   /** Creates and dispatches a ride for any payment method */
@@ -1976,6 +2029,10 @@ export default function ClientHomeScreen() {
         }
       }
     } catch (err: any) {
+      if (isUnauthorizedError(err)) {
+        await handleUnauthorizedRideRequest();
+        return;
+      }
       Alert.alert("Error", err?.message || "Failed to request ride. Please try again.");
     }
   }
@@ -1998,6 +2055,10 @@ export default function ClientHomeScreen() {
     try {
       await proceedWithRide(method);
     } catch (err: any) {
+      if (isUnauthorizedError(err)) {
+        await handleUnauthorizedRideRequest();
+        return;
+      }
       Alert.alert("Error", err?.message || "Failed to request ride. Please try again.");
     }
   }
