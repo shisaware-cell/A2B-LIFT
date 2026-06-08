@@ -141,7 +141,7 @@ export default function EarningsScreen() {
         </Text>
         <View style={styles.shareRules}>
           <Text style={styles.shareRule}>Trips counted: {annualShare?.qualifyingTrips || 0}</Text>
-          <Text style={styles.shareRule}>Platform fee: 20% | Annual share: 5%</Text>
+          <Text style={styles.shareRule}>Platform fee: 25% | Annual share: 5%</Text>
           <Text style={styles.shareRule}>Rules: 3+ months active, 5 trips/week, good service standards</Text>
         </View>
         <Text style={styles.shareMotto}>Improving Drivers' Lives and Building True Partnerships.</Text>
