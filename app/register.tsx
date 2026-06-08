@@ -197,7 +197,7 @@ export default function RegisterScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Referral Code</Text>
+            <Text style={styles.label}>Reward Code</Text>
             <View style={styles.inputWrapper}>
               <Ionicons name="gift-outline" size={18} color={Colors.textMuted} />
               <TextInput

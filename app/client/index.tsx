@@ -41,11 +41,11 @@ import A2BMap from "@/components/A2BMap";
 import LivenessCamera, { type LivenessChallenge, type LivenessCaptureResult } from "@/components/LivenessCamera";
 
 const VEHICLE_TYPES = [
-  { id: "budget", name: "Budget", desc: "Toyota Corolla, Toyota Quest", icon: "car-outline" as const, pricePerKm: 7, baseFare: 50 },
+  { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", icon: "car" as const, pricePerKm: 35, baseFare: 200, badge: "most popular" },
   { id: "luxury", name: "Luxury", desc: "BMW 3 Series, Mercedes C Class", icon: "car-sport" as const, pricePerKm: 13, baseFare: 100 },
   { id: "business", name: "Business Class", desc: "BMW 5 Series, Mercedes E Class", icon: "briefcase" as const, pricePerKm: 35, baseFare: 150 },
   { id: "van", name: "Van", desc: "Hyundai H1, Mercedes Vito, Staria", icon: "bus" as const, pricePerKm: 13, baseFare: 120 },
-  { id: "luxury_van", name: "Luxury Van", desc: "Mercedes V Class", icon: "car" as const, pricePerKm: 35, baseFare: 200 },
+  { id: "budget", name: "Budget", desc: "Toyota Corolla, Toyota Quest", icon: "car-outline" as const, pricePerKm: 7, baseFare: 50 },
 ];
 
 type RideStatus = "idle" | "selecting" | "confirming" | "requested" | "assigned" | "arriving" | "in_trip" | "completed" | "no_drivers";
@@ -3193,7 +3193,10 @@ export default function ClientHomeScreen() {
               >
                 <Ionicons name={vt.icon} size={22} color={Colors.white} />
                 <View style={styles.vehicleOptionInfo}>
-                  <Text style={styles.vehicleOptionName}>{vt.name}</Text>
+                  <View style={styles.vehicleOptionNameRow}>
+                    <Text style={styles.vehicleOptionName}>{vt.name}</Text>
+                    {"badge" in vt && vt.badge ? <Text style={styles.vehicleOptionBadge}>{vt.badge}</Text> : null}
+                  </View>
                   <Text style={styles.vehicleOptionDesc}>{vt.desc}</Text>
                   <Text style={styles.vehicleOptionPrice}>R{vt.baseFare} + R{vt.pricePerKm}/km</Text>
                 </View>
@@ -4709,10 +4712,22 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
+  vehicleOptionNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
   vehicleOptionName: {
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
     color: Colors.white,
+  },
+  vehicleOptionBadge: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    color: Colors.accent,
+    textTransform: "uppercase",
   },
   vehicleOptionDesc: {
     fontSize: 12,

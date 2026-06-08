@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Referral Programme — A2B Lift</title>
-  <meta name="description" content="Share A2B Lift and earn rewards. Riders earn on every trip their friends take. Drivers earn on every driver they refer." />
+  <title>Reward Programme — A2B Lift</title>
+  <meta name="description" content="Share A2B Lift and earn rewards. Riders earn on every trip their friends take. Drivers earn when invited drivers complete trips." />
   <link rel="icon" href="assets/images/favicon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -36,7 +36,7 @@
     .tab-content { display: none; }
     .tab-content.active { display: block; }
 
-    /* ── Referral CODE box ── */
+    /* ── Reward code box ── */
     .referral-code-box {
       background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
       color: var(--white);
@@ -159,10 +159,10 @@
 
   <!-- HERO -->
   <div class="referral-hero">
-    <p class="label label--light">Referral programme</p>
+    <p class="label label--light">Reward programme</p>
     <h1>Share A2B Lift.<br /><em>Earn every time.</em></h1>
-    <p>Riders earn 2.5% on their own completed rides and 2.5% when invited riders travel. Drivers earn 2.5% when the drivers they referred complete trips. One wallet, one payout flow.</p>
-    <a href="login.html" class="btn btn-white" id="heroJoinBtn">Get your referral link</a>
+    <p>Riders earn 2.5% on their own completed rides and 2.5% when invited riders travel. Drivers earn 2.5% when the drivers they invited complete trips. One wallet, one payout flow.</p>
+    <a href="login.html" class="btn btn-white" id="heroJoinBtn">Get your reward link</a>
   </div>
 
   <!-- TABS -->
@@ -176,9 +176,9 @@
       <!-- RIDERS TAB -->
       <div class="tab-content active" id="tab-riders">
 
-        <!-- Your referral code (shown if logged in) -->
+        <!-- Your reward code (shown if logged in) -->
         <div class="referral-code-box" id="riderCodeBox" style="display:none;">
-          <h2>Your referral link</h2>
+          <h2>Your reward link</h2>
           <p>Share this link or code with riders. When they sign up and complete trips, your rewards start building automatically.</p>
           <div class="code-display">
             <span id="riderCodeDisplay">—</span>
@@ -192,7 +192,7 @@
         </div>
 
         <div id="riderLoginPrompt" style="text-align:center;margin-bottom:64px;">
-          <a href="login.html?next=referral.html" class="btn btn-primary">Log in to see your referral code</a>
+          <a href="login.html?next=referral.html" class="btn btn-primary">Log in to see your reward code</a>
         </div>
 
         <p class="label">How you earn</p>
@@ -202,7 +202,7 @@
           <div class="step-card">
             <div class="step-circle"><span class="step-card-num">1</span></div>
             <h3>Share your link</h3>
-            <p>Every A2B Lift account gets a unique referral code and link. Share it anywhere — WhatsApp, socials, or directly with riders who use the app.</p>
+            <p>Every A2B Lift account gets a unique reward code and link. Share it anywhere — WhatsApp, socials, or directly with riders who use the app.</p>
           </div>
           <div class="step-card">
             <div class="step-circle"><span class="step-card-num">2</span></div>
@@ -229,7 +229,7 @@
           <div class="earn-card">
             <div class="earn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
             <h3>2.5% on invited rider trips</h3>
-            <p>When riders you directly referred complete trips, you earn another 2.5% from those completed rides.</p>
+            <p>When riders you directly invited complete trips, you earn another 2.5% from those completed rides.</p>
           </div>
           <div class="earn-card">
             <div class="earn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
@@ -239,7 +239,7 @@
         </div>
 
         <div style="max-width:640px;padding:24px;background:var(--grey-50);border-radius:var(--radius);margin-bottom:24px;">
-          <p style="font-size:14px;color:var(--grey-600);line-height:1.7;"><strong style="color:var(--black);">What counts as a reward?</strong> A2B Lift credits referral rewards from completed qualifying trip activity. Daily Lift Club bookings are excluded from this rewards model.</p>
+          <p style="font-size:14px;color:var(--grey-600);line-height:1.7;"><strong style="color:var(--black);">What counts as a reward?</strong> A2B Lift credits reward programme earnings from completed qualifying trip activity. Daily Lift Club bookings are excluded from this rewards model.</p>
         </div>
       </div>
 
@@ -247,7 +247,7 @@
       <div class="tab-content" id="tab-drivers">
 
         <div class="referral-code-box" id="driverCodeBox" style="display:none;">
-          <h2>Your driver referral code</h2>
+          <h2>Your driver reward code</h2>
           <p>Share this code with other drivers. When they sign up and complete trips on A2B Lift, you earn 2.5% from their completed trip activity.</p>
           <div class="code-display">
             <span id="driverCodeDisplay">—</span>
@@ -261,40 +261,40 @@
         </div>
 
         <div id="driverLoginPrompt" style="text-align:center;margin-bottom:64px;">
-          <a href="login.html?next=referral.html" class="btn btn-primary">Log in to see your referral code</a>
+          <a href="login.html?next=referral.html" class="btn btn-primary">Log in to see your reward code</a>
         </div>
 
-        <p class="label">Driver referrals</p>
+        <p class="label">Driver rewards</p>
         <h2 class="heading">Earn when the drivers<br /><em>you bring in keep moving.</em></h2>
 
         <div class="steps-grid" style="margin-bottom:48px;">
           <div class="step-card">
             <div class="step-circle"><span class="step-card-num">1</span></div>
             <h3>Share your code</h3>
-            <p>Your referral code works for both riders and drivers. Share it with any driver you know who's looking for flexible, well-paid chauffeur work.</p>
+            <p>Your reward code works for both riders and drivers. Share it with any driver you know who's looking for flexible, well-paid chauffeur work.</p>
           </div>
           <div class="step-card">
             <div class="step-circle"><span class="step-card-num">2</span></div>
             <h3>They register &amp; get approved</h3>
-            <p>The driver signs up using your code, completes vehicle verification, and is approved on the platform. They're now linked to your referral.</p>
+            <p>The driver signs up using your code, completes vehicle verification, and is approved on the platform. They're now linked to your reward programme account.</p>
           </div>
           <div class="step-card">
             <div class="step-circle"><span class="step-card-num">3</span></div>
             <h3>You earn on their activity</h3>
-            <p>Every trip your referred driver completes earns you 2.5% in loyalty rewards. The more they drive, the more you earn — passively.</p>
+            <p>Every trip your invited driver completes earns you 2.5% in loyalty rewards. The more they drive, the more you earn — passively.</p>
           </div>
         </div>
 
         <div class="earn-grid" style="margin-bottom:48px;">
           <div class="earn-card">
             <div class="earn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg></div>
-            <h3>2.5% on every referred driver trip</h3>
-            <p>When a driver you referred completes a trip, 2.5% from that qualifying trip activity goes into your loyalty balance. Automatically, every time.</p>
+            <h3>2.5% on every invited driver trip</h3>
+            <p>When a driver you invited completes a trip, 2.5% from that qualifying trip activity goes into your loyalty balance. Automatically, every time.</p>
           </div>
           <div class="earn-card">
             <div class="earn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></div>
             <h3>Stack with rider rewards</h3>
-            <p>As a driver, you also earn 2.5% loyalty rewards on your own completed trips. Driver referrals and ride rewards both flow into the same wallet balance.</p>
+            <p>As a driver, you also earn 2.5% loyalty rewards on your own completed trips. Driver rewards and ride rewards both flow into the same wallet balance.</p>
           </div>
           <div class="earn-card">
             <div class="earn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
@@ -313,7 +313,7 @@
       <div class="cta-band">
         <h2>Start earning on<br />every ride in your network.</h2>
         <div class="cta-band-actions">
-          <a href="login.html?next=referral.html" class="btn btn-primary">Get your referral link</a>
+          <a href="login.html?next=referral.html" class="btn btn-primary">Get your reward link</a>
           <a href="support.html#referrals" class="btn btn-ghost" style="color:var(--white);border-color:rgba(255,255,255,0.3);">Learn more</a>
         </div>
       </div>
@@ -333,8 +333,8 @@
             <a href="#" class="social-btn" aria-label="TikTok"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 0 0-.79-.05 6.34 6.34 0 0 0-6.34 6.34 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.69a8.2 8.2 0 0 0 4.78 1.53V6.78a4.85 4.85 0 0 1-1.01-.09z"/></svg></a>
           </div>
         </div>
-        <div class="footer-col"><h4>Passengers</h4><a href="rides.html">Book a ride</a><a href="long-distance.html">Long distance</a><a href="referral.html">Referral programme</a><a href="support.html">Support</a></div>
-        <div class="footer-col"><h4>Drivers</h4><a href="driver-register.html">Register to drive</a><a href="earn.html">How earnings work</a><a href="referral.html">Referral programme</a><a href="support.html#drivers">Driver guide</a></div>
+        <div class="footer-col"><h4>Passengers</h4><a href="rides.html">Book a ride</a><a href="long-distance.html">Long distance</a><a href="referral.html">Reward programme</a><a href="support.html">Support</a></div>
+        <div class="footer-col"><h4>Drivers</h4><a href="driver-register.html">Register to drive</a><a href="earn.html">How earnings work</a><a href="referral.html">Reward programme</a><a href="support.html#drivers">Driver guide</a></div>
         <div class="footer-col"><h4>Company</h4><a href="safety.html">Safety</a><a href="blog.html">Blog</a><a href="support.html">Support</a><a href="support.html#privacy">Privacy policy</a></div>
       </div>
       <div class="footer-bottom">
@@ -368,15 +368,16 @@
       const userStr = localStorage.getItem('a2b_user');
       const user = userStr ? JSON.parse(userStr) : {};
       const code = user.referralCode || '';
+      const appTarget = user.role === 'chauffeur' ? 'driver' : 'client';
       const base = window.location.origin || 'https://a2blift.com';
-      const link = `${base}/r/${encodeURIComponent(code)}`;
-      const msg = `Join me on A2B Lift — luxury rides across South Africa. Use my referral code ${code} or sign up at: ${link}`;
+      const link = `${base}/r/${encodeURIComponent(code)}?app=${encodeURIComponent(appTarget)}`;
+      const msg = `Join me on A2B Lift — luxury rides across South Africa. Use my reward code ${code} or sign up at: ${link}`;
       if (method === 'whatsapp') window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`);
       else if (method === 'sms') window.open(`sms:?body=${encodeURIComponent(msg)}`);
       else { navigator.clipboard.writeText(link); alert('Link copied!'); }
     }
 
-    // Load referral code if logged in
+    // Load reward code if logged in
     (async function() {
       const token = localStorage.getItem('a2b_token');
       const userStr = localStorage.getItem('a2b_user');

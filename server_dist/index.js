@@ -1532,7 +1532,7 @@ async function creditReferralReward(options) {
   }
   await storage.createNotification({
     userId: referrer.id,
-    title: "Referral Earnings",
+    title: "Reward Earnings",
     body: options.notificationBody.replace("{amount}", reward.toFixed(2)),
     type: "reward"
   });
@@ -2074,9 +2074,10 @@ async function registerRoutes(app2) {
         (event) => Number(event.totalRewards || 0) > 0 || event.status === "rewarded"
       ).length;
       const referralBase = process.env.EXPO_PUBLIC_REFERRAL_LINK_BASE_URL || process.env.EXPO_PUBLIC_DOMAIN || "https://api.a2blift.com";
+      const rewardApp = hydratedUser.role === "chauffeur" ? "driver" : "client";
       return res.json({
         referralCode: hydratedUser.referralCode,
-        shareUrl: `${String(referralBase).replace(/\/$/, "")}/r/${encodeURIComponent(hydratedUser.referralCode)}`,
+        shareUrl: `${String(referralBase).replace(/\/$/, "")}/r/${encodeURIComponent(hydratedUser.referralCode)}?app=${encodeURIComponent(rewardApp)}`,
         rewardsBalance: Number(hydratedUser.rewardsBalance || 0),
         referredCount: referralEvents2.length,
         rewardedReferrals,
@@ -4677,22 +4678,11 @@ async function registerRoutes(app2) {
   app2.get("/r/:code", (req, res) => {
     const normalizedCode = String(req.params.code || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
     if (!normalizedCode) {
-      return res.status(400).send("Invalid referral code");
+      return res.status(400).send("Invalid reward code");
     }
-    const androidPackage = "com.a2blift";
-    const iosAppStoreBase = process.env.IOS_APP_STORE_URL || process.env.EXPO_PUBLIC_IOS_APP_STORE_URL || "https://apps.apple.com/app/id982107779";
-    const iosAppStoreUrl = `${iosAppStoreBase}${iosAppStoreBase.includes("?") ? "&" : "?"}ref=${encodeURIComponent(normalizedCode)}`;
-    const playStoreUrl = `https://play.google.com/store/apps/details?id=${androidPackage}&referrer=${encodeURIComponent(`ref=${normalizedCode}`)}`;
-    const userAgent = String(req.headers["user-agent"] || "").toLowerCase();
-    const isAndroid = userAgent.includes("android");
-    const isIos = /(iphone|ipad|ipod)/.test(userAgent);
-    if (isAndroid) {
-      return res.redirect(302, playStoreUrl);
-    }
-    if (isIos) {
-      return res.redirect(302, iosAppStoreUrl);
-    }
-    return res.redirect(302, `https://a2blift.com/register?ref=${encodeURIComponent(normalizedCode)}`);
+    const requestedApp = String(req.query.app || req.query.source || req.query.role || "").trim().toLowerCase();
+    const appTarget = requestedApp === "driver" || requestedApp === "chauffeur" ? "driver" : "client";
+    return res.redirect(302, `https://a2blift.com/referral-launch.html?ref=${encodeURIComponent(normalizedCode)}&app=${encodeURIComponent(appTarget)}`);
   });
   app2.post("/api/long-distance/availability", requireAuth, async (req, res) => {
     try {
@@ -4880,8 +4870,8 @@ async function registerRoutes(app2) {
             sourceUserId: chauffeur.userId,
             grossFare: bookingFare,
             type: "driver_referral_commission",
-            description: "2.5% referral reward from a long-distance booking by a driver you referred",
-            notificationBody: "You earned R {amount} \u2014 2.5% from a long-distance booking by a driver you referred.",
+            description: "2.5% reward programme earning from a long-distance booking by a driver you invited",
+            notificationBody: "You earned R {amount} \u2014 2.5% from a long-distance booking by a driver you invited.",
             referencePrefix: "drv_ld_ref"
           });
           await creditReferralReward({
@@ -4889,8 +4879,8 @@ async function registerRoutes(app2) {
             sourceUserId: rider.id,
             grossFare: bookingFare,
             type: "rider_referral_commission",
-            description: "2.5% referral reward from a long-distance booking by a rider you referred",
-            notificationBody: "You earned R {amount} \u2014 2.5% from a long-distance booking by a rider you referred.",
+            description: "2.5% reward programme earning from a long-distance booking by a rider you invited",
+            notificationBody: "You earned R {amount} \u2014 2.5% from a long-distance booking by a rider you invited.",
             referencePrefix: "rdr_ld_ref"
           });
         } catch (referralErr) {
@@ -6254,8 +6244,8 @@ async function registerRoutes(app2) {
               rideId: ride.id,
               grossFare: ride.price,
               type: "driver_referral_commission",
-              description: "2.5% referral reward from a trip completed by a driver you referred",
-              notificationBody: "You earned R {amount} \u2014 2.5% from a trip completed by a driver you referred.",
+              description: "2.5% reward programme earning from a trip completed by a driver you invited",
+              notificationBody: "You earned R {amount} \u2014 2.5% from a trip completed by a driver you invited.",
               referencePrefix: "drv_ref"
             });
           }
@@ -6266,8 +6256,8 @@ async function registerRoutes(app2) {
               rideId: ride.id,
               grossFare: ride.price,
               type: "rider_referral_commission",
-              description: "2.5% referral reward from a trip completed by a rider you referred",
-              notificationBody: "You earned R {amount} \u2014 2.5% from a trip completed by a rider you referred.",
+              description: "2.5% reward programme earning from a trip completed by a rider you invited",
+              notificationBody: "You earned R {amount} \u2014 2.5% from a trip completed by a rider you invited.",
               referencePrefix: "rdr_ref"
             });
           }
@@ -7825,7 +7815,9 @@ async function configureExpoAndLanding(app2) {
   app2.get("/a2b-admin", serveAdmin);
   const serveReferralLaunch = (req, res) => {
     const referralCode = req.params.code;
-    const target = referralCode ? `/referral-launch.html?code=${encodeURIComponent(referralCode)}` : "/referral-launch.html";
+    const appTarget = String(req.query.app || req.query.source || req.query.role || "").trim();
+    const appQuery = appTarget ? `&app=${encodeURIComponent(appTarget)}` : "";
+    const target = referralCode ? `/referral-launch.html?code=${encodeURIComponent(referralCode)}${appQuery}` : "/referral-launch.html";
     res.redirect(302, target);
   };
   app2.get("/referral/:code", serveReferralLaunch);

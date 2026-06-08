@@ -174,7 +174,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 17h10"/><path d="M5 12h14"/><path d="M8 7h8"/><circle cx="7" cy="19" r="2"/><circle cx="17" cy="19" r="2"/></svg>Lift Club
         </div>
         <div class="dash-nav-item" onclick="showPage('referral')" id="nav-referral">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Referrals
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Rewards
+        </div>
+        <div class="dash-nav-item" id="nav-driverapply" style="display:none;" onclick="showPage('driverapply')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M17 11l2 2 4-5"/></svg>Become a driver
         </div>
         <div class="dash-nav-item" id="nav-driverapply" style="display:none;" onclick="showPage('driverapply')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M17 11l2 2 4-5"/></svg>Become a driver
@@ -205,7 +208,7 @@
           </div>
         </div>
         <div class="referral-box">
-          <div><h3>Refer friends, earn rewards</h3><p>Share your code and earn 2.5% when referred riders or drivers complete qualifying trips.</p></div>
+          <div><h3>Invite friends, earn rewards</h3><p>Share your code and earn 2.5% when invited riders or drivers complete qualifying trips.</p></div>
           <div class="ref-code-pill"><span id="ovRefCode">—</span><button class="copy-btn" style="background:rgba(255,255,255,0.15);color:var(--white);border:1px solid rgba(255,255,255,0.2);padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font);" onclick="copyCode('ovRefCode')">Copy</button></div>
         </div>
         <div class="driver-apply-card" id="overviewDriverApplyCard" style="display:none;">
@@ -314,16 +317,53 @@
 
       <!-- REFERRAL -->
       <div class="dash-page" id="page-referral">
-        <h1 class="dash-page-title">Referrals</h1>
+        <h1 class="dash-page-title">Rewards</h1>
         <div class="referral-box">
-          <div><h3>Your referral code</h3><p>Every trip someone in your network takes earns you rewards.</p></div>
+          <div><h3>Your reward code</h3><p>Every trip someone in your network takes earns you rewards.</p></div>
           <div class="ref-code-pill"><span id="refCodeDisplay">—</span><button class="copy-btn" style="background:rgba(255,255,255,0.15);color:var(--white);border:1px solid rgba(255,255,255,0.2);padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font);" onclick="copyCode('refCodeDisplay')">Copy</button></div>
         </div>
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:32px;">
           <button class="btn btn-primary" onclick="shareRef('whatsapp')">Share on WhatsApp</button>
           <button class="btn btn-ghost" onclick="shareRef('copy')">Copy link</button>
         </div>
-        <a href="referral.html" class="btn btn-ghost">View full referral details →</a>
+        <a href="referral.html" class="btn btn-ghost">View full reward details →</a>
+      </div>
+
+      <!-- DRIVER APPLICATION -->
+      <div class="dash-page" id="page-driverapply">
+        <h1 class="dash-page-title">Become a Driver</h1>
+        <div class="driver-apply-card">
+          <h3>Submit your driver application</h3>
+          <p>Use this form if you already have an A2B rider account and want to become a driver. Your account will move into the same admin approval flow used by the driver app.</p>
+          <div id="driverApplyStatus" style="font-size:13px;color:var(--grey-500);line-height:1.7;margin-bottom:16px;"></div>
+          <div class="ld-form-grid">
+            <div><label>Phone number</label><input type="tel" id="driverApplyPhone" placeholder="+27 82 123 4567" /></div>
+            <div><label>Driver photo</label><input type="file" id="driverApplyPhoto" accept="image/*" /></div>
+          </div>
+          <div class="doc-upload-grid">
+            <label class="doc-upload-tile" data-doc-tile="driver:pdrp_certificate">
+              <input type="file" id="docPdrp" accept="image/*,application/pdf" />
+              <div class="doc-upload-title">PDRP Certificate</div>
+              <div class="doc-upload-meta">Required · JPG, PNG or PDF</div>
+            </label>
+            <label class="doc-upload-tile" data-doc-tile="driver:drivers_license">
+              <input type="file" id="docLicense" accept="image/*,application/pdf" />
+              <div class="doc-upload-title">Valid Driver's License</div>
+              <div class="doc-upload-meta">Required · JPG, PNG or PDF</div>
+            </label>
+            <label class="doc-upload-tile" data-doc-tile="driver:criminal_background_check">
+              <input type="file" id="docBackground" accept="image/*,application/pdf" />
+              <div class="doc-upload-title">Criminal Background Check</div>
+              <div class="doc-upload-meta">Required · JPG, PNG or PDF</div>
+            </label>
+            <label class="doc-upload-tile" data-doc-tile="driver:driver_evaluation">
+              <input type="file" id="docEvaluation" accept="image/*,application/pdf" />
+              <div class="doc-upload-title">Driver Evaluation</div>
+              <div class="doc-upload-meta">Optional · JPG, PNG or PDF</div>
+            </label>
+          </div>
+          <button class="btn btn-primary" id="driverApplySubmitBtn" style="margin-top:20px;" onclick="submitDriverApplication()">Submit driver application</button>
+        </div>
       </div>
 
       <!-- DRIVER APPLICATION -->
@@ -509,10 +549,11 @@
     function shareRef(method) {
       const code = document.getElementById('refCodeDisplay').textContent;
       const base = window.location.origin || 'https://a2blift.com';
-      const link = `${base}/login.html?ref=${code}#register`;
-      const msg = `Join me on A2B Lift! Use my code ${code}: ${link}`;
+      const appTarget = currentUser?.role === 'chauffeur' ? 'driver' : 'client';
+      const link = `${base}/r/${encodeURIComponent(code)}?app=${encodeURIComponent(appTarget)}`;
+      const msg = `Join me on A2B Lift! Use my reward code ${code}: ${link}`;
       if (method === 'whatsapp') window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`);
-      else { navigator.clipboard.writeText(link); showNotification('Referral link copied!', 'success'); }
+      else { navigator.clipboard.writeText(link); showNotification('Reward link copied!', 'success'); }
     }
 
     function initDashMap() {

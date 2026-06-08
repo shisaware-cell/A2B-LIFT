@@ -346,8 +346,10 @@ async function configureExpoAndLanding(app: express.Application) {
 
   const serveReferralLaunch = (req: Request, res: Response) => {
     const referralCode = req.params.code;
+    const appTarget = String(req.query.app || req.query.source || req.query.role || "").trim();
+    const appQuery = appTarget ? `&app=${encodeURIComponent(appTarget)}` : "";
     const target = referralCode
-      ? `/referral-launch.html?code=${encodeURIComponent(referralCode)}`
+      ? `/referral-launch.html?code=${encodeURIComponent(referralCode)}${appQuery}`
       : "/referral-launch.html";
     res.redirect(302, target);
   };

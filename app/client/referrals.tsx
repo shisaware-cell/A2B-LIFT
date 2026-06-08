@@ -69,13 +69,14 @@ type ReferralDashboardResponse = ReferralSummary & {
 const IOS_APP_STORE_URL =
   process.env.EXPO_PUBLIC_IOS_APP_STORE_URL ||
   "https://apps.apple.com/app/id982107779";
-const ANDROID_PACKAGE_ID = "com.a2blift";
+const CLIENT_ANDROID_PACKAGE_ID = "com.a2blift.client";
+const DRIVER_ANDROID_PACKAGE_ID = "com.a2blift";
 const MIN_CASHOUT_AMOUNT = 100;
 const REFERRAL_PREVIEW_COUNT = 5;
 const REFERRALS_REFRESH_INTERVAL_MS = 60000;
 
 const TX_LABELS: Record<string, string> = {
-  referral_reward: "Referral reward",
+  referral_reward: "Reward programme",
   ride_cashback: "Trip cashback",
   ride_redemption: "Ride redemption",
   ride_refund: "Ride refund",
@@ -127,7 +128,19 @@ function transactionPrefix(type: string) {
   return "+";
 }
 
-function buildStoreReferralUrl(referralCode: string, target: "android" | "ios" | "auto" = "auto") {
+type RewardAppTarget = "client" | "driver";
+
+function appendRewardSource(url: string, appTarget: RewardAppTarget) {
+  if (/[?&]app=/.test(url)) return url;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}app=${encodeURIComponent(appTarget)}`;
+}
+
+function buildStoreReferralUrl(
+  referralCode: string,
+  target: "android" | "ios" | "auto" = "auto",
+  appTarget: RewardAppTarget = "client",
+) {
   const normalizedCode = referralCode.trim().toUpperCase();
   const resolvedTarget = target === "auto"
     ? (Platform.OS === "ios" ? "ios" : "android")
@@ -135,16 +148,19 @@ function buildStoreReferralUrl(referralCode: string, target: "android" | "ios" |
 
   if (resolvedTarget === "ios") {
     const separator = IOS_APP_STORE_URL.includes("?") ? "&" : "?";
-    return `${IOS_APP_STORE_URL}${separator}ref=${encodeURIComponent(normalizedCode)}`;
+    return `${IOS_APP_STORE_URL}${separator}ref=${encodeURIComponent(normalizedCode)}&app=${encodeURIComponent(appTarget)}`;
   }
 
-  return `https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE_ID}&referrer=ref%3D${encodeURIComponent(normalizedCode)}`;
+  const packageId = appTarget === "driver" ? DRIVER_ANDROID_PACKAGE_ID : CLIENT_ANDROID_PACKAGE_ID;
+  return `https://play.google.com/store/apps/details?id=${packageId}&referrer=${encodeURIComponent(`ref=${normalizedCode}&app=${appTarget}`)}`;
 }
 
-function buildReferralShareUrl(referralCode?: string | null, shareUrl?: string | null) {
+function buildRewardShareUrl(referralCode?: string | null, shareUrl?: string | null, appTarget: RewardAppTarget = "client") {
   const code = referralCode?.trim().toUpperCase();
-  if (!code) return shareUrl?.trim() || "";
-  return buildStoreReferralUrl(code);
+  const providedUrl = shareUrl?.trim();
+  if (providedUrl) return appendRewardSource(providedUrl, appTarget);
+  if (!code) return "";
+  return buildStoreReferralUrl(code, "auto", appTarget);
 }
 
 function getReferralActivityDate(person: ReferredPerson) {
@@ -158,13 +174,17 @@ function getReferralActivityCopy(person: ReferredPerson) {
   return `Joined with your invite on ${formatDate(person.joinedAt)}`;
 }
 
-function buildFallbackSummary(referralCode?: string | null, rewardsBalance?: number | null): ReferralSummary | null {
+function buildFallbackSummary(
+  referralCode?: string | null,
+  rewardsBalance?: number | null,
+  appTarget: RewardAppTarget = "client",
+): ReferralSummary | null {
   const normalizedCode = referralCode?.trim().toUpperCase();
   if (!normalizedCode) return null;
 
   return {
     referralCode: normalizedCode,
-    shareUrl: buildReferralShareUrl(normalizedCode),
+    shareUrl: buildRewardShareUrl(normalizedCode, null, appTarget),
     rewardsBalance: Number(rewardsBalance || 0),
     referredCount: 0,
     rewardedReferrals: 0,
@@ -213,6 +233,7 @@ export default function ReferralsScreen() {
     enteredCashoutAmount >= MIN_CASHOUT_AMOUNT &&
     enteredCashoutAmount <= rewardsBalance;
   const backRoute = segments[0] === "chauffeur" ? "/chauffeur" : "/client/profile";
+  const appTarget: RewardAppTarget = segments[0] === "chauffeur" ? "driver" : "client";
   const referralPreview = referredPeople.slice(0, REFERRAL_PREVIEW_COUNT);
 
   const loadData = useCallback(async (options?: { showLoader?: boolean }) => {
@@ -223,7 +244,7 @@ export default function ReferralsScreen() {
     }
     setLoadNotice(null);
 
-    const fallbackSummary = buildFallbackSummary(user?.referralCode, user?.rewardsBalance);
+    const fallbackSummary = buildFallbackSummary(user?.referralCode, user?.rewardsBalance, appTarget);
 
     try {
       let nextSummary = fallbackSummary;
@@ -239,7 +260,7 @@ export default function ReferralsScreen() {
 
         nextSummary = {
           referralCode: summaryPayload.referralCode,
-          shareUrl: buildReferralShareUrl(summaryPayload.referralCode, summaryPayload.shareUrl),
+          shareUrl: buildRewardShareUrl(summaryPayload.referralCode, summaryPayload.shareUrl, appTarget),
           rewardsBalance: Number(summaryPayload.rewardsBalance || 0),
           referredCount: Number(summaryPayload.referredCount || 0),
           rewardedReferrals: Number(summaryPayload.rewardedReferrals || 0),
@@ -290,7 +311,7 @@ export default function ReferralsScreen() {
           if (fallbackCode) {
             nextSummary = {
               referralCode: fallbackCode,
-              shareUrl: buildReferralShareUrl(fallbackCode, mePayload?.shareUrl),
+              shareUrl: buildRewardShareUrl(fallbackCode, mePayload?.shareUrl, appTarget),
               rewardsBalance: Number(mePayload?.rewardsBalance || 0),
               referredCount: nextSummary?.referredCount || 0,
               rewardedReferrals: nextSummary?.rewardedReferrals || 0,
@@ -311,7 +332,7 @@ export default function ReferralsScreen() {
         setLoading(false);
       }
     }
-  }, [user?.referralCode, user?.rewardsBalance]);
+  }, [appTarget, user?.referralCode, user?.rewardsBalance]);
 
   useFocusEffect(
     useCallback(() => {
@@ -331,15 +352,15 @@ export default function ReferralsScreen() {
 
   async function handleShareReferral() {
     const referralCode = summary?.referralCode || user?.referralCode || "";
-    const shareUrl = buildReferralShareUrl(referralCode, summary?.shareUrl);
+    const shareUrl = buildRewardShareUrl(referralCode, summary?.shareUrl, appTarget);
     if (!referralCode || !shareUrl) {
-      Alert.alert("Invite Unavailable", "Your referral link is still being prepared. Please try again in a moment.");
+      Alert.alert("Invite Unavailable", "Your reward link is still being prepared. Please try again in a moment.");
       return;
     }
 
     try {
       await Share.share({
-        message: `Join A2B LIFT with my referral code ${referralCode} Tap this link to open the app and start registration: ${shareUrl}`,
+        message: `Join A2B LIFT with my reward code ${referralCode}. Tap this link to open the app and start registration: ${shareUrl}`,
         url: shareUrl,
       });
     } catch (error: any) {
@@ -403,7 +424,7 @@ export default function ReferralsScreen() {
           <Pressable onPress={() => router.navigate(backRoute as any)} hitSlop={10}>
             <Ionicons name="chevron-back" size={24} color={Colors.white} />
           </Pressable>
-          <Text style={styles.title}>Referral Club</Text>
+          <Text style={styles.title}>Reward Programme</Text>
           <Pressable onPress={handleShareReferral} hitSlop={10}>
             <Ionicons name="share-social-outline" size={22} color={Colors.white} />
           </Pressable>
@@ -411,7 +432,7 @@ export default function ReferralsScreen() {
 
         <Text style={styles.eyebrow}>INVITE. EARN. RIDE.</Text>
         <Text style={styles.pageLead}>
-          Earn 2.5% back on every ride and another 2.5% when your referral completes a trip.
+          Earn 2.5% back on every ride and another 2.5% when someone you invited completes a trip.
         </Text>
 
         {loadNotice ? <Text style={styles.inlineNotice}>{loadNotice}</Text> : null}
@@ -426,11 +447,11 @@ export default function ReferralsScreen() {
             </View>
 
             <Text style={styles.cardCopyDark}>
-              Share your code. When your referral completes a trip, you earn another 2.5%.
+              Share your code. When someone you invited completes a trip, you earn another 2.5%.
             </Text>
 
             <View style={styles.codeBlock}>
-              <Text style={styles.codeBlockLabel}>Referral code</Text>
+              <Text style={styles.codeBlockLabel}>Reward code</Text>
               <Text style={styles.codeBlockValue}>{summary?.referralCode || "-"}</Text>
             </View>
 
@@ -440,7 +461,7 @@ export default function ReferralsScreen() {
                 {(() => {
                   const code = summary?.referralCode || user?.referralCode;
                   if (!code) return "Loading your link...";
-                  return buildStoreReferralUrl(code.trim().toUpperCase(), Platform.OS === "ios" ? "ios" : "android");
+                  return buildStoreReferralUrl(code.trim().toUpperCase(), Platform.OS === "ios" ? "ios" : "android", appTarget);
                 })()}
               </Text>
             </View>
@@ -479,7 +500,7 @@ export default function ReferralsScreen() {
 
             <View style={styles.balanceNotice}>
               <Ionicons name="sparkles-outline" size={16} color={Colors.white} />
-              <Text style={styles.balanceNoticeText}>Balances refresh after completed trips and referral rewards post automatically.</Text>
+              <Text style={styles.balanceNoticeText}>Balances refresh after completed trips and reward programme earnings post automatically.</Text>
             </View>
 
             <Text style={styles.minimumHint}>Minimum withdrawal request: R {MIN_CASHOUT_AMOUNT.toFixed(2)}</Text>
@@ -517,7 +538,7 @@ export default function ReferralsScreen() {
 
         <View style={[styles.metricGrid, isWide && styles.metricGridWide]}>
           <View style={styles.metricCard}>
-            <Text style={styles.metricLabel}>People referred</Text>
+            <Text style={styles.metricLabel}>People invited</Text>
             <Text style={styles.metricValue}>{summary?.referredCount || 0}</Text>
           </View>
           <View style={styles.metricCard}>
@@ -670,18 +691,18 @@ export default function ReferralsScreen() {
           <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 16 }]}> 
             <View style={styles.modalHeaderRow}>
               <View style={styles.modalHeaderCopy}>
-                <Text style={styles.modalEyebrow}>YOUR REFERRALS</Text>
-                <Text style={styles.modalTitle}>People you referred</Text>
+                <Text style={styles.modalEyebrow}>YOUR INVITES</Text>
+                <Text style={styles.modalTitle}>People you invited</Text>
               </View>
               <Pressable style={styles.modalCloseButton} onPress={() => setShowReferredPeople(false)} hitSlop={10}>
                 <Ionicons name="close" size={18} color={Colors.textSecondary} />
               </Pressable>
             </View>
             <Text style={styles.modalCopy}>
-              See who joined with your invite and when each referral started earning rewards.
+              See who joined with your invite and when each person started earning rewards.
             </Text>
             {referredPeople.length === 0 ? (
-              <Text style={styles.emptyText}>No referred riders yet.</Text>
+              <Text style={styles.emptyText}>No invited riders yet.</Text>
             ) : (
               <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
                 {referredPeople.map((person, index) => (

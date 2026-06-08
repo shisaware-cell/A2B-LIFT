@@ -213,8 +213,8 @@ export default function ProfileScreen() {
           <Ionicons name="gift-outline" size={18} color={Colors.white} />
         </View>
         <View style={styles.referralCardCopy}>
-          <Text style={styles.referralCardTitle}>Referral Club</Text>
-          <Text style={styles.referralCardText}>Invite friends, track rewards, and share your referral code.</Text>
+          <Text style={styles.referralCardTitle}>Reward Programme</Text>
+          <Text style={styles.referralCardText}>Invite friends, track rewards, and share your reward code.</Text>
         </View>
         <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
       </Pressable>
@@ -279,7 +279,7 @@ export default function ProfileScreen() {
           <View style={styles.menuIconCircle}>
             <Ionicons name="gift-outline" size={20} color={Colors.white} />
           </View>
-          <Text style={styles.menuText}>Referral & Rewards</Text>
+          <Text style={styles.menuText}>Rewards</Text>
           <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
         </Pressable>
       </View>

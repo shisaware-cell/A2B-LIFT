@@ -125,7 +125,7 @@ async function creditReferralReward(options: {
 
   await storage.createNotification({
     userId: referrer.id,
-    title: "Referral Earnings",
+    title: "Reward Earnings",
     body: options.notificationBody.replace("{amount}", reward.toFixed(2)),
     type: "reward",
   });
@@ -859,10 +859,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         process.env.EXPO_PUBLIC_REFERRAL_LINK_BASE_URL ||
         process.env.EXPO_PUBLIC_DOMAIN ||
         "https://api.a2blift.com";
+      const rewardApp = hydratedUser.role === "chauffeur" ? "driver" : "client";
 
       return res.json({
         referralCode: hydratedUser.referralCode,
-        shareUrl: `${String(referralBase).replace(/\/$/, "")}/r/${encodeURIComponent(hydratedUser.referralCode)}`,
+        shareUrl: `${String(referralBase).replace(/\/$/, "")}/r/${encodeURIComponent(hydratedUser.referralCode)}?app=${encodeURIComponent(rewardApp)}`,
         rewardsBalance: Number(hydratedUser.rewardsBalance || 0),
         referredCount: referralEvents.length,
         rewardedReferrals,
@@ -4005,30 +4006,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       .replace(/[^A-Z0-9]/g, "");
 
     if (!normalizedCode) {
-      return res.status(400).send("Invalid referral code");
+      return res.status(400).send("Invalid reward code");
     }
 
-    const androidPackage = "com.a2blift";
-    const iosAppStoreBase =
-      process.env.IOS_APP_STORE_URL ||
-      process.env.EXPO_PUBLIC_IOS_APP_STORE_URL ||
-      "https://apps.apple.com/app/id982107779";
-    const iosAppStoreUrl = `${iosAppStoreBase}${iosAppStoreBase.includes("?") ? "&" : "?"}ref=${encodeURIComponent(normalizedCode)}`;
-    const playStoreUrl = `https://play.google.com/store/apps/details?id=${androidPackage}&referrer=${encodeURIComponent(`ref=${normalizedCode}`)}`;
+    const requestedApp = String(req.query.app || req.query.source || req.query.role || "")
+      .trim()
+      .toLowerCase();
+    const appTarget = requestedApp === "driver" || requestedApp === "chauffeur" ? "driver" : "client";
 
-    const userAgent = String(req.headers["user-agent"] || "").toLowerCase();
-    const isAndroid = userAgent.includes("android");
-    const isIos = /(iphone|ipad|ipod)/.test(userAgent);
-
-    if (isAndroid) {
-      return res.redirect(302, playStoreUrl);
-    }
-
-    if (isIos) {
-      return res.redirect(302, iosAppStoreUrl);
-    }
-
-    return res.redirect(302, `https://a2blift.com/register?ref=${encodeURIComponent(normalizedCode)}`);
+    return res.redirect(302, `https://a2blift.com/referral-launch.html?ref=${encodeURIComponent(normalizedCode)}&app=${encodeURIComponent(appTarget)}`);
   });
 
   // ─── Long Distance: driver availability toggle ───────────────────────────
@@ -4257,8 +4243,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             sourceUserId: chauffeur.userId,
             grossFare: bookingFare,
             type: "driver_referral_commission",
-            description: "2.5% referral reward from a long-distance booking by a driver you referred",
-            notificationBody: "You earned R {amount} — 2.5% from a long-distance booking by a driver you referred.",
+            description: "2.5% reward programme earning from a long-distance booking by a driver you invited",
+            notificationBody: "You earned R {amount} — 2.5% from a long-distance booking by a driver you invited.",
             referencePrefix: "drv_ld_ref",
           });
           await creditReferralReward({
@@ -4266,8 +4252,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             sourceUserId: rider.id,
             grossFare: bookingFare,
             type: "rider_referral_commission",
-            description: "2.5% referral reward from a long-distance booking by a rider you referred",
-            notificationBody: "You earned R {amount} — 2.5% from a long-distance booking by a rider you referred.",
+            description: "2.5% reward programme earning from a long-distance booking by a rider you invited",
+            notificationBody: "You earned R {amount} — 2.5% from a long-distance booking by a rider you invited.",
             referencePrefix: "rdr_ld_ref",
           });
         } catch (referralErr: any) {
@@ -5869,7 +5855,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.error("earnings record failed (non-fatal):", earningsErr.message);
         }
 
-        // ── Referral rewards: credit 2.5% for referred drivers and riders ──
+        // ── Reward programme earnings: credit 2.5% for invited drivers and riders ──
         try {
           const completingChauffeur = await storage.getChauffeur(ride.chauffeurId);
           if (completingChauffeur?.userId) {
@@ -5879,8 +5865,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
               rideId: ride.id,
               grossFare: ride.price,
               type: "driver_referral_commission",
-              description: "2.5% referral reward from a trip completed by a driver you referred",
-              notificationBody: "You earned R {amount} — 2.5% from a trip completed by a driver you referred.",
+              description: "2.5% reward programme earning from a trip completed by a driver you invited",
+              notificationBody: "You earned R {amount} — 2.5% from a trip completed by a driver you invited.",
               referencePrefix: "drv_ref",
             });
           }
@@ -5891,8 +5877,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
               rideId: ride.id,
               grossFare: ride.price,
               type: "rider_referral_commission",
-              description: "2.5% referral reward from a trip completed by a rider you referred",
-              notificationBody: "You earned R {amount} — 2.5% from a trip completed by a rider you referred.",
+              description: "2.5% reward programme earning from a trip completed by a rider you invited",
+              notificationBody: "You earned R {amount} — 2.5% from a trip completed by a rider you invited.",
               referencePrefix: "rdr_ref",
             });
           }

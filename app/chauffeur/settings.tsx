@@ -294,7 +294,7 @@ export default function ChauffeurSettingsScreen() {
           <View style={styles.menuIconCircle}>
             <Ionicons name="gift-outline" size={20} color={Colors.white} />
           </View>
-          <Text style={styles.menuText}>Referral & Rewards</Text>
+          <Text style={styles.menuText}>Rewards</Text>
           <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
         </Pressable>
       </View>

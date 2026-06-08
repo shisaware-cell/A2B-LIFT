@@ -26,8 +26,8 @@ export default function ChauffeurReferralsScreen() {
     return (
       <View style={[styles.container, styles.center]}>
         <Ionicons name="lock-closed-outline" size={46} color={Colors.textMuted} />
-        <Text style={styles.title}>Referrals are for drivers</Text>
-        <Text style={styles.body}>Partner accounts manage fleet operations and do not have referral links.</Text>
+        <Text style={styles.title}>Rewards are for drivers</Text>
+        <Text style={styles.body}>Partner accounts manage fleet operations and do not have reward programme links.</Text>
         <Pressable style={styles.button} onPress={() => router.back()}>
           <Text style={styles.buttonText}>Back</Text>
         </Pressable>

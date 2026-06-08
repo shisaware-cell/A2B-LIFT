@@ -135,7 +135,7 @@ export default function LoginScreen() {
           <View style={styles.referralNotice}>
             <Ionicons name="gift-outline" size={18} color={Colors.white} />
             <View style={styles.referralNoticeCopy}>
-              <Text style={styles.referralNoticeTitle}>Referral saved</Text>
+              <Text style={styles.referralNoticeTitle}>Reward code saved</Text>
               <Text style={styles.referralNoticeText}>
                 Code {pendingReferralCode} will be applied when you create your account.
               </Text>

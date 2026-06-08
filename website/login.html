@@ -75,7 +75,7 @@
             </button>
           </div>
           <div class="form-divider">or sign up with email</div>
-          <p id="referralHint" style="display:none;font-size:13px;color:var(--grey-600);text-align:center;line-height:1.7;background:var(--grey-50);border:1px solid var(--grey-200);border-radius:var(--radius-sm);padding:10px 12px;">Referral code applied.</p>
+          <p id="referralHint" style="display:none;font-size:13px;color:var(--grey-600);text-align:center;line-height:1.7;background:var(--grey-50);border:1px solid var(--grey-200);border-radius:var(--radius-sm);padding:10px 12px;">Reward code applied.</p>
           <form id="registerForm" onsubmit="handleRegister(event)">
             <div class="auth-form">
               <div class="auth-name-row">
@@ -197,13 +197,13 @@
     const urlState = new URLSearchParams(window.location.search);
     const referralCode = (urlState.get('ref') || '').trim().toUpperCase();
 
-    // Pre-select tab from URL hash or referral deep link
+    // Pre-select tab from URL hash or reward deep link
     if (window.location.hash === '#register' || referralCode) switchTab('register');
 
     if (referralCode) {
       const hint = document.getElementById('referralHint');
       hint.style.display = 'block';
-      hint.textContent = `Referral code applied: ${referralCode}`;
+      hint.textContent = `Reward code applied: ${referralCode}`;
     }
 
     (function handleGoogleCallback() {

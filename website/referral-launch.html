@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Open A2B Lift</title>
-  <meta name="description" content="Open the A2B Lift app with your referral code." />
+  <meta name="description" content="Open the A2B Lift app with your reward code." />
   <link rel="icon" href="assets/images/favicon.png" />
   <style>
     :root {
@@ -143,11 +143,11 @@
 </head>
 <body>
   <main class="card">
-    <div class="eyebrow"><span class="dot"></span> Referral invite</div>
+    <div class="eyebrow"><span class="dot"></span> Reward invite</div>
     <h1>Open A2B Lift</h1>
-    <p id="lead">We are opening the app with your referral code now.</p>
+    <p id="lead">We are opening the app with your reward code now.</p>
     <div class="code" id="codeBlock" hidden>
-      Referral code<br />
+      Reward code<br />
       <strong id="codeValue"></strong>
     </div>
     <div class="actions">
@@ -159,7 +159,18 @@
   </main>
 
   <script>
-    const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.a2blift";
+    const APP_TARGETS = {
+      client: {
+        scheme: "a2bliftclient",
+        packageId: "com.a2blift.client",
+        playStoreUrl: "https://play.google.com/store/apps/details?id=com.a2blift.client",
+      },
+      driver: {
+        scheme: "a2blift",
+        packageId: "com.a2blift",
+        playStoreUrl: "https://play.google.com/store/apps/details?id=com.a2blift",
+      },
+    };
 
     function normalizeReferralCode(value) {
       return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -167,7 +178,7 @@
 
     function extractReferralCode() {
       const params = new URLSearchParams(window.location.search);
-      const queryRef = normalizeReferralCode(params.get("ref"));
+      const queryRef = normalizeReferralCode(params.get("ref") || params.get("code"));
       if (queryRef) return queryRef;
 
       const segments = window.location.pathname.split("/").filter(Boolean);
@@ -178,16 +189,24 @@
       return "";
     }
 
+    function getAppTarget() {
+      const params = new URLSearchParams(window.location.search);
+      const rawTarget = String(params.get("app") || params.get("source") || params.get("role") || "").trim().toLowerCase();
+      return rawTarget === "driver" || rawTarget === "chauffeur" ? "driver" : "client";
+    }
+
     const referralCode = extractReferralCode();
+    const appTarget = getAppTarget();
+    const appConfig = APP_TARGETS[appTarget];
     const appUrl = referralCode
-      ? `a2blift://register?ref=${encodeURIComponent(referralCode)}`
-      : "a2blift://register";
+      ? `${appConfig.scheme}://register?ref=${encodeURIComponent(referralCode)}&app=${encodeURIComponent(appTarget)}`
+      : `${appConfig.scheme}://register`;
     const webUrl = referralCode
       ? `/login.html?ref=${encodeURIComponent(referralCode)}#register`
       : "/login.html#register";
     const playStoreUrl = referralCode
-      ? `${PLAY_STORE_URL}&referrer=${encodeURIComponent(`ref=${referralCode}`)}`
-      : PLAY_STORE_URL;
+      ? `${appConfig.playStoreUrl}&referrer=${encodeURIComponent(`ref=${referralCode}&app=${appTarget}`)}`
+      : appConfig.playStoreUrl;
 
     document.getElementById("openAppBtn").href = appUrl;
     document.getElementById("downloadBtn").href = playStoreUrl;
