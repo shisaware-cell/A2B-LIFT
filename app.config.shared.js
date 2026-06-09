@@ -10,7 +10,7 @@ const defaultPamolProjectId = "f282a582-7512-48d6-b563-13aa571d9115";
 const defaultPascalProjectId = "eb3b8747-40b2-4aad-b118-e64339bfeea0";
 const defaultClientProjectId = "9932543b-f023-4dec-8213-5d0fe99ad749";
 const defaultClientSlug = "a2b-lift-client-eas-mFdHJz";
-const currentAndroidVersionCode = 98;
+const currentAndroidVersionCode = 100;
 
 function normalizeAssetPrefix(assetPrefix = ".") {
   return String(assetPrefix || ".").replace(/\/$/, "");
@@ -152,7 +152,8 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
             targetSdkVersion: 35,
             minSdkVersion: 24,
             ndkVersion: "27.1.12297006",
-            useLegacyPackaging: true,
+            useLegacyPackaging: false,
+            buildArchs: ["arm64-v8a", "x86_64"],
           },
         },
       ],
