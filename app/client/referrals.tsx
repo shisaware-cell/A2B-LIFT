@@ -130,9 +130,10 @@ function transactionPrefix(type: string) {
 type RewardAppTarget = "client" | "driver";
 
 function appendRewardSource(url: string, appTarget: RewardAppTarget) {
-  if (/[?&]app=/.test(url)) return url;
-  const separator = url.includes("?") ? "&" : "?";
-  return `${url}${separator}app=${encodeURIComponent(appTarget)}`;
+  const publicUrl = url.replace(/^https:\/\/api\.a2blift\.com(?=\/)/i, "https://a2blift.com");
+  if (/[?&]app=/.test(publicUrl)) return publicUrl;
+  const separator = publicUrl.includes("?") ? "&" : "?";
+  return `${publicUrl}${separator}app=${encodeURIComponent(appTarget)}`;
 }
 
 function buildRewardLandingUrl(referralCode: string, appTarget: RewardAppTarget = "client") {

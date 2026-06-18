@@ -1008,16 +1008,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (event) => Number(event.totalRewards || 0) > 0 || event.status === "rewarded",
       ).length;
 
-      const referralBase =
+      const configuredReferralBase =
         process.env.EXPO_PUBLIC_REFERRAL_LINK_BASE_URL ||
         process.env.EXPO_PUBLIC_REFERRAL_BASE_URL ||
-        process.env.EXPO_PUBLIC_DOMAIN ||
+        process.env.A2B_PUBLIC_SITE_URL ||
+        process.env.PUBLIC_SITE_URL ||
         "https://a2blift.com";
+      const referralBase = String(configuredReferralBase)
+        .replace(/\/$/, "")
+        .replace(/^https:\/\/api\.a2blift\.com$/i, "https://a2blift.com");
       const rewardApp = hydratedUser.role === "chauffeur" ? "driver" : "client";
 
       return res.json({
         referralCode: hydratedUser.referralCode,
-        shareUrl: `${String(referralBase).replace(/\/$/, "")}/r/${encodeURIComponent(hydratedUser.referralCode)}?app=${encodeURIComponent(rewardApp)}`,
+        shareUrl: `${referralBase}/r/${encodeURIComponent(hydratedUser.referralCode)}?app=${encodeURIComponent(rewardApp)}`,
         rewardsBalance: Number(hydratedUser.rewardsBalance || 0),
         referredCount: referralEvents.length,
         rewardedReferrals,
