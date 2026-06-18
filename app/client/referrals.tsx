@@ -66,11 +66,10 @@ type ReferralDashboardResponse = ReferralSummary & {
   cashouts?: RewardCashout[];
 };
 
-const IOS_APP_STORE_URL =
-  process.env.EXPO_PUBLIC_IOS_APP_STORE_URL ||
-  "https://apps.apple.com/app/id982107779";
-const CLIENT_ANDROID_PACKAGE_ID = "com.a2blift.client";
-const DRIVER_ANDROID_PACKAGE_ID = "com.a2blift";
+const REWARD_LINK_BASE_URL =
+  process.env.EXPO_PUBLIC_REFERRAL_LINK_BASE_URL ||
+  process.env.EXPO_PUBLIC_REFERRAL_BASE_URL ||
+  "https://a2blift.com";
 const MIN_CASHOUT_AMOUNT = 100;
 const REFERRAL_PREVIEW_COUNT = 5;
 const REFERRALS_REFRESH_INTERVAL_MS = 60000;
@@ -136,23 +135,10 @@ function appendRewardSource(url: string, appTarget: RewardAppTarget) {
   return `${url}${separator}app=${encodeURIComponent(appTarget)}`;
 }
 
-function buildStoreReferralUrl(
-  referralCode: string,
-  target: "android" | "ios" | "auto" = "auto",
-  appTarget: RewardAppTarget = "client",
-) {
+function buildRewardLandingUrl(referralCode: string, appTarget: RewardAppTarget = "client") {
   const normalizedCode = referralCode.trim().toUpperCase();
-  const resolvedTarget = target === "auto"
-    ? (Platform.OS === "ios" ? "ios" : "android")
-    : target;
-
-  if (resolvedTarget === "ios") {
-    const separator = IOS_APP_STORE_URL.includes("?") ? "&" : "?";
-    return `${IOS_APP_STORE_URL}${separator}ref=${encodeURIComponent(normalizedCode)}&app=${encodeURIComponent(appTarget)}`;
-  }
-
-  const packageId = appTarget === "driver" ? DRIVER_ANDROID_PACKAGE_ID : CLIENT_ANDROID_PACKAGE_ID;
-  return `https://play.google.com/store/apps/details?id=${packageId}&referrer=${encodeURIComponent(`ref=${normalizedCode}&app=${appTarget}`)}`;
+  const base = String(REWARD_LINK_BASE_URL).replace(/\/$/, "");
+  return `${base}/r/${encodeURIComponent(normalizedCode)}?app=${encodeURIComponent(appTarget)}`;
 }
 
 function buildRewardShareUrl(referralCode?: string | null, shareUrl?: string | null, appTarget: RewardAppTarget = "client") {
@@ -160,7 +146,7 @@ function buildRewardShareUrl(referralCode?: string | null, shareUrl?: string | n
   const providedUrl = shareUrl?.trim();
   if (providedUrl) return appendRewardSource(providedUrl, appTarget);
   if (!code) return "";
-  return buildStoreReferralUrl(code, "auto", appTarget);
+  return buildRewardLandingUrl(code, appTarget);
 }
 
 function getReferralActivityDate(person: ReferredPerson) {
@@ -461,7 +447,7 @@ export default function ReferralsScreen() {
                 {(() => {
                   const code = summary?.referralCode || user?.referralCode;
                   if (!code) return "Loading your link...";
-                  return buildStoreReferralUrl(code.trim().toUpperCase(), Platform.OS === "ios" ? "ios" : "android", appTarget);
+                  return buildRewardShareUrl(code.trim().toUpperCase(), summary?.shareUrl, appTarget);
                 })()}
               </Text>
             </View>

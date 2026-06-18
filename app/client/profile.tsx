@@ -27,7 +27,10 @@ interface ClientProfileDetails {
 
 const DRIVER_APP_DEEP_LINK = "a2blift://register";
 const DRIVER_ANDROID_PACKAGE = "com.a2blift";
-const DRIVER_APP_STORE_URL_IOS = process.env.EXPO_PUBLIC_IOS_APP_STORE_URL || "https://apps.apple.com/app/id982107779";
+const REWARD_LINK_BASE_URL =
+  process.env.EXPO_PUBLIC_REFERRAL_LINK_BASE_URL ||
+  process.env.EXPO_PUBLIC_REFERRAL_BASE_URL ||
+  "https://a2blift.com";
 const DRIVER_APP_STORE_URL_ANDROID_WEB = `https://play.google.com/store/apps/details?id=${DRIVER_ANDROID_PACKAGE}`;
 
 function normalizeReferralCode(value?: string | null) {
@@ -49,7 +52,13 @@ function buildAndroidStoreUrl(referralCode?: string | null, useNativeStoreScheme
     ? `market://details?id=${DRIVER_ANDROID_PACKAGE}`
     : DRIVER_APP_STORE_URL_ANDROID_WEB;
   if (!referralCode) return baseUrl;
-  return `${baseUrl}&referrer=${encodeURIComponent(`ref=${referralCode}`)}`;
+  return `${baseUrl}&referrer=${encodeURIComponent(`ref=${referralCode}&app=driver`)}`;
+}
+
+function buildDriverWebUrl(referralCode?: string | null) {
+  const base = String(REWARD_LINK_BASE_URL).replace(/\/$/, "");
+  if (!referralCode) return `${base}/driver-register.html`;
+  return `${base}/r/${encodeURIComponent(referralCode)}?app=driver`;
 }
 
 export default function ProfileScreen() {
@@ -119,10 +128,10 @@ export default function ProfileScreen() {
     const referralCode = normalizeReferralCode(pendingReferralCode);
     const driverAppUrl = appendQueryParam(DRIVER_APP_DEEP_LINK, "ref", referralCode);
     const platformStoreUrl = Platform.OS === "ios"
-      ? appendQueryParam(DRIVER_APP_STORE_URL_IOS, "ref", referralCode)
+      ? buildDriverWebUrl(referralCode)
       : buildAndroidStoreUrl(referralCode, true);
     const webStoreUrl = Platform.OS === "ios"
-      ? appendQueryParam(DRIVER_APP_STORE_URL_IOS, "ref", referralCode)
+      ? buildDriverWebUrl(referralCode)
       : buildAndroidStoreUrl(referralCode, false);
 
     try {

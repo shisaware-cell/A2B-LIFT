@@ -1010,8 +1010,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const referralBase =
         process.env.EXPO_PUBLIC_REFERRAL_LINK_BASE_URL ||
+        process.env.EXPO_PUBLIC_REFERRAL_BASE_URL ||
         process.env.EXPO_PUBLIC_DOMAIN ||
-        "https://api.a2blift.com";
+        "https://a2blift.com";
       const rewardApp = hydratedUser.role === "chauffeur" ? "driver" : "client";
 
       return res.json({

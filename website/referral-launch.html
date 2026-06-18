@@ -152,7 +152,7 @@
     </div>
     <div class="actions">
       <a id="openAppBtn" class="btn btn-primary" href="#">Open the app</a>
-      <a id="downloadBtn" class="btn btn-secondary" href="https://play.google.com/store/apps/details?id=com.a2blift">Download on Google Play</a>
+      <a id="downloadBtn" class="btn btn-secondary" href="/login.html#register">Continue on the web</a>
       <a id="webBtn" class="btn btn-secondary" href="/login.html#register">Continue on the web</a>
     </div>
     <div class="status" id="status">If the app does not open, use the buttons below.</div>
@@ -163,12 +163,16 @@
       client: {
         scheme: "a2bliftclient",
         packageId: "com.a2blift.client",
-        playStoreUrl: "https://play.google.com/store/apps/details?id=com.a2blift.client",
+        iosStoreUrl: window.A2B_CLIENT_IOS_APP_STORE_URL || "",
+        playStoreUrl: "",
+        webUrl: "/login.html#register",
       },
       driver: {
         scheme: "a2blift",
         packageId: "com.a2blift",
+        iosStoreUrl: window.A2B_DRIVER_IOS_APP_STORE_URL || "",
         playStoreUrl: "https://play.google.com/store/apps/details?id=com.a2blift",
+        webUrl: "/driver-register.html",
       },
     };
 
@@ -195,21 +199,30 @@
       return rawTarget === "driver" || rawTarget === "chauffeur" ? "driver" : "client";
     }
 
+    function appendQuery(url, key, value) {
+      if (!value) return url;
+      const [base, hash = ""] = String(url).split("#");
+      const separator = base.includes("?") ? "&" : "?";
+      return `${base}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}${hash ? `#${hash}` : ""}`;
+    }
+
     const referralCode = extractReferralCode();
     const appTarget = getAppTarget();
     const appConfig = APP_TARGETS[appTarget];
     const appUrl = referralCode
       ? `${appConfig.scheme}://register?ref=${encodeURIComponent(referralCode)}&app=${encodeURIComponent(appTarget)}`
       : `${appConfig.scheme}://register`;
-    const webUrl = referralCode
-      ? `/login.html?ref=${encodeURIComponent(referralCode)}#register`
-      : "/login.html#register";
-    const playStoreUrl = referralCode
-      ? `${appConfig.playStoreUrl}&referrer=${encodeURIComponent(`ref=${referralCode}&app=${appTarget}`)}`
-      : appConfig.playStoreUrl;
+    const webUrl = appendQuery(appConfig.webUrl, "ref", referralCode);
+    const playStoreUrl = appConfig.playStoreUrl
+      ? `${appConfig.playStoreUrl}${referralCode ? `&referrer=${encodeURIComponent(`ref=${referralCode}&app=${appTarget}`)}` : ""}`
+      : "";
+    const iosStoreBaseUrl = appendQuery(appConfig.iosStoreUrl, "ref", referralCode);
+    const iosStoreUrl = iosStoreBaseUrl
+      ? appendQuery(iosStoreBaseUrl, "app", appTarget)
+      : "";
 
     document.getElementById("openAppBtn").href = appUrl;
-    document.getElementById("downloadBtn").href = playStoreUrl;
+    document.getElementById("downloadBtn").href = webUrl;
     document.getElementById("webBtn").href = webUrl;
 
     if (referralCode) {
@@ -231,15 +244,37 @@
       if (document.visibilityState === "hidden") return;
 
       if (isAndroid) {
-        status.textContent = "App not detected. Redirecting to Google Play...";
-        window.location.replace(playStoreUrl);
+        if (playStoreUrl) {
+          status.textContent = "App not detected. Redirecting to Google Play...";
+          window.location.replace(playStoreUrl);
+          return;
+        }
+        status.textContent = "App not detected. Continue on the web while this app is being prepared for Android.";
+        return;
+      }
+
+      if (isIOS && iosStoreUrl) {
+        status.textContent = "App not detected. Redirecting to the App Store...";
+        window.location.replace(iosStoreUrl);
         return;
       }
 
       status.textContent = isIOS
-        ? "App not detected. Use the button below or continue on the web."
-        : "If the app does not open, continue on the web or download it below.";
+        ? "App not detected. Continue on the web while this app is being prepared for iPhone."
+        : "If the app does not open, continue on the web.";
     }, 1400);
+
+    if (isAndroid && playStoreUrl) {
+      document.getElementById("downloadBtn").href = playStoreUrl;
+      document.getElementById("downloadBtn").textContent = "Download on Google Play";
+    } else if (isIOS && iosStoreUrl) {
+      document.getElementById("downloadBtn").href = iosStoreUrl;
+      document.getElementById("downloadBtn").textContent = "Download on the App Store";
+    } else {
+      document.getElementById("downloadBtn").textContent = appTarget === "driver"
+        ? "Continue driver signup on the web"
+        : "Continue rider signup on the web";
+    }
 
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") {
