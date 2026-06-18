@@ -11,6 +11,7 @@ import {
   partnerProfiles,
   vehicles,
   vehicleAssignments,
+  fleetDriverInvites,
   liftClubRoutes,
   liftClubBookings,
   documents,
@@ -445,6 +446,14 @@ export class DatabaseStorage implements IStorage {
         or(
           eq(vehicleAssignments.driverOperatorProfileId, id),
           eq(vehicleAssignments.assignedByOperatorProfileId, id),
+        ),
+      );
+    await db
+      .delete(fleetDriverInvites)
+      .where(
+        or(
+          eq(fleetDriverInvites.driverOperatorProfileId, id),
+          eq(fleetDriverInvites.invitedByOperatorProfileId, id),
         ),
       );
     await db.delete(partnerProfiles).where(eq(partnerProfiles.operatorProfileId, id));

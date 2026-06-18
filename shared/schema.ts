@@ -247,6 +247,31 @@ export const vehicleAssignments = pgTable("vehicle_assignments", {
   removedAt: timestamp("removed_at"),
 });
 
+export const fleetDriverInvites = pgTable("fleet_driver_invites", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  driverOperatorProfileId: varchar("driver_operator_profile_id")
+    .notNull()
+    .references(() => operatorProfiles.id),
+  invitedByOperatorProfileId: varchar("invited_by_operator_profile_id")
+    .notNull()
+    .references(() => operatorProfiles.id),
+  invitedByUserId: varchar("invited_by_user_id")
+    .notNull()
+    .references(() => users.id),
+  status: text("status").notNull().default("pending"),
+  emailStatus: text("email_status").notNull().default("queued"),
+  emailError: text("email_error"),
+  message: text("message"),
+  resendId: text("resend_id"),
+  sentAt: timestamp("sent_at"),
+  acceptedAt: timestamp("accepted_at"),
+  declinedAt: timestamp("declined_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const liftClubRoutes = pgTable("lift_club_routes", {
   id: varchar("id")
     .primaryKey()
@@ -557,6 +582,7 @@ export type OperatorProfile = typeof operatorProfiles.$inferSelect;
 export type PartnerProfile = typeof partnerProfiles.$inferSelect;
 export type Vehicle = typeof vehicles.$inferSelect;
 export type VehicleAssignment = typeof vehicleAssignments.$inferSelect;
+export type FleetDriverInvite = typeof fleetDriverInvites.$inferSelect;
 export type LiftClubRoute = typeof liftClubRoutes.$inferSelect;
 export type LiftClubBooking = typeof liftClubBookings.$inferSelect;
 export type Document = typeof documents.$inferSelect;

@@ -3000,7 +3000,162 @@ export async function registerRoutes(app: Express): Promise<Server> {
       profile.type === "driver" ? storage.getChauffeurByUserId(profile.userId).catch(() => undefined) : Promise.resolve(null),
       profile.type === "partner" ? storage.getPartnerProfileByOperatorId(profile.id).catch(() => undefined) : Promise.resolve(null),
     ]);
-    return { ...profile, user: user || null, chauffeur: chauffeur || null, partnerProfile: partnerProfile || null };
+    const safeUser = user ? (({ password: _password, ...rest }) => rest)(user as any) : null;
+    return { ...profile, user: safeUser, chauffeur: chauffeur || null, partnerProfile: partnerProfile || null };
+  }
+
+  function escapeHtml(value: unknown): string {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function getOperatorDisplayName(profile: any, partnerProfile?: any | null, user?: any | null): string {
+    return (
+      partnerProfile?.companyName ||
+      partnerProfile?.company_name ||
+      user?.name ||
+      (profile?.type === "partner" ? "A2B fleet partner" : "A2B operator")
+    );
+  }
+
+  function buildFleetInviteEmail(options: {
+    inviteId: string;
+    driverName: string;
+    managerName: string;
+    managerEmail?: string | null;
+    message?: string | null;
+  }) {
+    const appUrl = (
+      process.env.EXPO_PUBLIC_REFERRAL_LINK_BASE_URL ||
+      process.env.PUBLIC_APP_URL ||
+      process.env.EXPO_PUBLIC_DOMAIN ||
+      "https://a2blift.com"
+    ).replace(/\/$/, "");
+    const acceptUrl = `${appUrl}/dashboard.html?fleetInvite=${encodeURIComponent(options.inviteId)}`;
+    const note = options.message?.trim();
+    const safeDriverName = escapeHtml(options.driverName || "Driver");
+    const safeManagerName = escapeHtml(options.managerName);
+    const safeManagerEmail = escapeHtml(options.managerEmail || "support@a2blift.com");
+
+    const text = [
+      `Hello ${options.driverName || "Driver"},`,
+      "",
+      `${options.managerName} has invited you to join their A2B LIFT fleet/team.`,
+      note ? `Message: ${note}` : "",
+      "",
+      `Open A2B LIFT Driver to accept or decline this invite. Invite link: ${acceptUrl}`,
+      "",
+      "A2B LIFT",
+    ].filter(Boolean).join("\n");
+
+    const html = `
+      <!doctype html>
+      <html>
+        <body style="margin:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#111;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:28px 12px;">
+            <tr>
+              <td align="center">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;background:#ffffff;border-radius:22px;overflow:hidden;border:1px solid #e5e7eb;">
+                  <tr>
+                    <td style="background:#050505;padding:30px 32px;color:#fff;">
+                      <div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#bdbdbd;font-weight:700;">A2B LIFT Fleet Invite</div>
+                      <h1 style="margin:12px 0 0;font-size:28px;line-height:1.15;">You have been invited to join a fleet</h1>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:30px 32px;">
+                      <p style="margin:0 0 16px;font-size:16px;line-height:1.65;">Hello ${safeDriverName},</p>
+                      <p style="margin:0 0 16px;font-size:16px;line-height:1.65;"><strong>${safeManagerName}</strong> has invited you to join their A2B LIFT fleet/team.</p>
+                      ${note ? `<div style="margin:20px 0;padding:16px;border-radius:14px;background:#f7f7f7;border:1px solid #ececec;"><div style="font-size:12px;text-transform:uppercase;letter-spacing:1.4px;color:#777;font-weight:700;margin-bottom:8px;">Message</div><div style="font-size:15px;line-height:1.6;">${escapeHtml(note)}</div></div>` : ""}
+                      <p style="margin:0 0 20px;font-size:15px;line-height:1.65;color:#444;">Open your A2B LIFT Driver app to review the invite. You can accept or decline it from your Fleet screen.</p>
+                      <a href="${acceptUrl}" style="display:inline-block;background:#050505;color:#fff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 22px;border-radius:999px;">Review fleet invite</a>
+                      <p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#777;">If you have questions, contact ${safeManagerName} or reply to A2B support at ${safeManagerEmail}.</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `;
+
+    return { subject: `${options.managerName} invited you to join their A2B LIFT fleet`, html, text };
+  }
+
+  async function sendFleetInviteEmail(options: {
+    inviteId: string;
+    to: string;
+    driverName: string;
+    managerName: string;
+    managerEmail?: string | null;
+    message?: string | null;
+  }) {
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) {
+      return { emailStatus: "pending_configuration", emailError: "RESEND_API_KEY is not configured", resendId: null };
+    }
+    const from = process.env.RESEND_FROM_EMAIL || "A2B LIFT <support@a2blift.com>";
+    const email = buildFleetInviteEmail(options);
+    try {
+      const response = await axios.post(
+        "https://api.resend.com/emails",
+        {
+          from,
+          to: [options.to],
+          subject: email.subject,
+          html: email.html,
+          text: email.text,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          timeout: 12000,
+        },
+      );
+      return { emailStatus: "sent", emailError: null, resendId: response.data?.id || null };
+    } catch (error: any) {
+      return {
+        emailStatus: "failed",
+        emailError: error?.response?.data?.message || error?.message || "Resend email failed",
+        resendId: null,
+      };
+    }
+  }
+
+  async function serializeFleetInvite(row: any) {
+    const [driverProfile, managerProfile] = await Promise.all([
+      storage.getOperatorProfile(row.driver_operator_profile_id || row.driverOperatorProfileId).catch(() => undefined),
+      storage.getOperatorProfile(row.invited_by_operator_profile_id || row.invitedByOperatorProfileId).catch(() => undefined),
+    ]);
+    const [driver, manager] = await Promise.all([
+      driverProfile ? serializeOperatorProfile(driverProfile) : Promise.resolve(null),
+      managerProfile ? serializeOperatorProfile(managerProfile) : Promise.resolve(null),
+    ]);
+    return {
+      id: row.id,
+      driverOperatorProfileId: row.driver_operator_profile_id || row.driverOperatorProfileId,
+      invitedByOperatorProfileId: row.invited_by_operator_profile_id || row.invitedByOperatorProfileId,
+      invitedByUserId: row.invited_by_user_id || row.invitedByUserId,
+      status: row.status,
+      emailStatus: row.email_status || row.emailStatus,
+      emailError: row.email_error || row.emailError,
+      message: row.message,
+      resendId: row.resend_id || row.resendId,
+      sentAt: row.sent_at || row.sentAt,
+      acceptedAt: row.accepted_at || row.acceptedAt,
+      declinedAt: row.declined_at || row.declinedAt,
+      createdAt: row.created_at || row.createdAt,
+      updatedAt: row.updated_at || row.updatedAt,
+      driver,
+      manager,
+    };
   }
 
   async function serializeVehicle(vehicle: any) {
@@ -3457,6 +3612,202 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({ drivers: filtered });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/fleet/invites", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      const [sentResult, receivedResult] = await Promise.all([
+        pool.query(
+          `
+            SELECT *
+            FROM fleet_driver_invites
+            WHERE invited_by_operator_profile_id = $1
+            ORDER BY created_at DESC
+            LIMIT 100
+          `,
+          [profile.id],
+        ),
+        pool.query(
+          `
+            SELECT *
+            FROM fleet_driver_invites
+            WHERE driver_operator_profile_id = $1
+            ORDER BY created_at DESC
+            LIMIT 100
+          `,
+          [profile.id],
+        ),
+      ]);
+      const [sentInvites, receivedInvites] = await Promise.all([
+        Promise.all(sentResult.rows.map(serializeFleetInvite)),
+        Promise.all(receivedResult.rows.map(serializeFleetInvite)),
+      ]);
+      return res.json({ sentInvites, receivedInvites });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/fleet/invites", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      if (profile.status !== "approved") {
+        return res.status(403).json({ message: "Your operator profile must be approved first." });
+      }
+      if (profile.type !== "partner") {
+        return res.status(403).json({ message: "Only approved fleet partners can invite drivers to a fleet." });
+      }
+
+      const driverOperatorProfileId = requireStringField(req.body, "driverOperatorProfileId");
+      const message = typeof req.body.message === "string" ? req.body.message.trim().slice(0, 600) : "";
+      if (driverOperatorProfileId === profile.id) {
+        return res.status(400).json({ message: "You cannot invite yourself." });
+      }
+
+      const [driverProfile, managerUser, managerPartner] = await Promise.all([
+        storage.getOperatorProfile(driverOperatorProfileId),
+        storage.getUser(profile.userId),
+        storage.getPartnerProfileByOperatorId(profile.id).catch(() => undefined),
+      ]);
+      if (!driverProfile || driverProfile.type !== "driver" || driverProfile.status !== "approved") {
+        return res.status(400).json({ message: "Only approved A2B drivers can be invited." });
+      }
+      const driverUser = await storage.getUser(driverProfile.userId);
+      if (!driverUser?.username) {
+        return res.status(400).json({ message: "This driver does not have an email address on file." });
+      }
+
+      const pending = await pool.query(
+        `
+          SELECT *
+          FROM fleet_driver_invites
+          WHERE driver_operator_profile_id = $1
+            AND invited_by_operator_profile_id = $2
+            AND status = 'pending'
+          LIMIT 1
+        `,
+        [driverProfile.id, profile.id],
+      );
+      if (pending.rowCount && pending.rowCount > 0 && pending.rows[0]?.email_status === "sent") {
+        return res.status(409).json({ message: "You already have a pending invite for this driver." });
+      }
+      let invite = pending.rows[0];
+      if (invite) {
+        const refreshed = await pool.query(
+          `
+            UPDATE fleet_driver_invites
+            SET message = COALESCE($2, message),
+                email_status = 'queued',
+                email_error = NULL,
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING *
+          `,
+          [invite.id, message || null],
+        );
+        invite = refreshed.rows[0];
+      } else {
+        const inserted = await pool.query(
+          `
+            INSERT INTO fleet_driver_invites (
+              driver_operator_profile_id,
+              invited_by_operator_profile_id,
+              invited_by_user_id,
+              status,
+              email_status,
+              message
+            )
+            VALUES ($1, $2, $3, 'pending', 'queued', $4)
+            RETURNING *
+          `,
+          [driverProfile.id, profile.id, req.auth!.sub, message || null],
+        );
+        invite = inserted.rows[0];
+      }
+      const managerName = getOperatorDisplayName(profile, managerPartner, managerUser);
+      const emailResult = await sendFleetInviteEmail({
+        inviteId: invite.id,
+        to: driverUser.username,
+        driverName: driverUser.name || "Driver",
+        managerName,
+        managerEmail: managerUser?.username || managerPartner?.contactEmail || null,
+        message,
+      });
+      const updated = await pool.query(
+        `
+          UPDATE fleet_driver_invites
+          SET email_status = $2,
+              email_error = $3,
+              resend_id = $4,
+              sent_at = CASE WHEN $2 = 'sent' THEN NOW() ELSE sent_at END,
+              updated_at = NOW()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [invite.id, emailResult.emailStatus, emailResult.emailError, emailResult.resendId],
+      );
+
+      await notifyUserEvent({
+        userId: driverProfile.userId,
+        type: "fleet_invite",
+        title: "Fleet invite received",
+        body: `${managerName} invited you to join their A2B LIFT fleet/team.`,
+        data: { inviteId: invite.id, invitedByOperatorProfileId: profile.id },
+      });
+
+      return res.status(201).json({ invite: await serializeFleetInvite(updated.rows[0]) });
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message });
+    }
+  });
+
+  app.put("/api/fleet/invites/:id/respond", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const status = String(req.body?.status || "").toLowerCase();
+      if (!["accepted", "declined"].includes(status)) {
+        return res.status(400).json({ message: "Invite status must be accepted or declined." });
+      }
+      const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      const existing = await pool.query("SELECT * FROM fleet_driver_invites WHERE id = $1 LIMIT 1", [req.params.id]);
+      const invite = existing.rows[0];
+      if (!invite) return res.status(404).json({ message: "Invite not found" });
+      if (invite.driver_operator_profile_id !== profile.id) {
+        return res.status(403).json({ message: "Only the invited driver can respond to this invite." });
+      }
+      if (invite.status !== "pending") {
+        return res.status(409).json({ message: "This invite has already been responded to." });
+      }
+      const updated = await pool.query(
+        `
+          UPDATE fleet_driver_invites
+          SET status = $2,
+              accepted_at = CASE WHEN $2 = 'accepted' THEN NOW() ELSE accepted_at END,
+              declined_at = CASE WHEN $2 = 'declined' THEN NOW() ELSE declined_at END,
+              updated_at = NOW()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [invite.id, status],
+      );
+      const managerProfile = await storage.getOperatorProfile(invite.invited_by_operator_profile_id).catch(() => undefined);
+      if (managerProfile) {
+        const driverUser = await storage.getUser(profile.userId).catch(() => undefined);
+        await notifyUserEvent({
+          userId: managerProfile.userId,
+          type: "fleet_invite_response",
+          title: status === "accepted" ? "Fleet invite accepted" : "Fleet invite declined",
+          body: `${driverUser?.name || "A driver"} ${status} your fleet invite.`,
+          data: { inviteId: invite.id, driverOperatorProfileId: profile.id },
+        });
+      }
+      return res.json({ invite: await serializeFleetInvite(updated.rows[0]) });
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message });
     }
   });
 

@@ -537,6 +537,32 @@ function setupErrorHandler(app: express.Application) {
         removed_at timestamp
       )
     `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS fleet_driver_invites (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        driver_operator_profile_id varchar NOT NULL REFERENCES operator_profiles(id),
+        invited_by_operator_profile_id varchar NOT NULL REFERENCES operator_profiles(id),
+        invited_by_user_id varchar NOT NULL REFERENCES users(id),
+        status text NOT NULL DEFAULT 'pending',
+        email_status text NOT NULL DEFAULT 'queued',
+        email_error text,
+        message text,
+        resend_id text,
+        sent_at timestamp,
+        accepted_at timestamp,
+        declined_at timestamp,
+        created_at timestamp DEFAULT now(),
+        updated_at timestamp DEFAULT now()
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS fleet_driver_invites_manager_idx
+        ON fleet_driver_invites (invited_by_operator_profile_id, created_at DESC)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS fleet_driver_invites_driver_idx
+        ON fleet_driver_invites (driver_operator_profile_id, created_at DESC)
+    `);
     console.log("[MIGRATION] Fleet onboarding tables ensured ✅");
   } catch (err: any) {
     console.error("[MIGRATION] Warning: could not apply fleet onboarding migration:", err.message);
