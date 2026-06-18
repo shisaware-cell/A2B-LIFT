@@ -40,7 +40,7 @@ function getVariantConfig(variant) {
       iosBundleIdentifier: "com.a2blift.client",
       androidPackage: "com.a2blift.client",
       androidVersionCode: currentAndroidVersionCode,
-      iosBuildNumber: "1",
+      iosBuildNumber: "2",
       runtimeVersion: "1.0.0-client",
       notificationChannel: "client-alerts",
     };
