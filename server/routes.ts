@@ -800,6 +800,159 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return res.json(safeUser);
   });
 
+  app.delete("/api/auth/me", requireAuth, async (req: AuthedRequest, res: Response) => {
+    const userId = req.auth!.sub;
+    const client = await pool.connect();
+
+    const maybeQuery = async (query: string, params: unknown[] = []) => {
+      try {
+        return await client.query(query, params);
+      } catch (error: any) {
+        if (error?.code === "42P01" || error?.code === "42703") return null;
+        throw error;
+      }
+    };
+
+    try {
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const chauffeurRows = await pool.query("SELECT id FROM chauffeurs WHERE user_id = $1", [userId]);
+      const chauffeurIds = chauffeurRows.rows.map((row) => row.id).filter(Boolean);
+      const activeRideStatuses = ["requested", "accepted", "arrived", "in_progress", "en_route"];
+      const activeRideCheck = await pool.query(
+        `
+          SELECT id
+          FROM rides
+          WHERE (client_id = $1 OR chauffeur_id = ANY($2::varchar[]))
+            AND status = ANY($3::text[])
+          LIMIT 1
+        `,
+        [userId, chauffeurIds, activeRideStatuses],
+      );
+
+      if (activeRideCheck.rowCount && activeRideCheck.rowCount > 0) {
+        return res.status(409).json({ message: "Please complete or cancel any active trip before deleting your account." });
+      }
+
+      const deletedEmail = `deleted-${userId}@deleted.a2b.local`;
+      const deletedPassword = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
+
+      await client.query("BEGIN");
+      await maybeQuery("DELETE FROM notifications WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM saved_cards WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM wallet_transactions WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM messages WHERE sender_id = $1", [userId]);
+      await maybeQuery("DELETE FROM safety_reports WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM trip_enquiries WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM liveness_sessions WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM documents WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM lift_club_bookings WHERE rider_id = $1", [userId]);
+
+      await maybeQuery(
+        `
+          DELETE FROM lift_club_bookings
+          WHERE route_id IN (
+            SELECT id FROM lift_club_routes WHERE chauffeur_id = ANY($1::varchar[])
+          )
+        `,
+        [chauffeurIds],
+      );
+      await maybeQuery("DELETE FROM lift_club_routes WHERE chauffeur_id = ANY($1::varchar[])", [chauffeurIds]);
+
+      await maybeQuery("UPDATE payments SET paystack_auth_code = NULL WHERE payer_user_id = $1", [userId]);
+      await maybeQuery(
+        `
+          UPDATE reward_transactions
+          SET source_user_id = NULL
+          WHERE source_user_id = $1
+        `,
+        [userId],
+      );
+      await maybeQuery(
+        `
+          UPDATE reward_transactions
+          SET referral_event_id = NULL
+          WHERE referral_event_id IN (
+            SELECT id
+            FROM referral_events
+            WHERE referrer_user_id = $1 OR referred_user_id = $1
+          )
+        `,
+        [userId],
+      );
+      await maybeQuery("DELETE FROM reward_transactions WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM reward_cashouts WHERE user_id = $1 OR reviewed_by_admin_id = $1", [userId]);
+      await maybeQuery("DELETE FROM referral_events WHERE referrer_user_id = $1 OR referred_user_id = $1", [userId]);
+
+      await maybeQuery(
+        `
+          UPDATE driver_applications
+          SET status = 'withdrawn',
+              notes = 'Applicant deleted their account.',
+              reviewed_at = NOW(),
+              reviewer_admin_id = NULL
+          WHERE user_id = $1
+        `,
+        [userId],
+      );
+      await maybeQuery(
+        `
+          UPDATE chauffeurs
+          SET is_online = false,
+              is_approved = false,
+              available_for_long_distance = false,
+              long_distance_from = NULL,
+              long_distance_to = NULL,
+              long_distance_date = NULL,
+              long_distance_price_per_seat = NULL,
+              long_distance_seats_available = 0,
+              phone = NULL,
+              profile_photo = NULL,
+              push_token = NULL,
+              lat = NULL,
+              lng = NULL,
+              location_updated_at = NULL,
+              car_make = 'Deleted',
+              vehicle_model = 'Deleted',
+              plate_number = 'Deleted',
+              vehicle_type = 'Deleted',
+              car_color = 'Deleted'
+          WHERE user_id = $1
+        `,
+        [userId],
+      );
+      await maybeQuery(
+        `
+          UPDATE users
+          SET username = $2,
+              password = $3,
+              name = 'Deleted Account',
+              phone = NULL,
+              profile_photo = NULL,
+              push_token = NULL,
+              referral_code = NULL,
+              referred_by_user_id = NULL,
+              rewards_balance = 0,
+              wallet_balance = 0
+          WHERE id = $1
+        `,
+        [userId, deletedEmail, deletedPassword],
+      );
+
+      await client.query("COMMIT");
+      res.clearCookie("a2b_token", { path: "/" });
+      return res.json({ ok: true, message: "Account deleted" });
+    } catch (error: any) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {}
+      return res.status(500).json({ message: error.message || "Account deletion failed" });
+    } finally {
+      client.release();
+    }
+  });
+
   app.get("/api/referrals/me", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
       const user = await storage.getUser(req.auth!.sub);

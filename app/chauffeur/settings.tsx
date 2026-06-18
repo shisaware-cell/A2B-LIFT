@@ -28,7 +28,7 @@ interface DriverProfileSummary {
 
 export default function ChauffeurSettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { user, logout } = useAuth();
+  const { user, logout, clearSession } = useAuth();
   const [showVehicle, setShowVehicle] = useState(false);
   const [showDocuments, setShowDocuments] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -39,6 +39,7 @@ export default function ChauffeurSettingsScreen() {
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
   const [driverProfile, setDriverProfile] = useState<DriverProfileSummary | null>(null);
   const [driverProfileLoading, setDriverProfileLoading] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   // Fetch driver application status
   const { data: application, refetch: refetchApplication } = useQuery({
@@ -90,6 +91,52 @@ export default function ChauffeurSettingsScreen() {
 
   async function handleLogout() {
     await logout();
+  }
+
+  async function deleteAccount() {
+    try {
+      setDeletingAccount(true);
+      await apiRequest("DELETE", "/api/auth/me");
+      queryClient.clear();
+      await AsyncStorage.multiRemove(["a2b_chauffeur", "a2b_current_ride"]);
+      await clearSession();
+      Alert.alert("Account Deleted", "Your A2B Driver account has been deleted.", [
+        { text: "OK", onPress: () => router.replace("/login") },
+      ]);
+    } catch (error: any) {
+      Alert.alert(
+        "Could Not Delete Account",
+        error?.message || "Please try again. If you have an active trip, complete or cancel it first.",
+      );
+    } finally {
+      setDeletingAccount(false);
+    }
+  }
+
+  function handleDeleteAccount() {
+    if (deletingAccount) return;
+
+    Alert.alert(
+      "Delete account?",
+      "This permanently removes your personal account data, driver documents, saved cards, notifications, and disables your driver profile. Completed trip and payment records may be kept in anonymized form where required.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Continue",
+          style: "destructive",
+          onPress: () => {
+            Alert.alert(
+              "Final confirmation",
+              "Once deleted, you will be signed out and will need to create a new account to use A2B Driver again.",
+              [
+                { text: "Cancel", style: "cancel" },
+                { text: "Delete Account", style: "destructive", onPress: deleteAccount },
+              ],
+            );
+          },
+        },
+      ],
+    );
   }
 
   async function pickAndUploadDocument(type: string) {
@@ -299,9 +346,31 @@ export default function ChauffeurSettingsScreen() {
         </Pressable>
       </View>
 
+      <View style={styles.menuGroup}>
+        <Pressable
+          style={({ pressed }) => [styles.menuItem, deletingAccount && styles.menuItemDisabled, pressed && !deletingAccount && { opacity: 0.7 }]}
+          onPress={handleDeleteAccount}
+          disabled={deletingAccount}
+        >
+          <View style={[styles.menuIconCircle, styles.dangerIconCircle]}>
+            {deletingAccount ? (
+              <ActivityIndicator size="small" color={Colors.white} />
+            ) : (
+              <Ionicons name="trash-outline" size={20} color={Colors.white} />
+            )}
+          </View>
+          <View style={styles.menuTextBlock}>
+            <Text style={styles.dangerMenuText}>{deletingAccount ? "Deleting Account..." : "Delete Account"}</Text>
+            <Text style={styles.menuSubText}>Permanently remove your driver account</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+        </Pressable>
+      </View>
+
       <Pressable
         style={({ pressed }) => [styles.logoutBtn, pressed && { opacity: 0.8 }]}
         onPress={handleLogout}
+        disabled={deletingAccount}
       >
         <Ionicons name="log-out-outline" size={20} color={Colors.error} />
         <Text style={styles.logoutText}>Sign Out</Text>
@@ -647,8 +716,13 @@ const styles = StyleSheet.create({
   reviewCommentMuted: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textMuted, lineHeight: 18 },
   menuGroup: { backgroundColor: Colors.card, borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: Colors.border, marginBottom: 16 },
   menuItem: { flexDirection: "row", alignItems: "center", padding: 16, gap: 14, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  menuItemDisabled: { opacity: 0.65 },
   menuIconCircle: { width: 36, height: 36, borderRadius: 10, backgroundColor: Colors.accent, alignItems: "center", justifyContent: "center" },
+  dangerIconCircle: { backgroundColor: "rgba(244,67,54,0.22)" },
   menuText: { flex: 1, fontSize: 15, fontFamily: "Inter_500Medium", color: Colors.white },
+  menuTextBlock: { flex: 1, gap: 2 },
+  dangerMenuText: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.error },
+  menuSubText: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textMuted },
   logoutBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16, marginTop: 8 },
   logoutText: { fontSize: 15, fontFamily: "Inter_500Medium", color: Colors.error },
   brandFooter: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 16 },

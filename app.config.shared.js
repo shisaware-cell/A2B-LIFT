@@ -57,9 +57,11 @@ function getVariantConfig(variant) {
     iosBundleIdentifier: "com.a2blift",
     androidPackage: "com.a2blift",
     androidVersionCode: currentAndroidVersionCode,
-    iosBuildNumber: "1",
+    iosBuildNumber: "5",
     runtimeVersion: "1.0.44",
     notificationChannel: "ride-alerts-v3",
+    icon: "assets/images/driver-icon.png",
+    androidAdaptiveForeground: "assets/images/driver-android-icon-foreground.png",
   };
 }
 
@@ -79,7 +81,7 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
     owner: config.owner,
     version: "1.0.0",
     orientation: "portrait",
-    icon: assetPath(assetPrefix, "assets/images/icon.png"),
+    icon: assetPath(assetPrefix, config.icon || "assets/images/icon.png"),
     scheme: config.scheme,
     userInterfaceStyle: "dark",
     newArchEnabled: true,
@@ -118,7 +120,7 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
       versionCode: config.androidVersionCode,
       softwareKeyboardLayoutMode: "resize",
       adaptiveIcon: {
-        foregroundImage: assetPath(assetPrefix, "assets/images/android-icon-foreground-car.png"),
+        foregroundImage: assetPath(assetPrefix, config.androidAdaptiveForeground || "assets/images/android-icon-foreground-car.png"),
         backgroundColor: "#000000",
       },
       permissions: [
@@ -160,7 +162,7 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
       [
         "expo-notifications",
         {
-          icon: assetPath(assetPrefix, "assets/images/icon.png"),
+          icon: assetPath(assetPrefix, config.notificationIcon || "assets/images/icon.png"),
           color: "#0a0a0a",
           defaultChannel: config.notificationChannel,
           sounds: [assetPath(assetPrefix, "assets/trip_alert.wav")],
