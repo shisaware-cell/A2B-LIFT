@@ -135,6 +135,25 @@
       },
       "channel": "client-production"
     },
+    "client-ios-production": {
+      "distribution": "store",
+      "credentialsSource": "remote",
+      "environment": "production",
+      "ios": {
+        "buildConfiguration": "Release"
+      },
+      "env": {
+        "APP_VARIANT": "client",
+        "EXPO_ROUTER_APP_ROOT": "apps/client-mobile/app",
+        "EXPO_PUBLIC_EAS_OWNER_CLIENT": "a2bliftclub",
+        "EXPO_PUBLIC_EAS_PROJECT_ID_CLIENT": "9932543b-f023-4dec-8213-5d0fe99ad749",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDhC2aHuhOQ8ZwuWj2K5XZ5nAElB572-wo",
+        "EXPO_PUBLIC_DOMAIN": "https://api.a2blift.com",
+        "EXPO_PUBLIC_REFERRAL_BASE_URL": "https://a2blift.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://zzwkieiktbhptvgsqerd.supabase.co"
+      },
+      "channel": "client-production"
+    },
     "maptest-a2b": {
       "distribution": "internal",
       "credentialsSource": "remote",
@@ -175,6 +194,11 @@
         "serviceAccountKeyPath": "./google-play-key.json",
         "track": "internal"
       },
+      "ios": {
+        "appleId": "kidcornerza@gmail.com"
+      }
+    },
+    "client-ios-production": {
       "ios": {
         "appleId": "kidcornerza@gmail.com"
       }
