@@ -2957,10 +2957,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   const PARTNER_REQUIRED_DOCS = new Set([
-    "partner:company_registration",
     "partner:director_id",
     "partner:proof_of_address",
-    "partner:operating_permit",
     "partner:bank_account_details",
   ]);
   const VEHICLE_REQUIRED_DOCS = new Set([
@@ -2973,6 +2971,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const value = String(body?.[field] || "").trim();
     if (!value) throw new Error(`${field} is required`);
     return value;
+  }
+
+  function optionalStringField(body: any, field: string) {
+    return String(body?.[field] || "").trim();
   }
 
   async function getOrCreateOperatorProfile(options: {
@@ -3344,8 +3346,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/operator-profile/partner", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
       const partnerData = {
-        companyName: requireStringField(req.body, "companyName"),
-        registrationNumber: requireStringField(req.body, "registrationNumber"),
+        companyName: optionalStringField(req.body, "companyName"),
+        registrationNumber: optionalStringField(req.body, "registrationNumber"),
         contactPersonName: requireStringField(req.body, "contactPersonName"),
         contactPhone: requireStringField(req.body, "contactPhone"),
         contactEmail: requireStringField(req.body, "contactEmail"),

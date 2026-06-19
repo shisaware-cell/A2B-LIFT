@@ -347,9 +347,19 @@ async function configureExpoAndLanding(app: express.Application) {
   const serveReferralLaunch = (req: Request, res: Response) => {
     const referralCode = req.params.code;
     const appTarget = String(req.query.app || req.query.source || req.query.role || "").trim();
-    const appQuery = appTarget ? `&app=${encodeURIComponent(appTarget)}` : "";
+    const params = new URLSearchParams();
+    if (referralCode) params.set("code", referralCode);
+    if (appTarget) params.set("app", appTarget);
+    const clientIosUrl = process.env.A2B_CLIENT_IOS_APP_STORE_URL || process.env.EXPO_PUBLIC_CLIENT_IOS_APP_STORE_URL || "";
+    const driverIosUrl = process.env.A2B_DRIVER_IOS_APP_STORE_URL || process.env.EXPO_PUBLIC_DRIVER_IOS_APP_STORE_URL || "";
+    const clientAndroidUrl = process.env.A2B_CLIENT_ANDROID_STORE_URL || process.env.EXPO_PUBLIC_CLIENT_ANDROID_STORE_URL || "";
+    const driverAndroidUrl = process.env.A2B_DRIVER_ANDROID_STORE_URL || process.env.EXPO_PUBLIC_DRIVER_ANDROID_STORE_URL || "https://play.google.com/store/apps/details?id=com.a2blift";
+    if (clientIosUrl) params.set("clientIosUrl", clientIosUrl);
+    if (driverIosUrl) params.set("driverIosUrl", driverIosUrl);
+    if (clientAndroidUrl) params.set("clientAndroidUrl", clientAndroidUrl);
+    if (driverAndroidUrl) params.set("driverAndroidUrl", driverAndroidUrl);
     const target = referralCode
-      ? `/referral-launch.html?code=${encodeURIComponent(referralCode)}${appQuery}`
+      ? `/referral-launch.html?${params.toString()}`
       : "/referral-launch.html";
     res.redirect(302, target);
   };

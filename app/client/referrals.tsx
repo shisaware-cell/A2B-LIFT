@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -16,9 +16,12 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useSegments } from "expo-router";
+import Svg, { Rect } from "react-native-svg";
 import { apiRequest } from "@/lib/query-client";
 import { useAuth } from "@/lib/auth-context";
 import Colors from "@/constants/colors";
+
+const QRCode: { create: (text: string, options?: Record<string, unknown>) => { modules: { size: number; data: boolean[] } } } = require("qrcode");
 
 type ReferralSummary = {
   referralCode: string;
@@ -222,6 +225,19 @@ export default function ReferralsScreen() {
   const backRoute = segments[0] === "chauffeur" ? "/chauffeur" : "/client/profile";
   const appTarget: RewardAppTarget = segments[0] === "chauffeur" ? "driver" : "client";
   const referralPreview = referredPeople.slice(0, REFERRAL_PREVIEW_COUNT);
+  const rewardLink = useMemo(
+    () => buildRewardShareUrl(summary?.referralCode || user?.referralCode, summary?.shareUrl, appTarget),
+    [appTarget, summary?.referralCode, summary?.shareUrl, user?.referralCode],
+  );
+  const qrMatrix = useMemo(() => {
+    if (!rewardLink) return null;
+    try {
+      const qr = QRCode.create(rewardLink, { errorCorrectionLevel: "M", margin: 1 });
+      return { size: qr.modules.size, data: qr.modules.data };
+    } catch {
+      return null;
+    }
+  }, [rewardLink]);
 
   const loadData = useCallback(async (options?: { showLoader?: boolean }) => {
     const showLoader = options?.showLoader ?? !hasLoadedOnceRef.current;
@@ -339,7 +355,7 @@ export default function ReferralsScreen() {
 
   async function handleShareReferral() {
     const referralCode = summary?.referralCode || user?.referralCode || "";
-    const shareUrl = buildRewardShareUrl(referralCode, summary?.shareUrl, appTarget);
+    const shareUrl = rewardLink || buildRewardShareUrl(referralCode, summary?.shareUrl, appTarget);
     if (!referralCode || !shareUrl) {
       Alert.alert("Invite Unavailable", "Your reward link is still being prepared. Please try again in a moment.");
       return;
@@ -423,6 +439,37 @@ export default function ReferralsScreen() {
         </Text>
 
         {loadNotice ? <Text style={styles.inlineNotice}>{loadNotice}</Text> : null}
+
+        <View style={styles.qrCard}>
+          <View style={styles.qrHeader}>
+            <View>
+              <Text style={styles.qrEyebrow}>SCAN TO JOIN</Text>
+              <Text style={styles.qrTitle}>Reward QR code</Text>
+            </View>
+            <Ionicons name="qr-code-outline" size={24} color={Colors.white} />
+          </View>
+          <View style={styles.qrBody}>
+            <View style={styles.qrBox}>
+              {qrMatrix ? (
+                <Svg width="100%" height="100%" viewBox={`0 0 ${qrMatrix.size} ${qrMatrix.size}`}>
+                  <Rect x="0" y="0" width={qrMatrix.size} height={qrMatrix.size} fill="#FFFFFF" />
+                  {qrMatrix.data.map((filled, index) => {
+                    if (!filled) return null;
+                    const x = index % qrMatrix.size;
+                    const y = Math.floor(index / qrMatrix.size);
+                    return <Rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" fill="#111111" />;
+                  })}
+                </Svg>
+              ) : (
+                <ActivityIndicator color={Colors.primary} />
+              )}
+            </View>
+            <View style={styles.qrCopyWrap}>
+              <Text style={styles.qrCopy}>Scan this code to open the {appTarget === "driver" ? "driver" : "client"} app invite.</Text>
+              <Text style={styles.qrLink} numberOfLines={2}>{rewardLink || "Preparing your reward link..."}</Text>
+            </View>
+          </View>
+        </View>
 
         <View style={[styles.heroGrid, isWide && styles.heroGridWide]}>
           <View style={[styles.inviteCard, isWide && styles.heroColumn]}>
@@ -765,6 +812,63 @@ const styles = StyleSheet.create({
     color: Colors.warning,
     fontFamily: "Inter_500Medium",
     marginBottom: 6,
+  },
+  qrCard: {
+    backgroundColor: "#111111",
+    borderRadius: 22,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#242424",
+    marginBottom: 14,
+    gap: 14,
+  },
+  qrHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+  },
+  qrEyebrow: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    color: "#B69455",
+    letterSpacing: 1.2,
+  },
+  qrTitle: {
+    fontSize: 18,
+    fontFamily: "Inter_700Bold",
+    color: Colors.white,
+    marginTop: 3,
+  },
+  qrBody: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  qrBox: {
+    width: 106,
+    height: 106,
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 8,
+  },
+  qrCopyWrap: {
+    flex: 1,
+    gap: 8,
+  },
+  qrCopy: {
+    fontSize: 13,
+    lineHeight: 19,
+    fontFamily: "Inter_500Medium",
+    color: Colors.textSecondary,
+  },
+  qrLink: {
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textMuted,
   },
   heroGrid: {
     gap: 14,

@@ -11,10 +11,10 @@ import { uploadDocument } from "@/lib/supabase-storage";
 import Colors from "@/constants/colors";
 
 const PARTNER_DOCS = [
-  { id: "partner:company_registration", label: "Company Registration" },
+  { id: "partner:company_registration", label: "Company Registration", optional: true },
   { id: "partner:director_id", label: "Director ID" },
   { id: "partner:proof_of_address", label: "Proof of Address" },
-  { id: "partner:operating_permit", label: "Operating Permit" },
+  { id: "partner:operating_permit", label: "Operating Permit", optional: true },
   { id: "partner:bank_account_details", label: "Bank Account Details" },
 ];
 
@@ -138,12 +138,15 @@ export default function PartnerRegisterScreen() {
   }
 
   function validate() {
-    const missingFields = Object.entries(form).filter(([, value]) => !String(value || "").trim()).map(([key]) => key);
+    const optionalFields = new Set(["companyName", "registrationNumber"]);
+    const missingFields = Object.entries(form)
+      .filter(([key, value]) => !optionalFields.has(key) && !String(value || "").trim())
+      .map(([key]) => key);
     if (missingFields.length > 0) {
       setError("Please complete all partner details.");
       return false;
     }
-    const missingDocs = PARTNER_DOCS.filter((doc) => !documents[doc.id]);
+    const missingDocs = PARTNER_DOCS.filter((doc) => !doc.optional && !documents[doc.id]);
     if (missingDocs.length > 0) {
       setError(`Please upload: ${missingDocs.map((doc) => doc.label).join(", ")}`);
       return false;
@@ -190,7 +193,7 @@ export default function PartnerRegisterScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 28 }]}>
         <View style={styles.header}>
           <Text style={styles.title}>Partner Registration</Text>
-          <Text style={styles.subtitle}>Submit your company profile and required documents. Your progress is saved automatically.</Text>
+          <Text style={styles.subtitle}>Submit your partner profile and required documents. Your progress is saved automatically.</Text>
         </View>
         {!!error && <View style={styles.errorBox}><Ionicons name="alert-circle" size={16} color={Colors.error} /><Text style={styles.errorText}>{error}</Text></View>}
 
@@ -206,7 +209,7 @@ export default function PartnerRegisterScreen() {
             ["accountNumber", "Account Number"],
           ] as const).map(([field, label]) => (
             <View key={field} style={styles.inputGroup}>
-              <Text style={styles.label}>{label} *</Text>
+              <Text style={styles.label}>{label}{["companyName", "registrationNumber"].includes(field) ? " (optional)" : " *"}</Text>
               <TextInput
                 style={styles.input}
                 value={form[field]}
@@ -218,7 +221,7 @@ export default function PartnerRegisterScreen() {
           ))}
         </View>
 
-        <Text style={styles.sectionTitle}>Required Documents</Text>
+        <Text style={styles.sectionTitle}>Partner Documents</Text>
         <View style={styles.form}>
           {PARTNER_DOCS.map((doc) => {
             const file = documents[doc.id];
@@ -226,7 +229,7 @@ export default function PartnerRegisterScreen() {
               <Pressable key={doc.id} style={[styles.docRow, file && styles.docRowUploaded]} onPress={() => pickDocument(doc.id)}>
                 <Ionicons name={file ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={file ? Colors.success : Colors.textMuted} />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.docTitle}>{doc.label}</Text>
+                  <Text style={styles.docTitle}>{doc.label}{doc.optional ? " (optional)" : ""}</Text>
                   <Text style={styles.docMeta}>{uploadingDocs[doc.id] ? "Saving upload..." : file ? file.name : "Tap to upload"}</Text>
                 </View>
               </Pressable>

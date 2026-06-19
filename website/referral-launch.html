@@ -199,6 +199,10 @@
       return rawTarget === "driver" || rawTarget === "chauffeur" ? "driver" : "client";
     }
 
+    function getParam(name) {
+      return String(new URLSearchParams(window.location.search).get(name) || "").trim();
+    }
+
     function appendQuery(url, key, value) {
       if (!value) return url;
       const [base, hash = ""] = String(url).split("#");
@@ -209,6 +213,12 @@
     const referralCode = extractReferralCode();
     const appTarget = getAppTarget();
     const appConfig = APP_TARGETS[appTarget];
+    const clientIosUrl = getParam("clientIosUrl") || appConfig.iosStoreUrl;
+    const driverIosUrl = getParam("driverIosUrl") || appConfig.iosStoreUrl;
+    const clientAndroidUrl = getParam("clientAndroidUrl") || appConfig.playStoreUrl;
+    const driverAndroidUrl = getParam("driverAndroidUrl") || appConfig.playStoreUrl;
+    appConfig.iosStoreUrl = appTarget === "driver" ? driverIosUrl : clientIosUrl;
+    appConfig.playStoreUrl = appTarget === "driver" ? driverAndroidUrl : clientAndroidUrl;
     const appUrl = referralCode
       ? `${appConfig.scheme}://register?ref=${encodeURIComponent(referralCode)}&app=${encodeURIComponent(appTarget)}`
       : `${appConfig.scheme}://register`;
@@ -283,7 +293,16 @@
     });
 
     window.addEventListener("pagehide", () => window.clearTimeout(fallbackTimer));
-    window.setTimeout(openApp, 120);
+
+    if (isIOS) {
+      if (iosStoreUrl) {
+        window.setTimeout(() => {
+          if (document.visibilityState !== "hidden") window.location.replace(iosStoreUrl);
+        }, 900);
+      }
+    } else {
+      window.setTimeout(openApp, 120);
+    }
   </script>
 </body>
 </html>

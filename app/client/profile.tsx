@@ -31,6 +31,7 @@ const REWARD_LINK_BASE_URL =
   process.env.EXPO_PUBLIC_REFERRAL_LINK_BASE_URL ||
   process.env.EXPO_PUBLIC_REFERRAL_BASE_URL ||
   "https://a2blift.com";
+const DRIVER_IOS_APP_STORE_URL = process.env.EXPO_PUBLIC_DRIVER_IOS_APP_STORE_URL || "";
 const DRIVER_APP_STORE_URL_ANDROID_WEB = `https://play.google.com/store/apps/details?id=${DRIVER_ANDROID_PACKAGE}`;
 
 function normalizeReferralCode(value?: string | null) {
@@ -128,7 +129,7 @@ export default function ProfileScreen() {
     const referralCode = normalizeReferralCode(pendingReferralCode);
     const driverAppUrl = appendQueryParam(DRIVER_APP_DEEP_LINK, "ref", referralCode);
     const platformStoreUrl = Platform.OS === "ios"
-      ? buildDriverWebUrl(referralCode)
+      ? (DRIVER_IOS_APP_STORE_URL ? appendQueryParam(DRIVER_IOS_APP_STORE_URL, "ref", referralCode) : buildDriverWebUrl(referralCode))
       : buildAndroidStoreUrl(referralCode, true);
     const webStoreUrl = Platform.OS === "ios"
       ? buildDriverWebUrl(referralCode)

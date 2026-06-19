@@ -1,23 +1,29 @@
 import React from "react";
-import { View, Text, StyleSheet, Pressable, Platform, Linking } from "react-native";
+import { View, Text, StyleSheet, Pressable, Platform, Linking, Image } from "react-native";
 import { router } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@mobile-core/auth";
+import { getAppVariant } from "@mobile-core/app-variant";
 import { Colors } from "@mobile-ui/colors";
 import { EntranceView } from "@mobile-ui/motion";
 
 export default function SplashLanding() {
   const insets = useSafeAreaInsets();
   const { user, isLoading } = useAuth();
+  const isDriverApp = getAppVariant() === "driver";
 
   // Navigation handled by AuthGate in _layout.tsx
 
   if (isLoading) {
     return (
       <View style={[styles.container, { backgroundColor: Colors.primary }]}>
-        <Ionicons name="car-sport" size={48} color={Colors.white} />
+        {isDriverApp ? (
+          <Image source={require("../assets/images/driver-icon.png")} style={styles.loadingLogo} resizeMode="contain" />
+        ) : (
+          <Ionicons name="car-sport" size={48} color={Colors.white} />
+        )}
       </View>
     );
   }
@@ -31,7 +37,11 @@ export default function SplashLanding() {
       <View style={[styles.content, { paddingTop: insets.top + (Platform.OS === "web" ? 67 : 0) }]}>
         <EntranceView direction="up" duration={800} delay={200} style={styles.logoArea}>
           <View style={styles.iconCircle}>
-            <Ionicons name="car-sport" size={40} color={Colors.white} />
+            {isDriverApp ? (
+              <Image source={require("../assets/images/driver-icon.png")} style={styles.driverLogo} resizeMode="contain" />
+            ) : (
+              <Ionicons name="car-sport" size={40} color={Colors.white} />
+            )}
           </View>
           <Text style={styles.appName}>A2B LIFT</Text>
           <Text style={styles.slogan}>Premium Ride Experience</Text>
@@ -122,6 +132,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 8,
+    overflow: "hidden",
+  },
+  driverLogo: {
+    width: 58,
+    height: 58,
+  },
+  loadingLogo: {
+    width: 76,
+    height: 76,
   },
   appName: {
     fontSize: 36,
