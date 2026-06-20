@@ -472,6 +472,7 @@ tbody tr:hover { background:#fafaf8; }
     </div>
     <div class="login-err" id="l-err"></div>
     <button class="btn-login" onclick="doLogin()">Sign in</button>
+    <button type="button" onclick="requestAdminPasswordReset()" style="margin-top:12px;width:100%;border:0;background:transparent;color:var(--muted);font-size:12px;font-weight:700;cursor:pointer;">Forgot password?</button>
   </div>
 </div>
 
@@ -518,6 +519,7 @@ async function doLogin() {
   const errEl = document.getElementById('l-err');
   const btn = document.querySelector('.btn-login');
   errEl.textContent = '';
+  errEl.style.color = '';
   if (!u || !p) { errEl.textContent = 'Enter username and password.'; return; }
   btn.textContent = 'Signing in…';
   btn.disabled = true;
@@ -551,6 +553,27 @@ async function doLogin() {
   } finally {
     btn.textContent = 'Sign in';
     btn.disabled = false;
+  }
+}
+
+async function requestAdminPasswordReset() {
+  const u = document.getElementById('l-user').value.trim();
+  const errEl = document.getElementById('l-err');
+  errEl.textContent = '';
+  if (!u) { errEl.textContent = 'Enter your email first, then click Forgot password.'; return; }
+  try {
+    const res = await fetch(API + '/api/auth/password-reset/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: u }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Unable to send reset link.');
+    errEl.style.color = '#1f8f3a';
+    errEl.textContent = data.message || 'If an account exists, a reset link will be sent.';
+  } catch (e) {
+    errEl.style.color = '';
+    errEl.textContent = e.message || 'Unable to send reset link.';
   }
 }
 

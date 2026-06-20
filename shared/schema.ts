@@ -272,6 +272,20 @@ export const fleetDriverInvites = pgTable("fleet_driver_invites", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  userId: varchar("user_id")
+    .notNull()
+    .references(() => users.id),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  requestedAt: timestamp("requested_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const liftClubRoutes = pgTable("lift_club_routes", {
   id: varchar("id")
     .primaryKey()
@@ -583,6 +597,7 @@ export type PartnerProfile = typeof partnerProfiles.$inferSelect;
 export type Vehicle = typeof vehicles.$inferSelect;
 export type VehicleAssignment = typeof vehicleAssignments.$inferSelect;
 export type FleetDriverInvite = typeof fleetDriverInvites.$inferSelect;
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type LiftClubRoute = typeof liftClubRoutes.$inferSelect;
 export type LiftClubBooking = typeof liftClubBookings.$inferSelect;
 export type Document = typeof documents.$inferSelect;

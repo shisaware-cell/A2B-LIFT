@@ -30,10 +30,12 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
+  const [resetMessage, setResetMessage] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   // Clear error whenever screen comes into focus (e.g. after logout)
-  useFocusEffect(useCallback(() => { setError(""); }, []));
+  useFocusEffect(useCallback(() => { setError(""); setResetMessage(""); }, []));
 
   // Handle the deep link callback from the backend OAuth flow
   useEffect(() => {
@@ -75,7 +77,7 @@ export default function LoginScreen() {
 
   async function handleLogin() {
     if (!username.trim() || !password.trim()) { setError("Please fill in all fields"); return; }
-    setLoading(true); setError("");
+    setLoading(true); setError(""); setResetMessage("");
     try {
       await login(username.trim(), password);
       // AuthGate handles navigation when user state changes
@@ -93,6 +95,26 @@ export default function LoginScreen() {
         setError(e.message || "Login failed. Please try again.");
       }
     } finally { setLoading(false); }
+  }
+
+  async function handlePasswordResetRequest() {
+    const email = username.trim().toLowerCase();
+    if (!email) {
+      setError("Enter your email address first, then tap Forgot password.");
+      return;
+    }
+    setResetLoading(true);
+    setError("");
+    setResetMessage("");
+    try {
+      const res = await apiRequest("POST", "/api/auth/password-reset/request", { email });
+      const data = await res.json().catch(() => ({}));
+      setResetMessage(data.message || "If an account exists, a password reset link will be sent.");
+    } catch (e: any) {
+      setError(e?.message || "Unable to send reset link. Please try again.");
+    } finally {
+      setResetLoading(false);
+    }
   }
 
   async function handleGoogleSignIn() {
@@ -150,6 +172,12 @@ export default function LoginScreen() {
               <Text style={styles.errorText}>{error}</Text>
             </View>
           )}
+          {!!resetMessage && (
+            <View style={styles.successBox}>
+              <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
+              <Text style={styles.successText}>{resetMessage}</Text>
+            </View>
+          )}
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Email</Text>
@@ -162,7 +190,14 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
+            <View style={styles.passwordLabelRow}>
+              <Text style={styles.label}>Password</Text>
+              <Pressable onPress={handlePasswordResetRequest} disabled={resetLoading} hitSlop={8}>
+                <Text style={[styles.forgotLink, resetLoading && { opacity: 0.65 }]}>
+                  {resetLoading ? "Sending..." : "Forgot password?"}
+                </Text>
+              </Pressable>
+            </View>
             <View style={styles.inputWrapper}>
               <Ionicons name="lock-closed-outline" size={18} color={Colors.textMuted} />
               <TextInput style={styles.input} placeholder="Enter password" placeholderTextColor={Colors.textMuted}
@@ -215,8 +250,12 @@ const styles = StyleSheet.create({
   form: { gap: 16 },
   errorBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(255,77,77,0.1)", padding: 12, borderRadius: 10, borderWidth: 1, borderColor: "rgba(255,77,77,0.2)" },
   errorText: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.error },
+  successBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(76,175,80,0.1)", padding: 12, borderRadius: 10, borderWidth: 1, borderColor: "rgba(76,175,80,0.22)" },
+  successText: { flex: 1, fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.success, lineHeight: 18 },
   inputGroup: { gap: 8 },
+  passwordLabelRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   label: { fontSize: 12, fontFamily: "Inter_500Medium", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 1 },
+  forgotLink: { fontSize: 12, fontFamily: "Inter_600SemiBold", color: Colors.white },
   inputWrapper: { flexDirection: "row", alignItems: "center", backgroundColor: Colors.card, borderRadius: 12, paddingHorizontal: 16, gap: 12, borderWidth: 1, borderColor: Colors.border },
   input: { flex: 1, paddingVertical: 15, fontSize: 15, fontFamily: "Inter_400Regular", color: Colors.white },
   loginBtn: { backgroundColor: Colors.white, paddingVertical: 15, borderRadius: 14, alignItems: "center", marginTop: 4 },

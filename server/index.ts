@@ -578,6 +578,32 @@ function setupErrorHandler(app: express.Application) {
     console.error("[MIGRATION] Warning: could not apply fleet onboarding migration:", err.message);
   }
 
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id varchar NOT NULL REFERENCES users(id),
+        token_hash text NOT NULL UNIQUE,
+        expires_at timestamp NOT NULL,
+        used_at timestamp,
+        requested_at timestamp DEFAULT now(),
+        created_at timestamp DEFAULT now()
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS password_reset_tokens_user_idx
+        ON password_reset_tokens (user_id, created_at DESC)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS password_reset_tokens_lookup_idx
+        ON password_reset_tokens (token_hash, expires_at)
+        WHERE used_at IS NULL
+    `);
+    console.log("[MIGRATION] Password reset table ensured ✅");
+  } catch (err: any) {
+    console.error("[MIGRATION] Warning: could not apply password reset migration:", err.message);
+  }
+
   setupCors(app);
   setupSecurity(app);
   setupBodyParsing(app);

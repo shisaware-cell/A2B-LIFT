@@ -693,9 +693,220 @@ export async function registerRoutes(app: Express): Promise<Server> {
     };
   }
 
+  function normalizeEmail(value: unknown): string {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function hashPasswordResetToken(token: string): string {
+    return crypto.createHash("sha256").update(token).digest("hex");
+  }
+
+  function getPasswordResetBaseUrl(): string {
+    return (
+      process.env.A2B_WEB_URL ||
+      process.env.PUBLIC_APP_URL ||
+      process.env.EXPO_PUBLIC_REFERRAL_BASE_URL ||
+      "https://a2blift.com"
+    ).replace(/\/$/, "");
+  }
+
+  function buildPasswordResetEmail(options: {
+    resetUrl: string;
+    name?: string | null;
+    expiresInMinutes: number;
+  }) {
+    const safeName = escapeHtml(options.name || "there");
+    const safeUrl = escapeHtml(options.resetUrl);
+    const subject = "Reset your A2B LIFT password";
+    const text = [
+      `Hello ${options.name || "there"},`,
+      "",
+      "We received a request to reset your A2B LIFT password.",
+      `Open this secure link to create a new password: ${options.resetUrl}`,
+      "",
+      `This link expires in ${options.expiresInMinutes} minutes. If you did not request it, you can ignore this email.`,
+      "",
+      "A2B LIFT",
+    ].join("\n");
+
+    const html = `
+      <!doctype html>
+      <html>
+        <body style="margin:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#111;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:28px 12px;">
+            <tr>
+              <td align="center">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;background:#ffffff;border-radius:22px;overflow:hidden;border:1px solid #e5e7eb;">
+                  <tr>
+                    <td style="background:#050505;padding:30px 32px;color:#fff;">
+                      <div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#bdbdbd;font-weight:700;">A2B LIFT Account</div>
+                      <h1 style="margin:12px 0 0;font-size:28px;line-height:1.15;">Reset your password</h1>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:30px 32px;">
+                      <p style="margin:0 0 16px;font-size:16px;line-height:1.65;">Hello ${safeName},</p>
+                      <p style="margin:0 0 20px;font-size:16px;line-height:1.65;">We received a request to reset your A2B LIFT password. Use the secure button below to create a new one.</p>
+                      <a href="${safeUrl}" style="display:inline-block;background:#050505;color:#fff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 22px;border-radius:999px;">Reset password</a>
+                      <p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#777;">This link expires in ${options.expiresInMinutes} minutes. If you did not request it, you can ignore this email.</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `;
+
+    return { subject, html, text };
+  }
+
+  async function sendPasswordResetEmail(options: {
+    to: string;
+    name?: string | null;
+    resetUrl: string;
+    expiresInMinutes: number;
+  }) {
+    const apiKey = process.env.RESEND_API_KEY;
+    const email = buildPasswordResetEmail(options);
+    if (!apiKey) {
+      if (process.env.NODE_ENV === "production") {
+        console.warn("[Password reset] RESEND_API_KEY is not configured.");
+      } else {
+        console.warn(`[Password reset] RESEND_API_KEY is not configured. Reset link for ${options.to}: ${options.resetUrl}`);
+      }
+      return { emailStatus: "pending_configuration", emailError: "RESEND_API_KEY is not configured", resendId: null };
+    }
+
+    const from = process.env.RESEND_FROM_EMAIL || "A2B LIFT <support@a2blift.com>";
+    try {
+      const response = await axios.post(
+        "https://api.resend.com/emails",
+        {
+          from,
+          to: [options.to],
+          subject: email.subject,
+          html: email.html,
+          text: email.text,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          timeout: 12000,
+        },
+      );
+      return { emailStatus: "sent", emailError: null, resendId: response.data?.id || null };
+    } catch (error: any) {
+      return {
+        emailStatus: "failed",
+        emailError: error?.response?.data?.message || error?.message || "Resend email failed",
+        resendId: null,
+      };
+    }
+  }
+
   // -----------------------------
   // Auth (JWT)
   // -----------------------------
+  app.post("/api/auth/password-reset/request", async (req: Request, res: Response) => {
+    const genericResponse = {
+      ok: true,
+      message: "If an A2B LIFT account exists for that email, a password reset link will be sent.",
+    };
+
+    try {
+      const email = normalizeEmail(req.body?.email || req.body?.username);
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ message: "Please enter a valid email address." });
+      }
+
+      const user = await storage.getUserByUsername(email);
+      if (!user) {
+        return res.json(genericResponse);
+      }
+
+      const token = crypto.randomBytes(32).toString("base64url");
+      const tokenHash = hashPasswordResetToken(token);
+      const expiresInMinutes = 60;
+      const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
+
+      await pool.query(
+        "UPDATE password_reset_tokens SET used_at = now() WHERE user_id = $1 AND used_at IS NULL",
+        [user.id],
+      );
+      await pool.query(
+        `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+         VALUES ($1, $2, $3)`,
+        [user.id, tokenHash, expiresAt],
+      );
+
+      const resetUrl = `${getPasswordResetBaseUrl()}/login.html?resetToken=${encodeURIComponent(token)}`;
+      const emailResult = await sendPasswordResetEmail({
+        to: email,
+        name: user.name,
+        resetUrl,
+        expiresInMinutes,
+      });
+
+      if (emailResult.emailError) {
+        console.warn("[Password reset] Email was not sent:", emailResult.emailError);
+      }
+
+      return res.json(genericResponse);
+    } catch (error: any) {
+      console.error("[Password reset] Request error:", error);
+      return res.status(500).json({ message: "Unable to process password reset right now. Please try again." });
+    }
+  });
+
+  app.post("/api/auth/password-reset/confirm", async (req: Request, res: Response) => {
+    try {
+      const token = String(req.body?.token || "").trim();
+      const password = String(req.body?.password || "");
+      if (!token) {
+        return res.status(400).json({ message: "Reset token is required." });
+      }
+      if (password.length < 8) {
+        return res.status(400).json({ message: "Password must be at least 8 characters." });
+      }
+
+      const tokenHash = hashPasswordResetToken(token);
+      const tokenResult = await pool.query(
+        `
+          SELECT id, user_id
+          FROM password_reset_tokens
+          WHERE token_hash = $1
+            AND used_at IS NULL
+            AND expires_at > now()
+          LIMIT 1
+        `,
+        [tokenHash],
+      );
+
+      const reset = tokenResult.rows?.[0];
+      if (!reset) {
+        return res.status(400).json({ message: "This reset link is invalid or has expired." });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      await pool.query("UPDATE users SET password = $1 WHERE id = $2", [hashedPassword, reset.user_id]);
+      await pool.query("UPDATE password_reset_tokens SET used_at = now() WHERE id = $1", [reset.id]);
+      await pool.query(
+        "UPDATE password_reset_tokens SET used_at = now() WHERE user_id = $1 AND used_at IS NULL",
+        [reset.user_id],
+      );
+
+      return res.json({ ok: true, message: "Password updated. You can now log in with your new password." });
+    } catch (error: any) {
+      console.error("[Password reset] Confirm error:", error);
+      return res.status(500).json({ message: "Unable to reset password right now. Please try again." });
+    }
+  });
+
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
       const { username, password, name, phone, role, referralCode } = req.body;

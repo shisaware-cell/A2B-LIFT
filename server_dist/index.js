@@ -49,6 +49,7 @@ __export(schema_exports, {
   documents: () => documents,
   driverApplications: () => driverApplications,
   earnings: () => earnings,
+  fleetDriverInvites: () => fleetDriverInvites,
   insertChauffeurSchema: () => insertChauffeurSchema,
   insertLivenessSessionSchema: () => insertLivenessSessionSchema,
   insertOperatorProfileSchema: () => insertOperatorProfileSchema,
@@ -64,6 +65,7 @@ __export(schema_exports, {
   notifications: () => notifications,
   operatorProfiles: () => operatorProfiles,
   partnerProfiles: () => partnerProfiles,
+  passwordResetTokens: () => passwordResetTokens,
   payments: () => payments,
   referralEvents: () => referralEvents,
   rewardCashouts: () => rewardCashouts,
@@ -265,6 +267,31 @@ var vehicleAssignments = (0, import_pg_core.pgTable)("vehicle_assignments", {
   status: (0, import_pg_core.text)("status").notNull().default("active"),
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
   removedAt: (0, import_pg_core.timestamp)("removed_at")
+});
+var fleetDriverInvites = (0, import_pg_core.pgTable)("fleet_driver_invites", {
+  id: (0, import_pg_core.varchar)("id").primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
+  driverOperatorProfileId: (0, import_pg_core.varchar)("driver_operator_profile_id").notNull().references(() => operatorProfiles.id),
+  invitedByOperatorProfileId: (0, import_pg_core.varchar)("invited_by_operator_profile_id").notNull().references(() => operatorProfiles.id),
+  invitedByUserId: (0, import_pg_core.varchar)("invited_by_user_id").notNull().references(() => users.id),
+  status: (0, import_pg_core.text)("status").notNull().default("pending"),
+  emailStatus: (0, import_pg_core.text)("email_status").notNull().default("queued"),
+  emailError: (0, import_pg_core.text)("email_error"),
+  message: (0, import_pg_core.text)("message"),
+  resendId: (0, import_pg_core.text)("resend_id"),
+  sentAt: (0, import_pg_core.timestamp)("sent_at"),
+  acceptedAt: (0, import_pg_core.timestamp)("accepted_at"),
+  declinedAt: (0, import_pg_core.timestamp)("declined_at"),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+});
+var passwordResetTokens = (0, import_pg_core.pgTable)("password_reset_tokens", {
+  id: (0, import_pg_core.varchar)("id").primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
+  userId: (0, import_pg_core.varchar)("user_id").notNull().references(() => users.id),
+  tokenHash: (0, import_pg_core.text)("token_hash").notNull().unique(),
+  expiresAt: (0, import_pg_core.timestamp)("expires_at").notNull(),
+  usedAt: (0, import_pg_core.timestamp)("used_at"),
+  requestedAt: (0, import_pg_core.timestamp)("requested_at").defaultNow(),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
 });
 var liftClubRoutes = (0, import_pg_core.pgTable)("lift_club_routes", {
   id: (0, import_pg_core.varchar)("id").primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
@@ -660,6 +687,12 @@ var DatabaseStorage = class {
       (0, import_drizzle_orm2.or)(
         (0, import_drizzle_orm2.eq)(vehicleAssignments.driverOperatorProfileId, id),
         (0, import_drizzle_orm2.eq)(vehicleAssignments.assignedByOperatorProfileId, id)
+      )
+    );
+    await db.delete(fleetDriverInvites).where(
+      (0, import_drizzle_orm2.or)(
+        (0, import_drizzle_orm2.eq)(fleetDriverInvites.driverOperatorProfileId, id),
+        (0, import_drizzle_orm2.eq)(fleetDriverInvites.invitedByOperatorProfileId, id)
       )
     );
     await db.delete(partnerProfiles).where((0, import_drizzle_orm2.eq)(partnerProfiles.operatorProfileId, id));
@@ -1943,6 +1976,182 @@ async function registerRoutes(app2) {
       rewardsBalance
     };
   }
+  function normalizeEmail(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+  function hashPasswordResetToken(token) {
+    return import_node_crypto.default.createHash("sha256").update(token).digest("hex");
+  }
+  function getPasswordResetBaseUrl() {
+    return (process.env.A2B_WEB_URL || process.env.PUBLIC_APP_URL || process.env.EXPO_PUBLIC_REFERRAL_BASE_URL || "https://a2blift.com").replace(/\/$/, "");
+  }
+  function buildPasswordResetEmail(options) {
+    const safeName = escapeHtml(options.name || "there");
+    const safeUrl = escapeHtml(options.resetUrl);
+    const subject = "Reset your A2B LIFT password";
+    const text2 = [
+      `Hello ${options.name || "there"},`,
+      "",
+      "We received a request to reset your A2B LIFT password.",
+      `Open this secure link to create a new password: ${options.resetUrl}`,
+      "",
+      `This link expires in ${options.expiresInMinutes} minutes. If you did not request it, you can ignore this email.`,
+      "",
+      "A2B LIFT"
+    ].join("\n");
+    const html = `
+      <!doctype html>
+      <html>
+        <body style="margin:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#111;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:28px 12px;">
+            <tr>
+              <td align="center">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;background:#ffffff;border-radius:22px;overflow:hidden;border:1px solid #e5e7eb;">
+                  <tr>
+                    <td style="background:#050505;padding:30px 32px;color:#fff;">
+                      <div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#bdbdbd;font-weight:700;">A2B LIFT Account</div>
+                      <h1 style="margin:12px 0 0;font-size:28px;line-height:1.15;">Reset your password</h1>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:30px 32px;">
+                      <p style="margin:0 0 16px;font-size:16px;line-height:1.65;">Hello ${safeName},</p>
+                      <p style="margin:0 0 20px;font-size:16px;line-height:1.65;">We received a request to reset your A2B LIFT password. Use the secure button below to create a new one.</p>
+                      <a href="${safeUrl}" style="display:inline-block;background:#050505;color:#fff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 22px;border-radius:999px;">Reset password</a>
+                      <p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#777;">This link expires in ${options.expiresInMinutes} minutes. If you did not request it, you can ignore this email.</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `;
+    return { subject, html, text: text2 };
+  }
+  async function sendPasswordResetEmail(options) {
+    const apiKey = process.env.RESEND_API_KEY;
+    const email = buildPasswordResetEmail(options);
+    if (!apiKey) {
+      if (process.env.NODE_ENV === "production") {
+        console.warn("[Password reset] RESEND_API_KEY is not configured.");
+      } else {
+        console.warn(`[Password reset] RESEND_API_KEY is not configured. Reset link for ${options.to}: ${options.resetUrl}`);
+      }
+      return { emailStatus: "pending_configuration", emailError: "RESEND_API_KEY is not configured", resendId: null };
+    }
+    const from = process.env.RESEND_FROM_EMAIL || "A2B LIFT <support@a2blift.com>";
+    try {
+      const response = await import_axios.default.post(
+        "https://api.resend.com/emails",
+        {
+          from,
+          to: [options.to],
+          subject: email.subject,
+          html: email.html,
+          text: email.text
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          timeout: 12e3
+        }
+      );
+      return { emailStatus: "sent", emailError: null, resendId: response.data?.id || null };
+    } catch (error) {
+      return {
+        emailStatus: "failed",
+        emailError: error?.response?.data?.message || error?.message || "Resend email failed",
+        resendId: null
+      };
+    }
+  }
+  app2.post("/api/auth/password-reset/request", async (req, res) => {
+    const genericResponse = {
+      ok: true,
+      message: "If an A2B LIFT account exists for that email, a password reset link will be sent."
+    };
+    try {
+      const email = normalizeEmail(req.body?.email || req.body?.username);
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ message: "Please enter a valid email address." });
+      }
+      const user = await storage.getUserByUsername(email);
+      if (!user) {
+        return res.json(genericResponse);
+      }
+      const token = import_node_crypto.default.randomBytes(32).toString("base64url");
+      const tokenHash = hashPasswordResetToken(token);
+      const expiresInMinutes = 60;
+      const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1e3);
+      await pool2.query(
+        "UPDATE password_reset_tokens SET used_at = now() WHERE user_id = $1 AND used_at IS NULL",
+        [user.id]
+      );
+      await pool2.query(
+        `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+         VALUES ($1, $2, $3)`,
+        [user.id, tokenHash, expiresAt]
+      );
+      const resetUrl = `${getPasswordResetBaseUrl()}/login.html?resetToken=${encodeURIComponent(token)}`;
+      const emailResult = await sendPasswordResetEmail({
+        to: email,
+        name: user.name,
+        resetUrl,
+        expiresInMinutes
+      });
+      if (emailResult.emailError) {
+        console.warn("[Password reset] Email was not sent:", emailResult.emailError);
+      }
+      return res.json(genericResponse);
+    } catch (error) {
+      console.error("[Password reset] Request error:", error);
+      return res.status(500).json({ message: "Unable to process password reset right now. Please try again." });
+    }
+  });
+  app2.post("/api/auth/password-reset/confirm", async (req, res) => {
+    try {
+      const token = String(req.body?.token || "").trim();
+      const password = String(req.body?.password || "");
+      if (!token) {
+        return res.status(400).json({ message: "Reset token is required." });
+      }
+      if (password.length < 8) {
+        return res.status(400).json({ message: "Password must be at least 8 characters." });
+      }
+      const tokenHash = hashPasswordResetToken(token);
+      const tokenResult = await pool2.query(
+        `
+          SELECT id, user_id
+          FROM password_reset_tokens
+          WHERE token_hash = $1
+            AND used_at IS NULL
+            AND expires_at > now()
+          LIMIT 1
+        `,
+        [tokenHash]
+      );
+      const reset = tokenResult.rows?.[0];
+      if (!reset) {
+        return res.status(400).json({ message: "This reset link is invalid or has expired." });
+      }
+      const hashedPassword = await import_bcryptjs.default.hash(password, 10);
+      await pool2.query("UPDATE users SET password = $1 WHERE id = $2", [hashedPassword, reset.user_id]);
+      await pool2.query("UPDATE password_reset_tokens SET used_at = now() WHERE id = $1", [reset.id]);
+      await pool2.query(
+        "UPDATE password_reset_tokens SET used_at = now() WHERE user_id = $1 AND used_at IS NULL",
+        [reset.user_id]
+      );
+      return res.json({ ok: true, message: "Password updated. You can now log in with your new password." });
+    } catch (error) {
+      console.error("[Password reset] Confirm error:", error);
+      return res.status(500).json({ message: "Unable to reset password right now. Please try again." });
+    }
+  });
   app2.post("/api/auth/register", async (req, res) => {
     try {
       const { username, password, name, phone, role, referralCode } = req.body;
@@ -2031,6 +2240,149 @@ async function registerRoutes(app2) {
     const safeUser = await hydrateAuthUser(user);
     return res.json(safeUser);
   });
+  app2.delete("/api/auth/me", requireAuth, async (req, res) => {
+    const userId = req.auth.sub;
+    const client = await pool2.connect();
+    const maybeQuery = async (query, params = []) => {
+      try {
+        return await client.query(query, params);
+      } catch (error) {
+        if (error?.code === "42P01" || error?.code === "42703") return null;
+        throw error;
+      }
+    };
+    try {
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      const chauffeurRows = await pool2.query("SELECT id FROM chauffeurs WHERE user_id = $1", [userId]);
+      const chauffeurIds = chauffeurRows.rows.map((row) => row.id).filter(Boolean);
+      const activeRideStatuses = ["requested", "accepted", "arrived", "in_progress", "en_route"];
+      const activeRideCheck = await pool2.query(
+        `
+          SELECT id
+          FROM rides
+          WHERE (client_id = $1 OR chauffeur_id = ANY($2::varchar[]))
+            AND status = ANY($3::text[])
+          LIMIT 1
+        `,
+        [userId, chauffeurIds, activeRideStatuses]
+      );
+      if (activeRideCheck.rowCount && activeRideCheck.rowCount > 0) {
+        return res.status(409).json({ message: "Please complete or cancel any active trip before deleting your account." });
+      }
+      const deletedEmail = `deleted-${userId}@deleted.a2b.local`;
+      const deletedPassword = await import_bcryptjs.default.hash(import_node_crypto.default.randomBytes(32).toString("hex"), 10);
+      await client.query("BEGIN");
+      await maybeQuery("DELETE FROM notifications WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM saved_cards WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM wallet_transactions WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM messages WHERE sender_id = $1", [userId]);
+      await maybeQuery("DELETE FROM safety_reports WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM trip_enquiries WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM liveness_sessions WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM documents WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM lift_club_bookings WHERE rider_id = $1", [userId]);
+      await maybeQuery(
+        `
+          DELETE FROM lift_club_bookings
+          WHERE route_id IN (
+            SELECT id FROM lift_club_routes WHERE chauffeur_id = ANY($1::varchar[])
+          )
+        `,
+        [chauffeurIds]
+      );
+      await maybeQuery("DELETE FROM lift_club_routes WHERE chauffeur_id = ANY($1::varchar[])", [chauffeurIds]);
+      await maybeQuery("UPDATE payments SET paystack_auth_code = NULL WHERE payer_user_id = $1", [userId]);
+      await maybeQuery(
+        `
+          UPDATE reward_transactions
+          SET source_user_id = NULL
+          WHERE source_user_id = $1
+        `,
+        [userId]
+      );
+      await maybeQuery(
+        `
+          UPDATE reward_transactions
+          SET referral_event_id = NULL
+          WHERE referral_event_id IN (
+            SELECT id
+            FROM referral_events
+            WHERE referrer_user_id = $1 OR referred_user_id = $1
+          )
+        `,
+        [userId]
+      );
+      await maybeQuery("DELETE FROM reward_transactions WHERE user_id = $1", [userId]);
+      await maybeQuery("DELETE FROM reward_cashouts WHERE user_id = $1 OR reviewed_by_admin_id = $1", [userId]);
+      await maybeQuery("DELETE FROM referral_events WHERE referrer_user_id = $1 OR referred_user_id = $1", [userId]);
+      await maybeQuery(
+        `
+          UPDATE driver_applications
+          SET status = 'withdrawn',
+              notes = 'Applicant deleted their account.',
+              reviewed_at = NOW(),
+              reviewer_admin_id = NULL
+          WHERE user_id = $1
+        `,
+        [userId]
+      );
+      await maybeQuery(
+        `
+          UPDATE chauffeurs
+          SET is_online = false,
+              is_approved = false,
+              available_for_long_distance = false,
+              long_distance_from = NULL,
+              long_distance_to = NULL,
+              long_distance_date = NULL,
+              long_distance_price_per_seat = NULL,
+              long_distance_seats_available = 0,
+              phone = NULL,
+              profile_photo = NULL,
+              push_token = NULL,
+              lat = NULL,
+              lng = NULL,
+              location_updated_at = NULL,
+              car_make = 'Deleted',
+              vehicle_model = 'Deleted',
+              plate_number = 'Deleted',
+              vehicle_type = 'Deleted',
+              car_color = 'Deleted'
+          WHERE user_id = $1
+        `,
+        [userId]
+      );
+      await maybeQuery(
+        `
+          UPDATE users
+          SET username = $2,
+              password = $3,
+              name = 'Deleted Account',
+              phone = NULL,
+              profile_photo = NULL,
+              push_token = NULL,
+              referral_code = NULL,
+              referred_by_user_id = NULL,
+              rewards_balance = 0,
+              wallet_balance = 0
+          WHERE id = $1
+        `,
+        [userId, deletedEmail, deletedPassword]
+      );
+      await client.query("COMMIT");
+      res.clearCookie("a2b_token", { path: "/" });
+      return res.json({ ok: true, message: "Account deleted" });
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+      }
+      return res.status(500).json({ message: error.message || "Account deletion failed" });
+    } finally {
+      client.release();
+    }
+  });
   app2.get("/api/referrals/me", requireAuth, async (req, res) => {
     try {
       const user = await storage.getUser(req.auth.sub);
@@ -2073,11 +2425,12 @@ async function registerRoutes(app2) {
       const rewardedReferrals = (referralEvents2 || []).filter(
         (event) => Number(event.totalRewards || 0) > 0 || event.status === "rewarded"
       ).length;
-      const referralBase = process.env.EXPO_PUBLIC_REFERRAL_LINK_BASE_URL || process.env.EXPO_PUBLIC_DOMAIN || "https://api.a2blift.com";
+      const configuredReferralBase = process.env.EXPO_PUBLIC_REFERRAL_LINK_BASE_URL || process.env.EXPO_PUBLIC_REFERRAL_BASE_URL || process.env.A2B_PUBLIC_SITE_URL || process.env.PUBLIC_SITE_URL || "https://a2blift.com";
+      const referralBase = String(configuredReferralBase).replace(/\/$/, "").replace(/^https:\/\/api\.a2blift\.com$/i, "https://a2blift.com");
       const rewardApp = hydratedUser.role === "chauffeur" ? "driver" : "client";
       return res.json({
         referralCode: hydratedUser.referralCode,
-        shareUrl: `${String(referralBase).replace(/\/$/, "")}/r/${encodeURIComponent(hydratedUser.referralCode)}?app=${encodeURIComponent(rewardApp)}`,
+        shareUrl: `${referralBase}/r/${encodeURIComponent(hydratedUser.referralCode)}?app=${encodeURIComponent(rewardApp)}`,
         rewardsBalance: Number(hydratedUser.rewardsBalance || 0),
         referredCount: referralEvents2.length,
         rewardedReferrals,
@@ -3613,10 +3966,8 @@ async function registerRoutes(app2) {
     }
   });
   const PARTNER_REQUIRED_DOCS = /* @__PURE__ */ new Set([
-    "partner:company_registration",
     "partner:director_id",
     "partner:proof_of_address",
-    "partner:operating_permit",
     "partner:bank_account_details"
   ]);
   const VEHICLE_REQUIRED_DOCS = /* @__PURE__ */ new Set([
@@ -3628,6 +3979,9 @@ async function registerRoutes(app2) {
     const value = String(body?.[field] || "").trim();
     if (!value) throw new Error(`${field} is required`);
     return value;
+  }
+  function optionalStringField(body, field) {
+    return String(body?.[field] || "").trim();
   }
   async function getOrCreateOperatorProfile(options) {
     const existing = await storage.getOperatorProfileByUserId(options.userId);
@@ -3653,7 +4007,126 @@ async function registerRoutes(app2) {
       profile.type === "driver" ? storage.getChauffeurByUserId(profile.userId).catch(() => void 0) : Promise.resolve(null),
       profile.type === "partner" ? storage.getPartnerProfileByOperatorId(profile.id).catch(() => void 0) : Promise.resolve(null)
     ]);
-    return { ...profile, user: user || null, chauffeur: chauffeur || null, partnerProfile: partnerProfile || null };
+    const safeUser = user ? (({ password: _password, ...rest }) => rest)(user) : null;
+    return { ...profile, user: safeUser, chauffeur: chauffeur || null, partnerProfile: partnerProfile || null };
+  }
+  function escapeHtml(value) {
+    return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function getOperatorDisplayName(profile, partnerProfile, user) {
+    return partnerProfile?.companyName || partnerProfile?.company_name || user?.name || (profile?.type === "partner" ? "A2B fleet partner" : "A2B operator");
+  }
+  function buildFleetInviteEmail(options) {
+    const appUrl = (process.env.EXPO_PUBLIC_REFERRAL_LINK_BASE_URL || process.env.PUBLIC_APP_URL || process.env.EXPO_PUBLIC_DOMAIN || "https://a2blift.com").replace(/\/$/, "");
+    const acceptUrl = `${appUrl}/dashboard.html?fleetInvite=${encodeURIComponent(options.inviteId)}`;
+    const note = options.message?.trim();
+    const safeDriverName = escapeHtml(options.driverName || "Driver");
+    const safeManagerName = escapeHtml(options.managerName);
+    const safeManagerEmail = escapeHtml(options.managerEmail || "support@a2blift.com");
+    const text2 = [
+      `Hello ${options.driverName || "Driver"},`,
+      "",
+      `${options.managerName} has invited you to join their A2B LIFT fleet/team.`,
+      note ? `Message: ${note}` : "",
+      "",
+      `Open A2B LIFT Driver to accept or decline this invite. Invite link: ${acceptUrl}`,
+      "",
+      "A2B LIFT"
+    ].filter(Boolean).join("\n");
+    const html = `
+      <!doctype html>
+      <html>
+        <body style="margin:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#111;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:28px 12px;">
+            <tr>
+              <td align="center">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;background:#ffffff;border-radius:22px;overflow:hidden;border:1px solid #e5e7eb;">
+                  <tr>
+                    <td style="background:#050505;padding:30px 32px;color:#fff;">
+                      <div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#bdbdbd;font-weight:700;">A2B LIFT Fleet Invite</div>
+                      <h1 style="margin:12px 0 0;font-size:28px;line-height:1.15;">You have been invited to join a fleet</h1>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:30px 32px;">
+                      <p style="margin:0 0 16px;font-size:16px;line-height:1.65;">Hello ${safeDriverName},</p>
+                      <p style="margin:0 0 16px;font-size:16px;line-height:1.65;"><strong>${safeManagerName}</strong> has invited you to join their A2B LIFT fleet/team.</p>
+                      ${note ? `<div style="margin:20px 0;padding:16px;border-radius:14px;background:#f7f7f7;border:1px solid #ececec;"><div style="font-size:12px;text-transform:uppercase;letter-spacing:1.4px;color:#777;font-weight:700;margin-bottom:8px;">Message</div><div style="font-size:15px;line-height:1.6;">${escapeHtml(note)}</div></div>` : ""}
+                      <p style="margin:0 0 20px;font-size:15px;line-height:1.65;color:#444;">Open your A2B LIFT Driver app to review the invite. You can accept or decline it from your Fleet screen.</p>
+                      <a href="${acceptUrl}" style="display:inline-block;background:#050505;color:#fff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 22px;border-radius:999px;">Review fleet invite</a>
+                      <p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#777;">If you have questions, contact ${safeManagerName} or reply to A2B support at ${safeManagerEmail}.</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `;
+    return { subject: `${options.managerName} invited you to join their A2B LIFT fleet`, html, text: text2 };
+  }
+  async function sendFleetInviteEmail(options) {
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) {
+      return { emailStatus: "pending_configuration", emailError: "RESEND_API_KEY is not configured", resendId: null };
+    }
+    const from = process.env.RESEND_FROM_EMAIL || "A2B LIFT <support@a2blift.com>";
+    const email = buildFleetInviteEmail(options);
+    try {
+      const response = await import_axios.default.post(
+        "https://api.resend.com/emails",
+        {
+          from,
+          to: [options.to],
+          subject: email.subject,
+          html: email.html,
+          text: email.text
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          timeout: 12e3
+        }
+      );
+      return { emailStatus: "sent", emailError: null, resendId: response.data?.id || null };
+    } catch (error) {
+      return {
+        emailStatus: "failed",
+        emailError: error?.response?.data?.message || error?.message || "Resend email failed",
+        resendId: null
+      };
+    }
+  }
+  async function serializeFleetInvite(row) {
+    const [driverProfile, managerProfile] = await Promise.all([
+      storage.getOperatorProfile(row.driver_operator_profile_id || row.driverOperatorProfileId).catch(() => void 0),
+      storage.getOperatorProfile(row.invited_by_operator_profile_id || row.invitedByOperatorProfileId).catch(() => void 0)
+    ]);
+    const [driver, manager] = await Promise.all([
+      driverProfile ? serializeOperatorProfile(driverProfile) : Promise.resolve(null),
+      managerProfile ? serializeOperatorProfile(managerProfile) : Promise.resolve(null)
+    ]);
+    return {
+      id: row.id,
+      driverOperatorProfileId: row.driver_operator_profile_id || row.driverOperatorProfileId,
+      invitedByOperatorProfileId: row.invited_by_operator_profile_id || row.invitedByOperatorProfileId,
+      invitedByUserId: row.invited_by_user_id || row.invitedByUserId,
+      status: row.status,
+      emailStatus: row.email_status || row.emailStatus,
+      emailError: row.email_error || row.emailError,
+      message: row.message,
+      resendId: row.resend_id || row.resendId,
+      sentAt: row.sent_at || row.sentAt,
+      acceptedAt: row.accepted_at || row.acceptedAt,
+      declinedAt: row.declined_at || row.declinedAt,
+      createdAt: row.created_at || row.createdAt,
+      updatedAt: row.updated_at || row.updatedAt,
+      driver,
+      manager
+    };
   }
   async function serializeVehicle(vehicle) {
     const [ownerProfile, documents2, assignments] = await Promise.all([
@@ -3816,8 +4289,8 @@ async function registerRoutes(app2) {
   app2.post("/api/operator-profile/partner", requireAuth, async (req, res) => {
     try {
       const partnerData = {
-        companyName: requireStringField(req.body, "companyName"),
-        registrationNumber: requireStringField(req.body, "registrationNumber"),
+        companyName: optionalStringField(req.body, "companyName"),
+        registrationNumber: optionalStringField(req.body, "registrationNumber"),
         contactPersonName: requireStringField(req.body, "contactPersonName"),
         contactPhone: requireStringField(req.body, "contactPhone"),
         contactEmail: requireStringField(req.body, "contactEmail"),
@@ -4066,6 +4539,194 @@ async function registerRoutes(app2) {
       return res.json({ drivers: filtered });
     } catch (error) {
       return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.get("/api/fleet/invites", requireAuth, async (req, res) => {
+    try {
+      const profile = await storage.getOperatorProfileByUserId(req.auth.sub);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      const [sentResult, receivedResult] = await Promise.all([
+        pool2.query(
+          `
+            SELECT *
+            FROM fleet_driver_invites
+            WHERE invited_by_operator_profile_id = $1
+            ORDER BY created_at DESC
+            LIMIT 100
+          `,
+          [profile.id]
+        ),
+        pool2.query(
+          `
+            SELECT *
+            FROM fleet_driver_invites
+            WHERE driver_operator_profile_id = $1
+            ORDER BY created_at DESC
+            LIMIT 100
+          `,
+          [profile.id]
+        )
+      ]);
+      const [sentInvites, receivedInvites] = await Promise.all([
+        Promise.all(sentResult.rows.map(serializeFleetInvite)),
+        Promise.all(receivedResult.rows.map(serializeFleetInvite))
+      ]);
+      return res.json({ sentInvites, receivedInvites });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.post("/api/fleet/invites", requireAuth, async (req, res) => {
+    try {
+      const profile = await storage.getOperatorProfileByUserId(req.auth.sub);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      if (profile.status !== "approved") {
+        return res.status(403).json({ message: "Your operator profile must be approved first." });
+      }
+      if (profile.type !== "partner") {
+        return res.status(403).json({ message: "Only approved fleet partners can invite drivers to a fleet." });
+      }
+      const driverOperatorProfileId = requireStringField(req.body, "driverOperatorProfileId");
+      const message = typeof req.body.message === "string" ? req.body.message.trim().slice(0, 600) : "";
+      if (driverOperatorProfileId === profile.id) {
+        return res.status(400).json({ message: "You cannot invite yourself." });
+      }
+      const [driverProfile, managerUser, managerPartner] = await Promise.all([
+        storage.getOperatorProfile(driverOperatorProfileId),
+        storage.getUser(profile.userId),
+        storage.getPartnerProfileByOperatorId(profile.id).catch(() => void 0)
+      ]);
+      if (!driverProfile || driverProfile.type !== "driver" || driverProfile.status !== "approved") {
+        return res.status(400).json({ message: "Only approved A2B drivers can be invited." });
+      }
+      const driverUser = await storage.getUser(driverProfile.userId);
+      if (!driverUser?.username) {
+        return res.status(400).json({ message: "This driver does not have an email address on file." });
+      }
+      const pending = await pool2.query(
+        `
+          SELECT *
+          FROM fleet_driver_invites
+          WHERE driver_operator_profile_id = $1
+            AND invited_by_operator_profile_id = $2
+            AND status = 'pending'
+          LIMIT 1
+        `,
+        [driverProfile.id, profile.id]
+      );
+      if (pending.rowCount && pending.rowCount > 0 && pending.rows[0]?.email_status === "sent") {
+        return res.status(409).json({ message: "You already have a pending invite for this driver." });
+      }
+      let invite = pending.rows[0];
+      if (invite) {
+        const refreshed = await pool2.query(
+          `
+            UPDATE fleet_driver_invites
+            SET message = COALESCE($2, message),
+                email_status = 'queued',
+                email_error = NULL,
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING *
+          `,
+          [invite.id, message || null]
+        );
+        invite = refreshed.rows[0];
+      } else {
+        const inserted = await pool2.query(
+          `
+            INSERT INTO fleet_driver_invites (
+              driver_operator_profile_id,
+              invited_by_operator_profile_id,
+              invited_by_user_id,
+              status,
+              email_status,
+              message
+            )
+            VALUES ($1, $2, $3, 'pending', 'queued', $4)
+            RETURNING *
+          `,
+          [driverProfile.id, profile.id, req.auth.sub, message || null]
+        );
+        invite = inserted.rows[0];
+      }
+      const managerName = getOperatorDisplayName(profile, managerPartner, managerUser);
+      const emailResult = await sendFleetInviteEmail({
+        inviteId: invite.id,
+        to: driverUser.username,
+        driverName: driverUser.name || "Driver",
+        managerName,
+        managerEmail: managerUser?.username || managerPartner?.contactEmail || null,
+        message
+      });
+      const updated = await pool2.query(
+        `
+          UPDATE fleet_driver_invites
+          SET email_status = $2,
+              email_error = $3,
+              resend_id = $4,
+              sent_at = CASE WHEN $2 = 'sent' THEN NOW() ELSE sent_at END,
+              updated_at = NOW()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [invite.id, emailResult.emailStatus, emailResult.emailError, emailResult.resendId]
+      );
+      await notifyUserEvent({
+        userId: driverProfile.userId,
+        type: "fleet_invite",
+        title: "Fleet invite received",
+        body: `${managerName} invited you to join their A2B LIFT fleet/team.`,
+        data: { inviteId: invite.id, invitedByOperatorProfileId: profile.id }
+      });
+      return res.status(201).json({ invite: await serializeFleetInvite(updated.rows[0]) });
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
+  });
+  app2.put("/api/fleet/invites/:id/respond", requireAuth, async (req, res) => {
+    try {
+      const status = String(req.body?.status || "").toLowerCase();
+      if (!["accepted", "declined"].includes(status)) {
+        return res.status(400).json({ message: "Invite status must be accepted or declined." });
+      }
+      const profile = await storage.getOperatorProfileByUserId(req.auth.sub);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      const existing = await pool2.query("SELECT * FROM fleet_driver_invites WHERE id = $1 LIMIT 1", [req.params.id]);
+      const invite = existing.rows[0];
+      if (!invite) return res.status(404).json({ message: "Invite not found" });
+      if (invite.driver_operator_profile_id !== profile.id) {
+        return res.status(403).json({ message: "Only the invited driver can respond to this invite." });
+      }
+      if (invite.status !== "pending") {
+        return res.status(409).json({ message: "This invite has already been responded to." });
+      }
+      const updated = await pool2.query(
+        `
+          UPDATE fleet_driver_invites
+          SET status = $2,
+              accepted_at = CASE WHEN $2 = 'accepted' THEN NOW() ELSE accepted_at END,
+              declined_at = CASE WHEN $2 = 'declined' THEN NOW() ELSE declined_at END,
+              updated_at = NOW()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [invite.id, status]
+      );
+      const managerProfile = await storage.getOperatorProfile(invite.invited_by_operator_profile_id).catch(() => void 0);
+      if (managerProfile) {
+        const driverUser = await storage.getUser(profile.userId).catch(() => void 0);
+        await notifyUserEvent({
+          userId: managerProfile.userId,
+          type: "fleet_invite_response",
+          title: status === "accepted" ? "Fleet invite accepted" : "Fleet invite declined",
+          body: `${driverUser?.name || "A driver"} ${status} your fleet invite.`,
+          data: { inviteId: invite.id, driverOperatorProfileId: profile.id }
+        });
+      }
+      return res.json({ invite: await serializeFleetInvite(updated.rows[0]) });
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
     }
   });
   app2.get("/api/fleet/overview", requireAuth, async (req, res) => {
@@ -7816,8 +8477,18 @@ async function configureExpoAndLanding(app2) {
   const serveReferralLaunch = (req, res) => {
     const referralCode = req.params.code;
     const appTarget = String(req.query.app || req.query.source || req.query.role || "").trim();
-    const appQuery = appTarget ? `&app=${encodeURIComponent(appTarget)}` : "";
-    const target = referralCode ? `/referral-launch.html?code=${encodeURIComponent(referralCode)}${appQuery}` : "/referral-launch.html";
+    const params = new URLSearchParams();
+    if (referralCode) params.set("code", referralCode);
+    if (appTarget) params.set("app", appTarget);
+    const clientIosUrl = process.env.A2B_CLIENT_IOS_APP_STORE_URL || process.env.EXPO_PUBLIC_CLIENT_IOS_APP_STORE_URL || "";
+    const driverIosUrl = process.env.A2B_DRIVER_IOS_APP_STORE_URL || process.env.EXPO_PUBLIC_DRIVER_IOS_APP_STORE_URL || "";
+    const clientAndroidUrl = process.env.A2B_CLIENT_ANDROID_STORE_URL || process.env.EXPO_PUBLIC_CLIENT_ANDROID_STORE_URL || "";
+    const driverAndroidUrl = process.env.A2B_DRIVER_ANDROID_STORE_URL || process.env.EXPO_PUBLIC_DRIVER_ANDROID_STORE_URL || "https://play.google.com/store/apps/details?id=com.a2blift";
+    if (clientIosUrl) params.set("clientIosUrl", clientIosUrl);
+    if (driverIosUrl) params.set("driverIosUrl", driverIosUrl);
+    if (clientAndroidUrl) params.set("clientAndroidUrl", clientAndroidUrl);
+    if (driverAndroidUrl) params.set("driverAndroidUrl", driverAndroidUrl);
+    const target = referralCode ? `/referral-launch.html?${params.toString()}` : "/referral-launch.html";
     res.redirect(302, target);
   };
   app2.get("/referral/:code", serveReferralLaunch);
@@ -7979,9 +8650,60 @@ function setupErrorHandler(app2) {
         removed_at timestamp
       )
     `);
+    await pool2.query(`
+      CREATE TABLE IF NOT EXISTS fleet_driver_invites (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        driver_operator_profile_id varchar NOT NULL REFERENCES operator_profiles(id),
+        invited_by_operator_profile_id varchar NOT NULL REFERENCES operator_profiles(id),
+        invited_by_user_id varchar NOT NULL REFERENCES users(id),
+        status text NOT NULL DEFAULT 'pending',
+        email_status text NOT NULL DEFAULT 'queued',
+        email_error text,
+        message text,
+        resend_id text,
+        sent_at timestamp,
+        accepted_at timestamp,
+        declined_at timestamp,
+        created_at timestamp DEFAULT now(),
+        updated_at timestamp DEFAULT now()
+      )
+    `);
+    await pool2.query(`
+      CREATE INDEX IF NOT EXISTS fleet_driver_invites_manager_idx
+        ON fleet_driver_invites (invited_by_operator_profile_id, created_at DESC)
+    `);
+    await pool2.query(`
+      CREATE INDEX IF NOT EXISTS fleet_driver_invites_driver_idx
+        ON fleet_driver_invites (driver_operator_profile_id, created_at DESC)
+    `);
     console.log("[MIGRATION] Fleet onboarding tables ensured \u2705");
   } catch (err) {
     console.error("[MIGRATION] Warning: could not apply fleet onboarding migration:", err.message);
+  }
+  try {
+    await pool2.query(`
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id varchar NOT NULL REFERENCES users(id),
+        token_hash text NOT NULL UNIQUE,
+        expires_at timestamp NOT NULL,
+        used_at timestamp,
+        requested_at timestamp DEFAULT now(),
+        created_at timestamp DEFAULT now()
+      )
+    `);
+    await pool2.query(`
+      CREATE INDEX IF NOT EXISTS password_reset_tokens_user_idx
+        ON password_reset_tokens (user_id, created_at DESC)
+    `);
+    await pool2.query(`
+      CREATE INDEX IF NOT EXISTS password_reset_tokens_lookup_idx
+        ON password_reset_tokens (token_hash, expires_at)
+        WHERE used_at IS NULL
+    `);
+    console.log("[MIGRATION] Password reset table ensured \u2705");
+  } catch (err) {
+    console.error("[MIGRATION] Warning: could not apply password reset migration:", err.message);
   }
   setupCors(app);
   setupSecurity(app);
