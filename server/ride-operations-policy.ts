@@ -28,6 +28,20 @@ export function calculateRiderCancellationFee(options: {
   return Math.max(0, options.baseFareCents) + Math.max(0, options.waitingFeeCents);
 }
 
+export function resolveCancellation(options: {
+  actor: "rider" | "driver";
+  baseFareCents: number;
+  minutesDrivingToPickup: number;
+  waitingFeeCents: number;
+  arrived?: boolean;
+}): { feeCents: number; cashDebtCents: number } {
+  if (options.actor === "driver") return { feeCents: 0, cashDebtCents: 0 };
+  const feeCents = options.arrived
+    ? Math.max(0, options.baseFareCents) + Math.max(0, options.waitingFeeCents)
+    : calculateRiderCancellationFee(options);
+  return { feeCents, cashDebtCents: feeCents };
+}
+
 export function reconcileDriverProfileStatus(options: {
   profileType: string;
   profileStatus: string;

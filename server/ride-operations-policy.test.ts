@@ -6,6 +6,7 @@ import {
   calculateRiderCancellationFee,
   calculateWaitingFee,
   reconcileDriverProfileStatus,
+  resolveCancellation,
 } from "./ride-operations-policy";
 import { calculatePrice } from "./luxuryPricingEngine";
 
@@ -34,4 +35,13 @@ test("charges the selected vehicle base fare only after three driving minutes", 
 test("reconciles only an approved driver's stale operator profile", () => {
   assert.equal(reconcileDriverProfileStatus({ profileType: "driver", profileStatus: "pending", chauffeurApproved: true }), "approved");
   assert.equal(reconcileDriverProfileStatus({ profileType: "partner", profileStatus: "pending", chauffeurApproved: true }), "pending");
+});
+
+test("charges a rider but never a driver for an eligible cancellation", () => {
+  assert.deepEqual(resolveCancellation({ actor: "driver", baseFareCents: 4500, minutesDrivingToPickup: 30, waitingFeeCents: 2000 }), { feeCents: 0, cashDebtCents: 0 });
+  assert.deepEqual(resolveCancellation({ actor: "rider", baseFareCents: 4500, minutesDrivingToPickup: 3, waitingFeeCents: 0 }), { feeCents: 4500, cashDebtCents: 4500 });
+});
+
+test("includes waiting time when a rider cancels after driver arrival", () => {
+  assert.deepEqual(resolveCancellation({ actor: "rider", baseFareCents: 4500, minutesDrivingToPickup: 0, waitingFeeCents: 1200, arrived: true }), { feeCents: 5700, cashDebtCents: 5700 });
 });

@@ -18,7 +18,7 @@ import {
 import { authOptional, requireAuth, requireRole, type AuthedRequest } from "./auth-middleware";
 import { signAccessToken, type UserRole } from "./auth";
 import { externalApiService } from "./external-api-service";
-import { calculateDemandMultiplier, reconcileDriverProfileStatus } from "./ride-operations-policy";
+import { calculateDemandMultiplier, calculateWaitingFee, reconcileDriverProfileStatus, resolveCancellation } from "./ride-operations-policy";
 
 const RIDE_MATCH_RADIUS_KM = 25;
 const CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
@@ -5972,6 +5972,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      if (Number(clientUser.walletBalance || 0) < 0) {
+        return res.status(409).json({
+          success: false,
+          message: "Please settle your outstanding cancellation balance before requesting another ride.",
+        });
+      }
+
       const categoryId = rideData.vehicleType || "budget";
       const normalizedDistanceKm = Number(rideData.selectedRouteDistanceKm ?? distanceKm ?? 10);
       const safeDistanceKm = Number.isFinite(normalizedDistanceKm) && normalizedDistanceKm > 0 ? normalizedDistanceKm : 10;
@@ -6004,6 +6011,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         vehicleType: rideData.vehicleType || "budget",
         paymentMethod: rideData.paymentMethod || "cash",
         price: safeFare,
+        quotedFare: safeFare,
+        finalFare: null,
         distanceKm: safeDistanceKm,
         durationMin: safeDurationMin,
         pricePerKm: priceEstimate.pricePerKm,
@@ -6442,10 +6451,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // For cancellations, capture the pre-update ride first so we can refund
       const rideBeforeUpdate = status === "cancelled" ? existingRide : null;
+      const now = new Date();
+      const isRiderCancellation = status === "cancelled" && isRider && !isAdmin;
+      const minutesDrivingToPickup = existingRide.pickupTravelStartedAt
+        ? Math.max(0, (now.getTime() - new Date(existingRide.pickupTravelStartedAt).getTime()) / 60000)
+        : 0;
+      const waitingFee = existingRide.arrivedAt
+        ? calculateWaitingFee(Math.max(0, (now.getTime() - new Date(existingRide.arrivedAt).getTime()) / 60000)) / 100
+        : 0;
+      const cancellation = status === "cancelled"
+        ? resolveCancellation({
+            actor: isRiderCancellation ? "rider" : "driver",
+            baseFareCents: Math.round(Number(existingRide.baseFare || 0) * 100),
+            minutesDrivingToPickup,
+            waitingFeeCents: Math.round(waitingFee * 100),
+            arrived: !!existingRide.arrivedAt,
+          })
+        : null;
 
       const ride = await storage.updateRide(req.params.id, {
         status,
         ...(status === "trip_completed" ? { completedAt: new Date() } : {}),
+        ...(status === "chauffeur_arriving" && isChauffeur && !existingRide.pickupTravelStartedAt ? { pickupTravelStartedAt: now } : {}),
+        ...(status === "chauffeur_arrived" && isChauffeur ? { arrivedAt: now } : {}),
+        ...(cancellation ? { waitingFee, cancellationFee: cancellation.feeCents / 100, finalFare: cancellation.feeCents / 100, settlementStatus: cancellation.feeCents > 0 ? "cancellation_due" : "cancelled" } : {}),
       });
       if (!ride) return res.status(404).json({ message: "Ride not found" });
 
@@ -6454,42 +6483,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const payments = await storage.getPaymentsByRide(req.params.id);
 
-          // ── Card payment → Paystack refund + credit wallet ──
+          const cancellationFee = Number(ride.cancellationFee || 0);
+          const refundAmount = Math.max(0, Number(rideBeforeUpdate.price || 0) - cancellationFee);
+
+          // ── Card payment → a single direct Paystack refund, less any earned cancellation fee ──
           const cardPayment = payments.find((p: any) =>
             p.method === "card" && p.status === "paid" && p.paystackReference
           );
-          if (cardPayment?.paystackReference) {
+          if (cardPayment?.paystackReference && refundAmount > 0) {
             const secret = process.env.PAYSTACK_SECRET_KEY || "";
             await axios.post(
               "https://api.paystack.co/refund",
-              { transaction: cardPayment.paystackReference },
+              { transaction: cardPayment.paystackReference, amount: Math.round(refundAmount * 100) },
               { headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" } }
             );
-            await storage.updatePayment(cardPayment.id, { status: "refunded" });
+            await storage.updatePayment(cardPayment.id, { status: cancellationFee > 0 ? "paid" : "refunded" });
             const rider = await storage.getUser(rideBeforeUpdate.clientId);
-            if (rider && rideBeforeUpdate.price) {
-              const amt = Number(rideBeforeUpdate.price);
-              const balanceBefore = rider.walletBalance || 0;
-              const newBalance = balanceBefore + amt;
-              await storage.updateUser(rider.id, { walletBalance: newBalance });
-              await storage.createWalletTransaction({
-                userId: rider.id, type: "refund", amount: amt,
-                balanceBefore, balanceAfter: newBalance,
-                reference: cardPayment.paystackReference,
-                description: "Ride cancelled — card payment refunded to wallet",
-                rideId: ride.id, status: "completed",
-              });
+            if (rider) {
               await storage.createNotification({
                 userId: rider.id,
                 title: "Refund Issued",
-                body: `Your ride was cancelled. R${amt.toFixed(2)} has been refunded to your A2B wallet.`,
+                body: `Your ride was cancelled. R${refundAmount.toFixed(2)} has been refunded to your card.`,
                 type: "payment",
               });
               if ((rider as any)?.pushToken) {
                 sendExpoPushNotification(
                   [(rider as any).pushToken],
                   "Refund Issued",
-                  `R${amt.toFixed(2)} has been refunded to your A2B wallet.`,
+                  `R${refundAmount.toFixed(2)} has been refunded to your card.`,
                   { rideId: ride.id, type: "ride:cancelled" },
                   { urgent: true, channelId: "client-alerts" },
                 );
@@ -6501,14 +6522,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const walletPayment = !cardPayment
             ? payments.find((p: any) => p.method === "wallet" && p.status === "paid")
             : null;
-          if (walletPayment && rideBeforeUpdate.price) {
+          if (walletPayment && refundAmount > 0) {
             const rider = await storage.getUser(rideBeforeUpdate.clientId);
             if (rider) {
-              const amt = Number(rideBeforeUpdate.price);
+              const amt = refundAmount;
               const balanceBefore = rider.walletBalance || 0;
               const newBalance = balanceBefore + amt;
               await storage.updateUser(rider.id, { walletBalance: newBalance });
-              await storage.updatePayment(walletPayment.id, { status: "refunded" });
+              await storage.updatePayment(walletPayment.id, { status: cancellationFee > 0 ? "paid" : "refunded" });
               await storage.createWalletTransaction({
                 userId: rider.id, type: "refund", amount: amt,
                 balanceBefore, balanceAfter: newBalance,
@@ -6537,18 +6558,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // ── Cash rides → notify client (no charge to reverse) ──
           const paymentMethod = rideBeforeUpdate.paymentMethod || "cash";
           if (!cardPayment && !walletPayment && paymentMethod === "cash") {
+            const rider = await storage.getUser(rideBeforeUpdate.clientId);
+            if (rider && cancellationFee > 0) {
+              const balanceBefore = Number(rider.walletBalance || 0);
+              const balanceAfter = balanceBefore - cancellationFee;
+              await storage.updateUser(rider.id, { walletBalance: balanceAfter });
+              await storage.createWalletTransaction({
+                userId: rider.id, type: "cancellation_fee", amount: -cancellationFee,
+                balanceBefore, balanceAfter,
+                reference: `cash_cancellation_${ride.id}`,
+                description: "Cash ride cancellation fee",
+                rideId: ride.id, status: "completed",
+              });
+            }
             await storage.createNotification({
               userId: rideBeforeUpdate.clientId,
               title: "Ride Cancelled",
-              body: "Your ride has been cancelled. No charges were applied.",
+              body: cancellationFee > 0 ? `Your cancellation fee is R${cancellationFee.toFixed(2)}.` : "No cancellation fee was charged.",
               type: "ride",
             });
-            const rider = await storage.getUser(rideBeforeUpdate.clientId);
             if ((rider as any)?.pushToken) {
               sendExpoPushNotification(
                 [(rider as any).pushToken],
                 "Ride Cancelled",
-                "Your ride was cancelled. No charges were applied.",
+                cancellationFee > 0 ? `A cancellation fee of R${cancellationFee.toFixed(2)} was applied.` : "No cancellation fee was charged.",
                 { rideId: ride.id, type: "ride:cancelled" },
                 { urgent: true, channelId: "client-alerts" },
               );
