@@ -18,6 +18,7 @@ import {
 import { authOptional, requireAuth, requireRole, type AuthedRequest } from "./auth-middleware";
 import { signAccessToken, type UserRole } from "./auth";
 import { externalApiService } from "./external-api-service";
+import { calculateDemandMultiplier, reconcileDriverProfileStatus } from "./ride-operations-policy";
 
 const RIDE_MATCH_RADIUS_KM = 25;
 const CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
@@ -26,6 +27,19 @@ const DRIVER_ANNUAL_SHARE_RATE = 0.05;
 const REFERRAL_REWARD_RATE = 0.025;
 const DRIVER_SHARE_MIN_ACTIVE_MONTHS = 3;
 const DRIVER_SHARE_MIN_WEEKLY_TRIPS = 5;
+const DEMAND_PRICING_CAP = 1.5;
+
+async function getDemandPricingMultiplier() {
+  const [allRides, chauffeurs] = await Promise.all([
+    storage.getAllRides(),
+    storage.getAllChauffeurs(),
+  ]);
+  return calculateDemandMultiplier({
+    searchingRides: allRides.filter((ride) => ride.status === "searching").length + 1,
+    onlineDrivers: chauffeurs.filter((chauffeur) => chauffeur.isApproved && chauffeur.isOnline).length,
+    maximum: DEMAND_PRICING_CAP,
+  });
+}
 
 function getAnnualShareGrossFromEarning(earning: any): number {
   const amount = Math.abs(Number(earning?.amount || 0));
@@ -3409,6 +3423,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     if (profile.type !== "driver") return profile;
 
+    const reconciledStatus = reconcileDriverProfileStatus({
+      profileType: profile.type,
+      profileStatus: profile.status,
+      chauffeurApproved: chauffeur.isApproved,
+    });
+    if (reconciledStatus !== profile.status) {
+      profile = await storage.updateOperatorProfile(profile.id, {
+        status: reconciledStatus,
+        rejectionReason: null,
+        reviewedAt: new Date(),
+      }) || profile;
+    }
+
     const ownedVehicles = await storage.getVehiclesByOwnerOperator(profile.id).catch(() => []);
     const hasLegacyVehicle = !!(chauffeur.carMake || chauffeur.vehicleModel || chauffeur.plateNumber);
     if (ownedVehicles.length === 0 && hasLegacyVehicle) {
@@ -3621,7 +3648,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/vehicles", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
-      const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
+      const profile = await ensureDriverOperatorForChauffeur(req.auth!.sub);
       if (!profile) return res.status(404).json({ message: "Operator profile not found" });
       if (profile.status !== "approved") {
         return res.status(403).json({ message: "Your operator profile must be approved before adding vehicles." });
@@ -5392,7 +5419,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/admin/vehicles/:id/status", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
     try {
       const status = requireStringField(req.body, "status");
-      if (!["approved", "rejected", "suspended", "pending"].includes(status)) {
+      if (!["approved", "rejected", "suspended", "waitlisted", "pending"].includes(status)) {
         return res.status(400).json({ message: "Invalid vehicle status" });
       }
       const vehicle = await storage.getVehicle(req.params.id);
@@ -5400,9 +5427,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ownerProfile = await storage.getOperatorProfile(vehicle.ownerOperatorProfileId);
       if (!ownerProfile) return res.status(404).json({ message: "Vehicle owner profile not found" });
       const reason = String(req.body.reason || "").trim();
+      if ((status === "rejected" || status === "suspended" || status === "waitlisted") && !reason) {
+        return res.status(400).json({ message: "A reason is required for this vehicle status." });
+      }
+      if (status === "approved") {
+        const documents = await storage.getDocumentsByVehicle(vehicle.id);
+        const approvedTypes = new Set(documents.filter((document) => document.status === "approved").map((document) => document.type));
+        const missingApproval = [...VEHICLE_REQUIRED_DOCS].filter((type) => !approvedTypes.has(type));
+        if (missingApproval.length > 0) {
+          return res.status(400).json({
+            message: `Approve all required vehicle documents first: ${missingApproval.map((type) => type.replace("vehicle:", "")).join(", ")}`,
+          });
+        }
+      }
       const updated = await storage.updateVehicle(vehicle.id, {
         status,
-        rejectionReason: status === "rejected" || status === "suspended" ? reason : null,
+        rejectionReason: status === "rejected" || status === "suspended" || status === "waitlisted" ? reason : null,
         reviewedAt: new Date(),
         reviewerAdminId: req.auth!.sub,
       });
@@ -5442,9 +5482,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await notifyUserEvent({
         userId: ownerProfile.userId,
         type: `vehicle_${status}`,
-        title: status === "approved" ? "Vehicle approved" : status === "rejected" ? "Vehicle not approved" : "Vehicle status updated",
+        title: status === "approved" ? "Vehicle approved" : status === "waitlisted" ? "Vehicle waitlisted" : status === "rejected" ? "Vehicle not approved" : "Vehicle status updated",
         body: status === "approved"
           ? `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) has been approved.`
+          : status === "waitlisted"
+            ? `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) has been waitlisted.${reason ? ` Reason: ${reason}.` : ""}`
           : status === "rejected"
             ? `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) was not approved.${reason ? ` Reason: ${reason}.` : ""}`
             : `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) status is now ${status}.`,
@@ -5708,9 +5750,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireAuth,
     requireRole(["admin"]),
     async (req: AuthedRequest, res: Response) => {
-      const { status } = req.body;
+      const status = String(req.body?.status || "");
+      const reviewReason = String(req.body?.reviewReason || "").trim();
+      if (!["approved", "rejected", "pending"].includes(status)) {
+        return res.status(400).json({ message: "Invalid document status" });
+      }
+      if (status === "rejected" && !reviewReason) {
+        return res.status(400).json({ message: "A rejection reason is required" });
+      }
       const doc = await storage.updateDocument(req.params.id, {
         status,
+        reviewReason: status === "rejected" ? reviewReason : null,
         reviewedAt: new Date(),
         reviewerAdminId: req.auth!.sub,
       });
@@ -5725,7 +5775,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/pricing/estimate", async (req: Request, res: Response) => {
     try {
       const { distanceKm, categoryId, isLateNight } = req.body;
-      const estimate = calculatePrice(distanceKm, categoryId || "budget", { isLateNight });
+      const demandMultiplier = await getDemandPricingMultiplier();
+      const estimate = calculatePrice(distanceKm, categoryId || "budget", { isLateNight, demandMultiplier });
       return res.json(estimate);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -5929,9 +5980,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const selectedRouteId = typeof rideData.selectedRouteId === "string" && rideData.selectedRouteId.trim()
         ? rideData.selectedRouteId.trim()
         : null;
-      const priceEstimate = calculatePrice(safeDistanceKm, categoryId, { isLateNight });
-      const requestedFare = Number(rideData.actualFare);
-      const safeFare = Number.isFinite(requestedFare) && requestedFare > 0 ? requestedFare : priceEstimate.totalPrice;
+      const demandMultiplier = await getDemandPricingMultiplier();
+      const priceEstimate = calculatePrice(safeDistanceKm, categoryId, { isLateNight, demandMultiplier });
+      const safeFare = priceEstimate.totalPrice;
       const routeCurrency = typeof rideData.routeCurrency === "string" && rideData.routeCurrency.trim()
         ? rideData.routeCurrency.trim().toUpperCase()
         : priceEstimate.currency;
@@ -5967,6 +6018,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         selectedRouteId,
         selectedRouteDistanceKm: selectedRouteId ? safeDistanceKm : null,
         actualFare: selectedRouteId ? safeFare : null,
+        demandMultiplier,
         routeCurrency,
         routeSelectedAt: selectedRouteId ? new Date() : null,
         ...(livenessVerifiedAt ? { livenessVerifiedAt } : {}),

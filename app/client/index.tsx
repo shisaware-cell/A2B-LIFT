@@ -121,6 +121,7 @@ interface RouteChoice extends DirectionRoute {
   baseFare: number;
   pricePerKm: number;
   lateNightPremium: number;
+  demandMultiplier: number;
   currency: string;
 }
 
@@ -1784,6 +1785,7 @@ export default function ClientHomeScreen() {
             baseFare: Number(estimate.baseFare ?? fallbackEstimate.baseFare),
             pricePerKm: Number(estimate.pricePerKm ?? fallbackEstimate.pricePerKm),
             lateNightPremium: Number(estimate.lateNightPremium ?? fallbackEstimate.lateNightPremium),
+            demandMultiplier: Number(estimate.demandMultiplier ?? 1),
             currency: estimate.currency || fallbackEstimate.currency,
           } as RouteChoice;
         } catch {
@@ -1798,6 +1800,7 @@ export default function ClientHomeScreen() {
             baseFare: fallbackEstimate.baseFare,
             pricePerKm: fallbackEstimate.pricePerKm,
             lateNightPremium: fallbackEstimate.lateNightPremium,
+            demandMultiplier: 1,
             currency: fallbackEstimate.currency,
           } as RouteChoice;
         }
@@ -2414,6 +2417,12 @@ export default function ClientHomeScreen() {
                   </View>
                 </View>
               ) : null}
+              {Number(selectedRouteChoice?.demandMultiplier || 1) > 1 && (
+                <View style={styles.highDemandBadge}>
+                  <Ionicons name="trending-up" size={14} color={Colors.warning} />
+                  <Text style={styles.highDemandBadgeText}>High demand pricing</Text>
+                </View>
+              )}
             </View>
 
             {routeChoices.length > 0 && (
@@ -2463,6 +2472,12 @@ export default function ClientHomeScreen() {
                 <View style={styles.fareRow}>
                   <Text style={styles.fareLabel}>Late night surcharge (30%)</Text>
                   <Text style={styles.fareValue}>R {lateNightPremium}</Text>
+                </View>
+              )}
+              {Number(selectedRouteChoice?.demandMultiplier || 1) > 1 && (
+                <View style={styles.fareRow}>
+                  <Text style={styles.fareLabel}>High demand multiplier</Text>
+                  <Text style={styles.fareValue}>× {selectedRouteChoice?.demandMultiplier.toFixed(2)}</Text>
                 </View>
               )}
             </View>
@@ -3802,6 +3817,22 @@ const styles = StyleSheet.create({
   },
   routeChoiceFareSelected: {
     color: Colors.white,
+  },
+  highDemandBadge: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "rgba(255,193,7,0.14)",
+  },
+  highDemandBadgeText: {
+    color: Colors.warning,
+    fontFamily: "Inter_700Bold",
+    fontSize: 12,
   },
   fareBreakdown: {
     backgroundColor: Colors.surface,

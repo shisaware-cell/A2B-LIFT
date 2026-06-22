@@ -271,6 +271,10 @@ tbody tr:hover { background:#fafaf8; }
       <span class="nav-icon">🚘</span> Vehicle Approvals
       <span class="nav-badge" id="nb-vehicles" style="display:none">0</span>
     </div>
+    <div class="nav-item" onclick="go('documents',this);closeSidebar()">
+      <span class="nav-icon">📂</span> Documents
+      <span class="nav-badge" id="nb-documents" style="display:none">0</span>
+    </div>
     <div class="nav-item" onclick="go('rides',this);closeSidebar()">
       <span class="nav-icon">🗺</span> Rides
     </div>
@@ -382,10 +386,25 @@ tbody tr:hover { background:#fafaf8; }
           <button class="ftab active" onclick="fVehicles('all',this)">All</button>
           <button class="ftab" onclick="fVehicles('pending',this)">Pending</button>
           <button class="ftab" onclick="fVehicles('approved',this)">Approved</button>
+          <button class="ftab" onclick="fVehicles('waitlisted',this)">Waitlisted</button>
           <button class="ftab" onclick="fVehicles('rejected',this)">Rejected</button>
         </div>
       </div>
       <div class="table-card" id="vehicles-table"><div class="loading">Loading…</div></div>
+    </div>
+
+    <div class="view" id="view-documents">
+      <div class="sec-head">
+        <div class="sec-title">Document Review</div>
+        <div class="filter-group">
+          <button class="ftab active" onclick="fDocuments('all',this)">All</button>
+          <button class="ftab" onclick="fDocuments('driver',this)">Drivers</button>
+          <button class="ftab" onclick="fDocuments('partner',this)">Partners</button>
+          <button class="ftab" onclick="fDocuments('vehicle',this)">Vehicles</button>
+          <button class="ftab" onclick="fDocuments('pending',this)">Pending</button>
+        </div>
+      </div>
+      <div class="table-card" id="documents-table"><div class="loading">Loading…</div></div>
     </div>
 
     <!-- RIDES -->
@@ -585,8 +604,8 @@ async function doLogout() {
 
 // ── NAV ──
 let curView = 'overview';
-let allChauf = [], allWd = [], allSafe = [], allApps = [], allPartners = [], allVehicles = [], allSelfies = [], chaufFilter = 'all', wdFilter = 'all', safeFilter = 'all', appsFilter = 'all', partnersFilter = 'all', vehiclesFilter = 'all';
-const VIEW_TITLES = { overview:'Dashboard', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', rides:'Rides', payments:'Payments', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users' };
+let allChauf = [], allWd = [], allSafe = [], allApps = [], allPartners = [], allVehicles = [], allDocuments = [], allSelfies = [], chaufFilter = 'all', wdFilter = 'all', safeFilter = 'all', appsFilter = 'all', partnersFilter = 'all', vehiclesFilter = 'all', documentsFilter = 'all';
+const VIEW_TITLES = { overview:'Dashboard', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', documents:'Document Review', rides:'Rides', payments:'Payments', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users' };
 
 function go(view, el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -600,7 +619,7 @@ function go(view, el) {
 }
 
 function loadView() {
-  ({ overview:loadOverview, chauffeurs:loadChauf, applications:loadApps, partners:loadPartners, vehicles:loadVehicles, rides:loadRides, payments:loadPay, selfies:loadSelfies, withdrawals:loadWd, safety:loadSafe, users:loadUsers })[curView]?.();
+  ({ overview:loadOverview, chauffeurs:loadChauf, applications:loadApps, partners:loadPartners, vehicles:loadVehicles, documents:loadDocuments, rides:loadRides, payments:loadPay, selfies:loadSelfies, withdrawals:loadWd, safety:loadSafe, users:loadUsers })[curView]?.();
 }
 
 function loadAll() {
@@ -609,6 +628,7 @@ function loadAll() {
   loadApps();
   loadPartners();
   loadVehicles();
+  loadDocuments();
   loadRides();
   loadPay();
   loadSelfies();
@@ -1427,8 +1447,56 @@ function renderDocsModal(docs) {
       ${d.url ? `<img src="${d.url}" class="doc-img" onerror="this.style.display='none'"/>` : ''}
       ${d.url ? `<a href="${d.url}" target="_blank" class="doc-link">Open full document</a>` : '<div class="empty-sub">No file URL</div>'}
       <div style="margin-top:8px"><span class="badge ${d.status==='approved'?'b-approved':d.status==='rejected'?'b-rejected':'b-pending'}">${d.status || 'pending'}</span></div>
+      ${d.reviewReason ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">${escapeHtml(d.reviewReason)}</div>` : ''}
+      <div class="action-cell" style="margin-top:8px">
+        ${d.status !== 'approved' ? `<button class="btn-sm btn-approve" onclick="reviewDocument('${d.id}','approved')">✓ Activate</button>` : ''}
+        ${d.status !== 'rejected' ? `<button class="btn-sm btn-reject" onclick="reviewDocument('${d.id}','rejected')">✕ Reject</button>` : ''}
+      </div>
     </div>`).join('')}
   </div>`;
+}
+
+async function reviewDocument(id, status) {
+  const reviewReason = status === 'rejected' ? window.prompt('Give the document rejection reason:') : '';
+  if (status === 'rejected' && !reviewReason?.trim()) return;
+  try {
+    const res = await apiFetch('/api/admin/documents/' + id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status, reviewReason}) });
+    if (!res.ok) throw new Error(await res.text());
+    toast(status === 'approved' ? '✅ Document activated.' : '🚫 Document rejected.', status === 'approved' ? 'ok' : 'err');
+    loadDocuments(); loadVehicles();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function loadDocuments() {
+  try {
+    const res = await apiFetch('/api/admin/documents');
+    if (!res.ok) throw new Error(await res.text());
+    allDocuments = await res.json();
+    const pending = allDocuments.filter(d => d.status === 'pending').length;
+    const badge = document.getElementById('nb-documents');
+    if (pending) { badge.textContent = pending; badge.style.display = ''; } else badge.style.display = 'none';
+    renderDocuments();
+  } catch(e) { document.getElementById('documents-table').innerHTML = emptyState('❌', 'Failed to load documents', e.message); }
+}
+
+function fDocuments(filter, el) {
+  document.querySelectorAll('#view-documents .ftab').forEach(tab => tab.classList.remove('active'));
+  el.classList.add('active'); documentsFilter = filter; renderDocuments();
+}
+
+function renderDocuments() {
+  let list = allDocuments;
+  if (documentsFilter === 'pending') list = list.filter(d => d.status === 'pending');
+  else if (documentsFilter !== 'all') list = list.filter(d => String(d.type || '').startsWith(documentsFilter + ':'));
+  const root = document.getElementById('documents-table');
+  if (!list.length) { root.innerHTML = emptyState('📂', 'No documents', 'Uploaded documents will appear here.'); return; }
+  root.innerHTML = `<table><thead><tr><th>Document</th><th>Type</th><th>Status</th><th>Uploaded</th><th>Actions</th></tr></thead><tbody>${list.map(d => `<tr>
+    <td><a href="${d.url}" target="_blank" class="doc-link">Open document</a></td>
+    <td>${escapeHtml(String(d.type || '').replace(':', ' · '))}</td>
+    <td><span class="badge ${d.status==='approved'?'b-approved':d.status==='rejected'?'b-rejected':'b-pending'}">${d.status || 'pending'}</span>${d.reviewReason ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">${escapeHtml(d.reviewReason)}</div>` : ''}</td>
+    <td>${fmt(d.uploadedAt)}</td>
+    <td><div class="action-cell">${d.status !== 'approved' ? `<button class="btn-sm btn-approve" onclick="reviewDocument('${d.id}','approved')">✓ Activate</button>` : ''}${d.status !== 'rejected' ? `<button class="btn-sm btn-reject" onclick="reviewDocument('${d.id}','rejected')">✕ Reject</button>` : ''}</div></td>
+  </tr>`).join('')}</tbody></table>`;
 }
 
 async function viewOperatorDocs(userId, name) {
@@ -1484,6 +1552,8 @@ function renderFilteredVehicles() {
       <td style="font-size:12px">${(v.documents || []).length}</td>
       <td><div class="action-cell">
         ${v.status==='pending' ? `<button class="btn-sm btn-approve" onclick="setVehicleStatus('${v.id}','approved')">✓ Approve</button>` : ''}
+        ${v.status==='waitlisted' ? `<button class="btn-sm btn-approve" onclick="setVehicleStatus('${v.id}','approved')">✓ Reactivate</button>` : ''}
+        ${v.status!=='waitlisted' && v.status!=='rejected' ? `<button class="btn-sm btn-detail" onclick="waitlistVehicle('${v.id}')">⏸ Waitlist</button>` : ''}
         ${v.status==='pending' ? `<button class="btn-sm btn-reject" onclick="rejectVehicle('${v.id}')">✕ Reject</button>` : ''}
         <button class="btn-sm btn-detail" onclick="vehicleDetail('${v.id}')">Details</button>
         <button class="btn-sm btn-detail" onclick="editVehicle('${v.id}')">✏ Edit</button>
@@ -1516,6 +1586,20 @@ function rejectVehicle(id) {
     <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
     <button class="btn-lg btn-red" onclick="doRejectVehicle('${id}')">✕ Confirm Rejection</button>`;
   openModal();
+}
+
+function waitlistVehicle(id) {
+  document.getElementById('m-title').textContent = 'Waitlist Vehicle';
+  document.getElementById('m-sub').textContent = 'The vehicle will be removed from service and affected drivers will be notified.';
+  document.getElementById('m-body').innerHTML = `<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Waitlist Reason <span style="color:var(--red)">*</span></label><textarea id="vehicle-waitlist-reason" class="f-input" style="width:100%;min-height:90px;resize:vertical;box-sizing:border-box"></textarea>`;
+  document.getElementById('m-foot').innerHTML = `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button><button class="btn-lg" style="background:#9a5b00;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer" onclick="doWaitlistVehicle('${id}')">⏸ Confirm Waitlist</button>`;
+  openModal();
+}
+
+function doWaitlistVehicle(id) {
+  const reason = document.getElementById('vehicle-waitlist-reason')?.value.trim();
+  if (!reason) return;
+  closeModal(); setVehicleStatus(id, 'waitlisted', reason);
 }
 
 function doRejectVehicle(id) {

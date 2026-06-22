@@ -236,6 +236,7 @@ export default function VehiclesScreen() {
           const docs = Array.isArray(vehicle.documents) ? vehicle.documents : [];
           const uploadedTypes = new Set(docs.map((doc: any) => doc.type));
           const missingDocs = VEHICLE_DOCS.filter((doc) => !uploadedTypes.has(doc.id));
+          const unapprovedDocs = VEHICLE_DOCS.filter((doc) => docs.find((uploaded: any) => uploaded.type === doc.id)?.status !== "approved");
           const isSubmitting = !!submittingVehicles[vehicleData.id] || vehicleData.status === "pending";
           const ownsVehicle = vehicleData.ownerOperatorProfileId === operatorProfile?.id;
           return (
@@ -252,16 +253,26 @@ export default function VehiclesScreen() {
 
               {vehicleData.status !== "approved" && (
                 <View style={styles.docsBlock}>
+                  {vehicleData.status === "waitlisted" && (
+                    <Text style={styles.waitlistText}>{vehicleData.rejectionReason || "This vehicle is waitlisted and cannot be used until A2B reactivates it."}</Text>
+                  )}
                   {VEHICLE_DOCS.map((doc) => {
                     const isUploading = !!uploadingDocs[`${vehicleData.id}:${doc.id}`];
                     const isUploaded = uploadedTypes.has(doc.id);
+                    const documentStatus = docs.find((uploaded: any) => uploaded.type === doc.id)?.status;
                     return (
                       <Pressable key={doc.id} style={[styles.docRow, isUploading && { opacity: 0.75 }]} onPress={() => pickAndUploadDocument(vehicleData.id, doc.id)} disabled={isUploading}>
                         {isUploading ? <ActivityIndicator size="small" color={Colors.white} /> : <Ionicons name={isUploaded ? "checkmark-circle" : "cloud-upload-outline"} size={18} color={isUploaded ? Colors.success : Colors.textMuted} />}
-                        <Text style={styles.docText}>{isUploading ? `Uploading ${doc.label}...` : doc.label}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.docText}>{isUploading ? `Uploading ${doc.label}...` : doc.label}</Text>
+                          {isUploaded && <Text style={styles.docStatus}>{documentStatus === "approved" ? "Activated" : documentStatus === "rejected" ? "Rejected - upload a replacement" : "Awaiting activation"}</Text>}
+                        </View>
                       </Pressable>
                     );
                   })}
+                  {missingDocs.length === 0 && unapprovedDocs.length > 0 && (
+                    <Text style={styles.pendingText}>A2B must activate all required documents before this vehicle can be approved.</Text>
+                  )}
                   <Pressable
                     style={[styles.submitBtn, (missingDocs.length > 0 || isSubmitting) && styles.submitBtnMuted]}
                     onPress={() => submitVehicle(vehicleData.id)}
@@ -326,10 +337,14 @@ const styles = StyleSheet.create({
   status_approved: { backgroundColor: "rgba(76,175,80,0.16)" },
   status_rejected: { backgroundColor: "rgba(255,77,77,0.16)" },
   status_suspended: { backgroundColor: "rgba(255,77,77,0.16)" },
+  status_waitlisted: { backgroundColor: "rgba(255,193,7,0.16)" },
   statusText: { color: Colors.white, fontFamily: "Inter_700Bold", fontSize: 11, textTransform: "uppercase" },
   docsBlock: { gap: 8 },
   docRow: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: Colors.border, borderRadius: 10, paddingHorizontal: 12 },
   docText: { color: Colors.white, fontFamily: "Inter_600SemiBold", fontSize: 12, flex: 1 },
+  docStatus: { color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 11, marginTop: 2 },
+  pendingText: { color: Colors.textSecondary, fontFamily: "Inter_400Regular", fontSize: 12, lineHeight: 17 },
+  waitlistText: { color: Colors.warning, fontFamily: "Inter_600SemiBold", fontSize: 12, lineHeight: 17 },
   actionRow: { flexDirection: "row", justifyContent: "flex-end", flexWrap: "wrap", gap: 8 },
   selectBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: Colors.accent },
   selectText: { color: Colors.white, fontFamily: "Inter_700Bold", fontSize: 12 },

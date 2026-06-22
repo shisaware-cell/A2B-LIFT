@@ -1,0 +1,37 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  calculateDemandMultiplier,
+  calculateRiderCancellationFee,
+  calculateWaitingFee,
+  reconcileDriverProfileStatus,
+} from "./ride-operations-policy";
+import { calculatePrice } from "./luxuryPricingEngine";
+
+test("charges R1 per started minute after a five minute arrival grace period and caps it at R30", () => {
+  assert.equal(calculateWaitingFee(5), 0);
+  assert.equal(calculateWaitingFee(5.01), 100);
+  assert.equal(calculateWaitingFee(40), 3000);
+});
+
+test("caps automatic high-demand pricing at the configured 1.5x maximum", () => {
+  assert.equal(calculateDemandMultiplier({ searchingRides: 3, onlineDrivers: 1, maximum: 1.5 }), 1.5);
+  assert.equal(calculateDemandMultiplier({ searchingRides: 1, onlineDrivers: 3, maximum: 1.5 }), 1);
+});
+
+test("includes the locked demand multiplier in a server-side quote", () => {
+  const estimate = calculatePrice(10, "budget", { demandMultiplier: 1.5 });
+  assert.equal(estimate.demandMultiplier, 1.5);
+  assert.equal(estimate.totalPrice, 180);
+});
+
+test("charges the selected vehicle base fare only after three driving minutes", () => {
+  assert.equal(calculateRiderCancellationFee({ minutesDrivingToPickup: 2.99, baseFareCents: 4500, waitingFeeCents: 0 }), 0);
+  assert.equal(calculateRiderCancellationFee({ minutesDrivingToPickup: 3, baseFareCents: 4500, waitingFeeCents: 1200 }), 5700);
+});
+
+test("reconciles only an approved driver's stale operator profile", () => {
+  assert.equal(reconcileDriverProfileStatus({ profileType: "driver", profileStatus: "pending", chauffeurApproved: true }), "approved");
+  assert.equal(reconcileDriverProfileStatus({ profileType: "partner", profileStatus: "pending", chauffeurApproved: true }), "pending");
+});

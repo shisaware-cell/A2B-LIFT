@@ -22,6 +22,7 @@ export interface PriceEstimate {
   category: string;
   currency: string;
   lateNightPremium: number;
+  demandMultiplier: number;
 }
 
 export function calculatePrice(
@@ -29,6 +30,7 @@ export function calculatePrice(
   categoryId: string,
   options?: {
     isLateNight?: boolean;
+    demandMultiplier?: number;
   }
 ): PriceEstimate {
   const category = VEHICLE_CATEGORIES[categoryId] || VEHICLE_CATEGORIES.budget;
@@ -43,6 +45,10 @@ export function calculatePrice(
     subtotal += lateNightPremium;
   }
 
+  const demandMultiplier = Math.max(1, Number(options?.demandMultiplier || 1));
+  const demandPremium = subtotal * (demandMultiplier - 1);
+  subtotal += demandPremium;
+
   return {
     baseFare: Math.round(baseFare),
     distanceFare: Math.round(distanceFare),
@@ -52,6 +58,7 @@ export function calculatePrice(
     category: category.name,
     currency: "ZAR",
     lateNightPremium: Math.round(lateNightPremium),
+    demandMultiplier,
   };
 }
 

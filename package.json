@@ -7,6 +7,7 @@
     "server:build": "esbuild server/index.ts --bundle --platform=node --packages=external --outfile=server_dist/index.js",
     "server:prod": "NODE_ENV=production node server_dist/index.js",
     "server:seed-admin": "tsx server/seed-admin.ts",
+    "test": "tsx --test server/*.test.ts",
     "expo:static:build": "npx expo export --platform web --output-dir static-build",
     "build": "npm run server:build",
     "start": "npm run server:prod",

@@ -162,6 +162,7 @@ var rides = (0, import_pg_core.pgTable)("rides", {
   selectedRouteId: (0, import_pg_core.text)("selected_route_id"),
   selectedRouteDistanceKm: (0, import_pg_core.real)("selected_route_distance_km"),
   actualFare: (0, import_pg_core.real)("actual_fare"),
+  demandMultiplier: (0, import_pg_core.real)("demand_multiplier").notNull().default(1),
   routeCurrency: (0, import_pg_core.text)("route_currency").default("ZAR"),
   routeSelectedAt: (0, import_pg_core.timestamp)("route_selected_at"),
   rewardsAmountUsed: (0, import_pg_core.real)("rewards_amount_used").default(0),
@@ -336,6 +337,7 @@ var documents = (0, import_pg_core.pgTable)("documents", {
   type: (0, import_pg_core.text)("type").notNull(),
   url: (0, import_pg_core.text)("url").notNull(),
   status: (0, import_pg_core.text)("status").notNull().default("pending"),
+  reviewReason: (0, import_pg_core.text)("review_reason"),
   uploadedAt: (0, import_pg_core.timestamp)("uploaded_at").defaultNow(),
   reviewedAt: (0, import_pg_core.timestamp)("reviewed_at"),
   reviewerAdminId: (0, import_pg_core.varchar)("reviewer_admin_id").references(() => users.id)
@@ -1288,6 +1290,9 @@ function calculatePrice(distanceKm, categoryId, options) {
     lateNightPremium = subtotal * (PRICING_CONFIG.lateNightPremiumMultiplier - 1);
     subtotal += lateNightPremium;
   }
+  const demandMultiplier = Math.max(1, Number(options?.demandMultiplier || 1));
+  const demandPremium = subtotal * (demandMultiplier - 1);
+  subtotal += demandPremium;
   return {
     baseFare: Math.round(baseFare),
     distanceFare: Math.round(distanceFare),
@@ -1296,7 +1301,8 @@ function calculatePrice(distanceKm, categoryId, options) {
     distanceKm: Math.round(distanceKm * 10) / 10,
     category: category.name,
     currency: "ZAR",
-    lateNightPremium: Math.round(lateNightPremium)
+    lateNightPremium: Math.round(lateNightPremium),
+    demandMultiplier
   };
 }
 function calculateChauffeurEarnings(totalPrice) {
@@ -1482,6 +1488,20 @@ var ExternalApiService = class {
 };
 var externalApiService = new ExternalApiService();
 
+// server/ride-operations-policy.ts
+function calculateDemandMultiplier(options) {
+  const maximum = Math.max(1, options.maximum);
+  if (options.searchingRides <= 1 || options.onlineDrivers <= 0) return 1;
+  const demandRatio = options.searchingRides / options.onlineDrivers;
+  return Math.min(maximum, Math.max(1, Math.round(demandRatio * 100) / 100));
+}
+function reconcileDriverProfileStatus(options) {
+  if (options.profileType === "driver" && options.profileStatus !== "approved" && options.chauffeurApproved) {
+    return "approved";
+  }
+  return options.profileStatus;
+}
+
 // server/routes.ts
 var RIDE_MATCH_RADIUS_KM = 25;
 var CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1e3;
@@ -1490,6 +1510,18 @@ var DRIVER_ANNUAL_SHARE_RATE = 0.05;
 var REFERRAL_REWARD_RATE = 0.025;
 var DRIVER_SHARE_MIN_ACTIVE_MONTHS = 3;
 var DRIVER_SHARE_MIN_WEEKLY_TRIPS = 5;
+var DEMAND_PRICING_CAP = 1.5;
+async function getDemandPricingMultiplier() {
+  const [allRides, chauffeurs2] = await Promise.all([
+    storage.getAllRides(),
+    storage.getAllChauffeurs()
+  ]);
+  return calculateDemandMultiplier({
+    searchingRides: allRides.filter((ride) => ride.status === "searching").length + 1,
+    onlineDrivers: chauffeurs2.filter((chauffeur) => chauffeur.isApproved && chauffeur.isOnline).length,
+    maximum: DEMAND_PRICING_CAP
+  });
+}
 function getAnnualShareGrossFromEarning(earning) {
   const amount = Math.abs(Number(earning?.amount || 0));
   const commission = Math.abs(Number(earning?.commission || 0));
@@ -4157,6 +4189,18 @@ async function registerRoutes(app2) {
       });
     }
     if (profile.type !== "driver") return profile;
+    const reconciledStatus = reconcileDriverProfileStatus({
+      profileType: profile.type,
+      profileStatus: profile.status,
+      chauffeurApproved: chauffeur.isApproved
+    });
+    if (reconciledStatus !== profile.status) {
+      profile = await storage.updateOperatorProfile(profile.id, {
+        status: reconciledStatus,
+        rejectionReason: null,
+        reviewedAt: /* @__PURE__ */ new Date()
+      }) || profile;
+    }
     const ownedVehicles = await storage.getVehiclesByOwnerOperator(profile.id).catch(() => []);
     const hasLegacyVehicle = !!(chauffeur.carMake || chauffeur.vehicleModel || chauffeur.plateNumber);
     if (ownedVehicles.length === 0 && hasLegacyVehicle) {
@@ -4343,7 +4387,7 @@ async function registerRoutes(app2) {
   });
   app2.post("/api/vehicles", requireAuth, async (req, res) => {
     try {
-      const profile = await storage.getOperatorProfileByUserId(req.auth.sub);
+      const profile = await ensureDriverOperatorForChauffeur(req.auth.sub);
       if (!profile) return res.status(404).json({ message: "Operator profile not found" });
       if (profile.status !== "approved") {
         return res.status(403).json({ message: "Your operator profile must be approved before adding vehicles." });
@@ -5894,7 +5938,7 @@ async function registerRoutes(app2) {
   app2.put("/api/admin/vehicles/:id/status", requireAuth, requireRole(["admin"]), async (req, res) => {
     try {
       const status = requireStringField(req.body, "status");
-      if (!["approved", "rejected", "suspended", "pending"].includes(status)) {
+      if (!["approved", "rejected", "suspended", "waitlisted", "pending"].includes(status)) {
         return res.status(400).json({ message: "Invalid vehicle status" });
       }
       const vehicle = await storage.getVehicle(req.params.id);
@@ -5902,9 +5946,22 @@ async function registerRoutes(app2) {
       const ownerProfile = await storage.getOperatorProfile(vehicle.ownerOperatorProfileId);
       if (!ownerProfile) return res.status(404).json({ message: "Vehicle owner profile not found" });
       const reason = String(req.body.reason || "").trim();
+      if ((status === "rejected" || status === "suspended" || status === "waitlisted") && !reason) {
+        return res.status(400).json({ message: "A reason is required for this vehicle status." });
+      }
+      if (status === "approved") {
+        const documents2 = await storage.getDocumentsByVehicle(vehicle.id);
+        const approvedTypes = new Set(documents2.filter((document) => document.status === "approved").map((document) => document.type));
+        const missingApproval = [...VEHICLE_REQUIRED_DOCS].filter((type) => !approvedTypes.has(type));
+        if (missingApproval.length > 0) {
+          return res.status(400).json({
+            message: `Approve all required vehicle documents first: ${missingApproval.map((type) => type.replace("vehicle:", "")).join(", ")}`
+          });
+        }
+      }
       const updated = await storage.updateVehicle(vehicle.id, {
         status,
-        rejectionReason: status === "rejected" || status === "suspended" ? reason : null,
+        rejectionReason: status === "rejected" || status === "suspended" || status === "waitlisted" ? reason : null,
         reviewedAt: /* @__PURE__ */ new Date(),
         reviewerAdminId: req.auth.sub
       });
@@ -5944,8 +6001,8 @@ async function registerRoutes(app2) {
       await notifyUserEvent({
         userId: ownerProfile.userId,
         type: `vehicle_${status}`,
-        title: status === "approved" ? "Vehicle approved" : status === "rejected" ? "Vehicle not approved" : "Vehicle status updated",
-        body: status === "approved" ? `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) has been approved.` : status === "rejected" ? `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) was not approved.${reason ? ` Reason: ${reason}.` : ""}` : `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) status is now ${status}.`,
+        title: status === "approved" ? "Vehicle approved" : status === "waitlisted" ? "Vehicle waitlisted" : status === "rejected" ? "Vehicle not approved" : "Vehicle status updated",
+        body: status === "approved" ? `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) has been approved.` : status === "waitlisted" ? `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) has been waitlisted.${reason ? ` Reason: ${reason}.` : ""}` : status === "rejected" ? `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) was not approved.${reason ? ` Reason: ${reason}.` : ""}` : `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) status is now ${status}.`,
         data: { vehicleId: vehicle.id }
       });
       return res.json(await serializeVehicle(updated));
@@ -6175,9 +6232,17 @@ async function registerRoutes(app2) {
     requireAuth,
     requireRole(["admin"]),
     async (req, res) => {
-      const { status } = req.body;
+      const status = String(req.body?.status || "");
+      const reviewReason = String(req.body?.reviewReason || "").trim();
+      if (!["approved", "rejected", "pending"].includes(status)) {
+        return res.status(400).json({ message: "Invalid document status" });
+      }
+      if (status === "rejected" && !reviewReason) {
+        return res.status(400).json({ message: "A rejection reason is required" });
+      }
       const doc = await storage.updateDocument(req.params.id, {
         status,
+        reviewReason: status === "rejected" ? reviewReason : null,
         reviewedAt: /* @__PURE__ */ new Date(),
         reviewerAdminId: req.auth.sub
       });
@@ -6188,7 +6253,8 @@ async function registerRoutes(app2) {
   app2.post("/api/pricing/estimate", async (req, res) => {
     try {
       const { distanceKm, categoryId, isLateNight } = req.body;
-      const estimate = calculatePrice(distanceKm, categoryId || "budget", { isLateNight });
+      const demandMultiplier = await getDemandPricingMultiplier();
+      const estimate = calculatePrice(distanceKm, categoryId || "budget", { isLateNight, demandMultiplier });
       return res.json(estimate);
     } catch (error) {
       return res.status(500).json({ message: error.message });
@@ -6354,9 +6420,9 @@ async function registerRoutes(app2) {
       const normalizedDurationMin = Number(rideData.durationMin ?? 0);
       const safeDurationMin = Number.isFinite(normalizedDurationMin) && normalizedDurationMin > 0 ? normalizedDurationMin : null;
       const selectedRouteId = typeof rideData.selectedRouteId === "string" && rideData.selectedRouteId.trim() ? rideData.selectedRouteId.trim() : null;
-      const priceEstimate = calculatePrice(safeDistanceKm, categoryId, { isLateNight });
-      const requestedFare = Number(rideData.actualFare);
-      const safeFare = Number.isFinite(requestedFare) && requestedFare > 0 ? requestedFare : priceEstimate.totalPrice;
+      const demandMultiplier = await getDemandPricingMultiplier();
+      const priceEstimate = calculatePrice(safeDistanceKm, categoryId, { isLateNight, demandMultiplier });
+      const safeFare = priceEstimate.totalPrice;
       const routeCurrency = typeof rideData.routeCurrency === "string" && rideData.routeCurrency.trim() ? rideData.routeCurrency.trim().toUpperCase() : priceEstimate.currency;
       const paymentMethod = rideData.paymentMethod || "cash";
       const livenessVerifiedAt = rideData.livenessStatus === "passed" ? /* @__PURE__ */ new Date() : void 0;
@@ -6385,6 +6451,7 @@ async function registerRoutes(app2) {
         selectedRouteId,
         selectedRouteDistanceKm: selectedRouteId ? safeDistanceKm : null,
         actualFare: selectedRouteId ? safeFare : null,
+        demandMultiplier,
         routeCurrency,
         routeSelectedAt: selectedRouteId ? /* @__PURE__ */ new Date() : null,
         ...livenessVerifiedAt ? { livenessVerifiedAt } : {}
