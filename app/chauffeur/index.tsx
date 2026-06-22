@@ -1746,6 +1746,11 @@ export default function ChauffeurDashboard() {
           )}
           <View style={[styles.navModalFooter, { paddingBottom: insets.bottom + 16 }]}>
             {(currentRide?.status === "chauffeur_assigned" || currentRide?.status === "chauffeur_arriving") && (
+              <Pressable style={[styles.actionBtn, styles.completeBtnStyle]} onPress={() => updateRideStatus("chauffeur_arrived")}>
+                <Text style={styles.actionBtnText}>I've Arrived</Text>
+              </Pressable>
+            )}
+            {(currentRide?.status === "chauffeur_assigned" || currentRide?.status === "chauffeur_arriving" || currentRide?.status === "chauffeur_arrived") && (
               <Pressable style={styles.actionBtn} onPress={startTripToDestination}>
                 <Text style={styles.actionBtnText}>Start Trip — Rider On Board</Text>
               </Pressable>

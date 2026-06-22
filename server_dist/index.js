@@ -1526,6 +1526,9 @@ function reconcileDriverProfileStatus(options) {
   }
   return options.profileStatus;
 }
+function isValidLocationSample(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
 
 // server/routes.ts
 var RIDE_MATCH_RADIUS_KM = 25;
@@ -6290,6 +6293,19 @@ async function registerRoutes(app2) {
   });
   app2.get("/api/pricing/categories", async (_req, res) => {
     return res.json(getVehicleCategories());
+  });
+  app2.put("/api/chauffeurs/:id/location", requireAuth, async (req, res) => {
+    try {
+      const chauffeur = await storage.getChauffeur(req.params.id);
+      if (!chauffeur || chauffeur.userId !== req.auth.sub) return res.status(403).json({ message: "Forbidden" });
+      const lat = Number(req.body?.lat);
+      const lng = Number(req.body?.lng);
+      if (!isValidLocationSample(lat, lng)) return res.status(400).json({ message: "A valid latitude and longitude are required" });
+      const updated = await storage.updateChauffeur(chauffeur.id, { lat, lng, locationUpdatedAt: /* @__PURE__ */ new Date() });
+      return res.json(updated);
+    } catch (error) {
+      return res.status(400).json({ message: error.message || "Unable to update location" });
+    }
   });
   app2.post("/api/liveness/session", requireAuth, async (req, res) => {
     try {

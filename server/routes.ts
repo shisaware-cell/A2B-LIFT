@@ -18,7 +18,7 @@ import {
 import { authOptional, requireAuth, requireRole, type AuthedRequest } from "./auth-middleware";
 import { signAccessToken, type UserRole } from "./auth";
 import { externalApiService } from "./external-api-service";
-import { calculateDemandMultiplier, calculateWaitingFee, reconcileDriverProfileStatus, resolveCancellation } from "./ride-operations-policy";
+import { calculateDemandMultiplier, calculateWaitingFee, isValidLocationSample, reconcileDriverProfileStatus, resolveCancellation } from "./ride-operations-policy";
 
 const RIDE_MATCH_RADIUS_KM = 25;
 const CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
@@ -5789,6 +5789,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/pricing/categories", async (_req: Request, res: Response) => {
     return res.json(getVehicleCategories());
+  });
+
+  app.put("/api/chauffeurs/:id/location", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const chauffeur = await storage.getChauffeur(req.params.id);
+      if (!chauffeur || chauffeur.userId !== req.auth!.sub) return res.status(403).json({ message: "Forbidden" });
+      const lat = Number(req.body?.lat);
+      const lng = Number(req.body?.lng);
+      if (!isValidLocationSample(lat, lng)) return res.status(400).json({ message: "A valid latitude and longitude are required" });
+      const updated = await storage.updateChauffeur(chauffeur.id, { lat, lng, locationUpdatedAt: new Date() });
+      return res.json(updated);
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message || "Unable to update location" });
+    }
   });
 
   // -----------------------------

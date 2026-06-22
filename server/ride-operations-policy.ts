@@ -52,3 +52,7 @@ export function reconcileDriverProfileStatus(options: {
   }
   return options.profileStatus;
 }
+
+export function isValidLocationSample(lat: number, lng: number): boolean {
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}

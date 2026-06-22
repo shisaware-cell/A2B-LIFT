@@ -7,6 +7,7 @@ import {
   calculateWaitingFee,
   reconcileDriverProfileStatus,
   resolveCancellation,
+  isValidLocationSample,
 } from "./ride-operations-policy";
 import { calculatePrice } from "./luxuryPricingEngine";
 
@@ -44,4 +45,9 @@ test("charges a rider but never a driver for an eligible cancellation", () => {
 
 test("includes waiting time when a rider cancels after driver arrival", () => {
   assert.deepEqual(resolveCancellation({ actor: "rider", baseFareCents: 4500, minutesDrivingToPickup: 0, waitingFeeCents: 1200, arrived: true }), { feeCents: 5700, cashDebtCents: 5700 });
+});
+
+test("accepts only finite latitude and longitude samples", () => {
+  assert.equal(isValidLocationSample(-26.2041, 28.0473), true);
+  assert.equal(isValidLocationSample(91, 28.0473), false);
 });
