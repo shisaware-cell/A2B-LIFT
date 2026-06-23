@@ -58,6 +58,7 @@
       "channel": "preview"
     },
     "production": {
+      "distribution": "store",
       "credentialsSource": "local",
       "environment": "production",
       "android": {
