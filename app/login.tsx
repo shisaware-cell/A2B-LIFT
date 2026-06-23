@@ -7,6 +7,7 @@ import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@mobile-core/auth";
+import { getAppVariant } from "@mobile-core/app-variant";
 import { apiRequest } from "@mobile-core/query";
 import { Colors } from "@mobile-ui/colors";
 import { KeyboardAwareScrollViewCompat } from "@mobile-ui/scroll";
@@ -31,8 +32,8 @@ export default function LoginScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
   const [resetMessage, setResetMessage] = useState("");
-  const [resetLoading, setResetLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const isDriverApp = getAppVariant() === "driver";
 
   // Clear error whenever screen comes into focus (e.g. after logout)
   useFocusEffect(useCallback(() => { setError(""); setResetMessage(""); }, []));
@@ -103,18 +104,8 @@ export default function LoginScreen() {
       setError("Enter your email address first, then tap Forgot password.");
       return;
     }
-    setResetLoading(true);
     setError("");
-    setResetMessage("");
-    try {
-      const res = await apiRequest("POST", "/api/auth/password-reset/request", { email });
-      const data = await res.json().catch(() => ({}));
-      setResetMessage(data.message || "If an account exists, a password reset link will be sent.");
-    } catch (e: any) {
-      setError(e?.message || "Unable to send reset link. Please try again.");
-    } finally {
-      setResetLoading(false);
-    }
+    setResetMessage("Password resets are handled by A2B support while email delivery is being set up.");
   }
 
   async function handleGoogleSignIn() {
@@ -150,7 +141,9 @@ export default function LoginScreen() {
       >
         <View style={styles.header}>
           <Text style={styles.title}>Welcome Back</Text>
-          <Text style={styles.subtitle}>Sign in to your A2B LIFT account</Text>
+          <Text style={styles.subtitle}>
+            Sign in to your {isDriverApp ? "A2B LIFT DRIVER" : "A2B LIFT"} account
+          </Text>
         </View>
 
         {!!pendingReferralCode && (
@@ -192,10 +185,8 @@ export default function LoginScreen() {
           <View style={styles.inputGroup}>
             <View style={styles.passwordLabelRow}>
               <Text style={styles.label}>Password</Text>
-              <Pressable onPress={handlePasswordResetRequest} disabled={resetLoading} hitSlop={8}>
-                <Text style={[styles.forgotLink, resetLoading && { opacity: 0.65 }]}>
-                  {resetLoading ? "Sending..." : "Forgot password?"}
-                </Text>
+              <Pressable onPress={handlePasswordResetRequest} hitSlop={8}>
+                <Text style={styles.forgotLink}>Forgot password?</Text>
               </Pressable>
             </View>
             <View style={styles.inputWrapper}>

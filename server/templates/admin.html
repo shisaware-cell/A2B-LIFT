@@ -580,20 +580,8 @@ async function requestAdminPasswordReset() {
   const errEl = document.getElementById('l-err');
   errEl.textContent = '';
   if (!u) { errEl.textContent = 'Enter your email first, then click Forgot password.'; return; }
-  try {
-    const res = await fetch(API + '/api/auth/password-reset/request', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: u }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.message || 'Unable to send reset link.');
-    errEl.style.color = '#1f8f3a';
-    errEl.textContent = data.message || 'If an account exists, a reset link will be sent.';
-  } catch (e) {
-    errEl.style.color = '';
-    errEl.textContent = e.message || 'Unable to send reset link.';
-  }
+  errEl.style.color = '#b7791f';
+  errEl.textContent = 'Ask another A2B administrator to set your password from the All Users screen.';
 }
 
 async function doLogout() {
@@ -2077,11 +2065,48 @@ async function loadUsers() {
         <td>⭐ ${Number(u.rating || 5).toFixed(1)}</td>
         <td style="font-weight:600;color:var(--green)">R ${Number(u.walletBalance || 0).toFixed(2)}</td>
         <td style="font-size:12px">${fmt(u.createdAt)}</td>
-        <td>${u.role !== 'admin' ? `<button class="btn-sm btn-delete" onclick="event.stopPropagation();adminDelete('user','${u.id}','${(u.name||u.username||'this user').replace(/'/g,"\\'")}')">🗑</button>` : ''}</td>
+        <td><div class="action-cell"><button class="btn-sm btn-detail" onclick="adminSetPassword('${u.id}','${(u.name||u.username||'this user').replace(/'/g,"\\'")}')">Set password</button>${u.role !== 'admin' ? `<button class="btn-sm btn-delete" onclick="event.stopPropagation();adminDelete('user','${u.id}','${(u.name||u.username||'this user').replace(/'/g,"\\'")}')">🗑</button>` : ''}</div></td>
       </tr>`).join('')}
       </tbody></table>`;
   } catch(e) {
     document.getElementById('users-table').innerHTML = emptyState('❌', 'Failed to load users', e.message);
+  }
+}
+
+function adminSetPassword(id, label) {
+  document.getElementById('m-title').textContent = 'Set user password';
+  document.getElementById('m-sub').textContent = `Set a new password for ${label}. Existing passwords are never displayed.`;
+  document.getElementById('m-body').innerHTML = `
+    <div class="field" style="margin-top:4px">
+      <div class="f-label">New password</div>
+      <input id="admin-user-password" class="f-input" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" />
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-green" onclick="saveAdminPassword('${id}')">Update password</button>`;
+  openModal();
+}
+
+async function saveAdminPassword(id) {
+  const input = document.getElementById('admin-user-password');
+  const password = input?.value || '';
+  if (password.length < 8) {
+    input?.focus();
+    toast('❌ Password must be at least 8 characters.', 'err');
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/admin/users/' + id + '/password', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Unable to update password.');
+    closeModal();
+    toast('✅ Password updated.', 'ok');
+  } catch (e) {
+    toast('❌ ' + (e.message || 'Unable to update password.'), 'err');
   }
 }
 

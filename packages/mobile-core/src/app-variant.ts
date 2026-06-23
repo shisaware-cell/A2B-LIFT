@@ -1,13 +1,13 @@
 import Constants from "expo-constants";
+import { resolveAppVariant } from "./app-variant-resolver";
 
 export type AppVariant = "mixed" | "driver" | "client";
 
 export function getAppVariant(): AppVariant {
-  const rawVariant = String(Constants.expoConfig?.extra?.appVariant || "").toLowerCase();
-
-  if (rawVariant === "client") return "client";
-  if (rawVariant === "driver") return "driver";
-  return "mixed";
+  return resolveAppVariant(
+    process.env.EXPO_PUBLIC_APP_VARIANT,
+    Constants.expoConfig?.extra?.appVariant,
+  );
 }
 
 export function usesRoleSelect(variant = getAppVariant()): boolean {

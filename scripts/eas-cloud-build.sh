@@ -36,10 +36,12 @@ esac
 case "$APP_VARIANT" in
   driver)
     export APP_VARIANT="driver"
+    export EXPO_PUBLIC_APP_VARIANT="driver"
     export EXPO_ROUTER_APP_ROOT="apps/driver-mobile/app"
     ;;
   client)
     export APP_VARIANT="client"
+    export EXPO_PUBLIC_APP_VARIANT="client"
     export EXPO_ROUTER_APP_ROOT="apps/client-mobile/app"
     export EXPO_PUBLIC_EAS_OWNER_CLIENT="${EXPO_PUBLIC_EAS_OWNER_CLIENT:-a2bliftclub}"
     export EXPO_PUBLIC_EAS_PROJECT_ID_CLIENT="${EXPO_PUBLIC_EAS_PROJECT_ID_CLIENT:-$DEFAULT_CLIENT_PROJECT_ID}"

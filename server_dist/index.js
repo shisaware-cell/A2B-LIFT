@@ -1530,6 +1530,19 @@ function isValidLocationSample(lat, lng) {
   return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 }
 
+// server/admin-password-policy.ts
+function validateAdminPassword(value) {
+  if (String(value || "").length < 8) {
+    return { ok: false, message: "Password must be at least 8 characters." };
+  }
+  return { ok: true };
+}
+
+// server/release-info.ts
+function getReleaseFingerprint(environment = process.env) {
+  return environment.RAILWAY_GIT_COMMIT_SHA || environment.GIT_COMMIT_SHA || "local";
+}
+
 // server/routes.ts
 var RIDE_MATCH_RADIUS_KM = 25;
 var CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1e3;
@@ -1882,7 +1895,11 @@ async function registerRoutes(app2) {
     });
   });
   app2.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+    res.json({
+      status: "ok",
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      release: getReleaseFingerprint()
+    });
   });
   app2.get("/api/config", (_req, res) => {
     res.json({
@@ -8427,6 +8444,19 @@ async function registerRoutes(app2) {
       return res.json({ message: "User deleted" });
     } catch (error) {
       return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.put("/api/admin/users/:id/password", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const validation = validateAdminPassword(req.body?.password);
+      if (!validation.ok) return res.status(400).json({ message: validation.message });
+      const user = await storage.getUser(req.params.id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      const password = await import_bcryptjs.default.hash(String(req.body.password), 10);
+      await storage.updateUser(user.id, { password });
+      return res.json({ ok: true, message: "Password updated." });
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Unable to update password." });
     }
   });
   app2.delete("/api/admin/withdrawals/:id", requireAuth, requireRole(["admin"]), async (req, res) => {

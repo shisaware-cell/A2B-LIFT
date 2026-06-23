@@ -12,7 +12,10 @@ import { EntranceView } from "@mobile-ui/motion";
 export default function SplashLanding() {
   const insets = useSafeAreaInsets();
   const { user, isLoading } = useAuth();
-  const isDriverApp = getAppVariant() === "driver";
+  const appVariant = getAppVariant();
+  const isDriverApp = appVariant === "driver";
+  const appName = isDriverApp ? "A2B LIFT DRIVER" : "A2B LIFT";
+  const slogan = isDriverApp ? "Drive With Confidence" : "Premium Ride Experience";
 
   // Navigation handled by AuthGate in _layout.tsx
 
@@ -22,7 +25,7 @@ export default function SplashLanding() {
         {isDriverApp ? (
           <Image source={require("../assets/images/driver-icon.png")} style={styles.loadingLogo} resizeMode="contain" />
         ) : (
-          <Ionicons name="car-sport" size={48} color={Colors.white} />
+          <Image source={require("../assets/images/icon.png")} style={styles.loadingLogo} resizeMode="contain" />
         )}
       </View>
     );
@@ -36,15 +39,13 @@ export default function SplashLanding() {
       />
       <View style={[styles.content, { paddingTop: insets.top + (Platform.OS === "web" ? 67 : 0) }]}>
         <EntranceView direction="up" duration={800} delay={200} style={styles.logoArea}>
-          <View style={styles.iconCircle}>
-            {isDriverApp ? (
-              <Image source={require("../assets/images/driver-icon.png")} style={styles.driverLogo} resizeMode="contain" />
-            ) : (
-              <Ionicons name="car-sport" size={40} color={Colors.white} />
-            )}
-          </View>
-          <Text style={styles.appName}>A2B LIFT</Text>
-          <Text style={styles.slogan}>Premium Ride Experience</Text>
+          {isDriverApp ? (
+            <Image source={require("../assets/images/driver-icon.png")} style={styles.driverLogo} resizeMode="contain" />
+          ) : (
+            <Image source={require("../assets/images/icon.png")} style={styles.clientLogo} resizeMode="contain" />
+          )}
+          <Text style={[styles.appName, isDriverApp && styles.driverAppName]}>{appName}</Text>
+          <Text style={styles.slogan}>{slogan}</Text>
         </EntranceView>
 
         <EntranceView duration={800} delay={600} style={styles.bottomArea}>
@@ -135,8 +136,14 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   driverLogo: {
-    width: 58,
-    height: 58,
+    width: 88,
+    height: 88,
+    marginBottom: 8,
+  },
+  clientLogo: {
+    width: 80,
+    height: 80,
+    marginBottom: 8,
   },
   loadingLogo: {
     width: 76,
@@ -147,6 +154,10 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     color: Colors.white,
     letterSpacing: 4,
+  },
+  driverAppName: {
+    fontSize: 28,
+    letterSpacing: 2,
   },
   slogan: {
     fontSize: 14,

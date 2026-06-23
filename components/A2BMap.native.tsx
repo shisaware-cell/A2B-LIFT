@@ -79,7 +79,6 @@ function decodePolyline(encoded: string): { latitude: number; longitude: number 
 }
 
 // Compute a MapView region from an array of coordinates with padding.
-// Using animateToRegion is more reliable than fitToCoordinates on iOS PROVIDER_GOOGLE in Expo Go.
 function computeRegion(
   coords: { latitude: number; longitude: number }[],
   extraPadFactor = 0.35
@@ -331,7 +330,7 @@ export default function A2BMap({
       <MapView
         ref={mapRef}
         style={styles.map}
-        provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
+        provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
         customMapStyle={customMapStyle}
         initialRegion={initialRegionRef.current}
         onMapReady={handleMapReady}

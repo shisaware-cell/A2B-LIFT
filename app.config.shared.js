@@ -35,13 +35,13 @@ function getVariantConfig(variant) {
       owner,
       projectId,
       name: "A2B LIFT",
-      version: "1.0.2",
+      version: "1.0.3",
       slug: process.env.EXPO_PUBLIC_EAS_SLUG_CLIENT || defaultClientSlug,
       scheme: "a2bliftclient",
       iosBundleIdentifier: "com.a2blift.client",
       androidPackage: "com.a2blift.client",
       androidVersionCode: currentAndroidVersionCode,
-      iosBuildNumber: "5",
+      iosBuildNumber: "6",
       runtimeVersion: "1.0.0-client",
       notificationChannel: "client-alerts",
     };
@@ -53,13 +53,13 @@ function getVariantConfig(variant) {
     owner,
     projectId: getDriverProjectId(owner),
     name: "A2B DRIVER",
-    version: "1.0.1",
+    version: "1.0.2",
     slug: "a2b-lift",
     scheme: "a2blift",
     iosBundleIdentifier: "com.a2blift",
     androidPackage: "com.a2blift",
     androidVersionCode: currentAndroidVersionCode,
-    iosBuildNumber: "10",
+    iosBuildNumber: "11",
     runtimeVersion: "1.0.44",
     notificationChannel: "ride-alerts-v3",
     icon: "assets/images/driver-icon.png",
@@ -68,6 +68,12 @@ function getVariantConfig(variant) {
 }
 
 function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
+  const declaredBuildVariant = String(process.env.EXPO_PUBLIC_APP_VARIANT || "").trim().toLowerCase();
+  if (declaredBuildVariant && declaredBuildVariant !== variant) {
+    throw new Error(
+      `APP_VARIANT (${variant}) and EXPO_PUBLIC_APP_VARIANT (${declaredBuildVariant}) must match.`,
+    );
+  }
   const config = getVariantConfig(variant);
   const easProjectConfig = config.projectId
     ? {
@@ -195,6 +201,7 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
     extra: {
       ...easProjectConfig,
       appVariant: config.variant,
+      releaseIdentity: `${config.variant}:${config.iosBundleIdentifier}`,
       googleMapsApiKey,
     },
     runtimeVersion: config.runtimeVersion,

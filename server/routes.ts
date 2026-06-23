@@ -19,6 +19,8 @@ import { authOptional, requireAuth, requireRole, type AuthedRequest } from "./au
 import { signAccessToken, type UserRole } from "./auth";
 import { externalApiService } from "./external-api-service";
 import { calculateDemandMultiplier, calculateWaitingFee, isValidLocationSample, reconcileDriverProfileStatus, resolveCancellation } from "./ride-operations-policy";
+import { validateAdminPassword } from "./admin-password-policy";
+import { getReleaseFingerprint } from "./release-info";
 
 const RIDE_MATCH_RADIUS_KM = 25;
 const CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
@@ -511,7 +513,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Health check for Railway / Render uptime monitoring
   app.get("/api/health", (_req: Request, res: Response) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
+    res.json({
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      release: getReleaseFingerprint(),
+    });
   });
 
   // Public config for the website (safe, non-secret values only)
@@ -8263,6 +8269,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({ message: "User deleted" });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.put("/api/admin/users/:id/password", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
+    try {
+      const validation = validateAdminPassword(req.body?.password);
+      if (!validation.ok) return res.status(400).json({ message: validation.message });
+
+      const user = await storage.getUser(req.params.id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const password = await bcrypt.hash(String(req.body.password), 10);
+      await storage.updateUser(user.id, { password } as any);
+      return res.json({ ok: true, message: "Password updated." });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || "Unable to update password." });
     }
   });
 

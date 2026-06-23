@@ -16,12 +16,10 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useSegments } from "expo-router";
-import Svg, { Rect } from "react-native-svg";
+import QRCode from "react-native-qrcode-svg";
 import { apiRequest } from "@/lib/query-client";
 import { useAuth } from "@/lib/auth-context";
 import Colors from "@/constants/colors";
-
-const QRCode: { create: (text: string, options?: Record<string, unknown>) => { modules: { size: number; data: boolean[] } } } = require("qrcode");
 
 type ReferralSummary = {
   referralCode: string;
@@ -229,16 +227,6 @@ export default function ReferralsScreen() {
     () => buildRewardShareUrl(summary?.referralCode || user?.referralCode, summary?.shareUrl, appTarget),
     [appTarget, summary?.referralCode, summary?.shareUrl, user?.referralCode],
   );
-  const qrMatrix = useMemo(() => {
-    if (!rewardLink) return null;
-    try {
-      const qr = QRCode.create(rewardLink, { errorCorrectionLevel: "M", margin: 1 });
-      return { size: qr.modules.size, data: qr.modules.data };
-    } catch {
-      return null;
-    }
-  }, [rewardLink]);
-
   const loadData = useCallback(async (options?: { showLoader?: boolean }) => {
     const showLoader = options?.showLoader ?? !hasLoadedOnceRef.current;
 
@@ -450,16 +438,14 @@ export default function ReferralsScreen() {
           </View>
           <View style={styles.qrBody}>
             <View style={styles.qrBox}>
-              {qrMatrix ? (
-                <Svg width="100%" height="100%" viewBox={`0 0 ${qrMatrix.size} ${qrMatrix.size}`}>
-                  <Rect x="0" y="0" width={qrMatrix.size} height={qrMatrix.size} fill="#FFFFFF" />
-                  {qrMatrix.data.map((filled, index) => {
-                    if (!filled) return null;
-                    const x = index % qrMatrix.size;
-                    const y = Math.floor(index / qrMatrix.size);
-                    return <Rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" fill="#111111" />;
-                  })}
-                </Svg>
+              {rewardLink ? (
+                <QRCode
+                  value={rewardLink}
+                  size={132}
+                  color="#111111"
+                  backgroundColor="#FFFFFF"
+                  quietZone={8}
+                />
               ) : (
                 <ActivityIndicator color={Colors.primary} />
               )}
