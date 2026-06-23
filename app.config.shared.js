@@ -41,7 +41,7 @@ function getVariantConfig(variant) {
       iosBundleIdentifier: "com.a2blift.client",
       androidPackage: "com.a2blift.client",
       androidVersionCode: currentAndroidVersionCode,
-      iosBuildNumber: "6",
+      iosBuildNumber: "7",
       runtimeVersion: "1.0.0-client",
       notificationChannel: "client-alerts",
     };
@@ -59,7 +59,7 @@ function getVariantConfig(variant) {
     iosBundleIdentifier: "com.a2blift",
     androidPackage: "com.a2blift",
     androidVersionCode: currentAndroidVersionCode,
-    iosBuildNumber: "11",
+    iosBuildNumber: "12",
     runtimeVersion: "1.0.44",
     notificationChannel: "ride-alerts-v3",
     icon: "assets/images/driver-icon.png",
@@ -110,6 +110,7 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
         NSPhotoLibraryAddUsageDescription: "A2B LIFT saves trip-related photos to your library.",
         ITSAppUsesNonExemptEncryption: false,
         UIBackgroundModes: ["location", "fetch"],
+        LSApplicationQueriesSchemes: ["comgooglemaps"],
       },
       config: {
         googleMapsApiKey,

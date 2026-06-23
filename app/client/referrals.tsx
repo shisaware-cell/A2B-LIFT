@@ -829,19 +829,22 @@ const styles = StyleSheet.create({
   qrBody: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
+    gap: 20,
   },
   qrBox: {
-    width: 106,
-    height: 106,
+    width: 148,
+    height: 148,
     borderRadius: 18,
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
     padding: 8,
+    overflow: "hidden",
+    flexShrink: 0,
   },
   qrCopyWrap: {
     flex: 1,
+    minWidth: 0,
     gap: 8,
   },
   qrCopy: {

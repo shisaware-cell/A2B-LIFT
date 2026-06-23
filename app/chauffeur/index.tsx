@@ -36,6 +36,10 @@ import {
 } from "@/lib/location-utils";
 import { apiRequest, getApiUrl } from "@/lib/query-client";
 import { useSocket } from "@/lib/socket-context";
+import {
+  buildGoogleMapsNavigationUrl,
+  buildGoogleMapsWebNavigationUrl,
+} from "@/lib/google-navigation";
 import Colors from "@/constants/colors";
 import A2BMap from "@/components/A2BMap";
 
@@ -206,6 +210,33 @@ export default function ChauffeurDashboard() {
   const isOnlineRef = useRef(false);
   const chauffeurRef = useRef<any>(null);
   const isExpoGoAndroid = Platform.OS === "android" && Constants.appOwnership === "expo";
+
+  async function openAcceptedRideNavigation() {
+    if (!currentRide) return;
+
+    const coordinate = currentRide.status === "trip_started"
+      ? { lat: Number(currentRide.dropoffLat), lng: Number(currentRide.dropoffLng) }
+      : { lat: Number(currentRide.pickupLat), lng: Number(currentRide.pickupLng) };
+    const platform = Platform.OS === "android" ? "android" : Platform.OS === "ios" ? "ios" : "web";
+    const appUrl = buildGoogleMapsNavigationUrl(coordinate, platform);
+    const webUrl = buildGoogleMapsWebNavigationUrl(coordinate);
+
+    if (!appUrl || !webUrl) {
+      Alert.alert("Navigation unavailable", "This trip does not have a valid destination yet.");
+      return;
+    }
+
+    try {
+      if (platform !== "web" && await Linking.canOpenURL(appUrl)) {
+        await Linking.openURL(appUrl);
+        return;
+      }
+
+      await Linking.openURL(webUrl);
+    } catch {
+      Alert.alert("Could not open Google Maps", "Please check that Google Maps is installed and try again.");
+    }
+  }
 
   function getClientFirstName(name?: string | null, fallback = "Client") {
     const cleaned = String(name || "").trim();
@@ -1967,7 +1998,7 @@ export default function ChauffeurDashboard() {
               <Ionicons name="chatbubble-outline" size={15} color={Colors.white} />
               <Text style={styles.rideSecBtnText}>Message</Text>
             </Pressable>
-            <Pressable style={[styles.rideSecBtn, { backgroundColor: Colors.accent }]} onPress={() => setShowNavModal(true)}>
+            <Pressable style={[styles.rideSecBtn, { backgroundColor: Colors.accent }]} onPress={openAcceptedRideNavigation}>
               <Ionicons name="navigate" size={15} color={Colors.white} />
               <Text style={styles.rideSecBtnText}>Navigate</Text>
             </Pressable>

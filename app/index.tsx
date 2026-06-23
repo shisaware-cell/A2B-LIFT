@@ -42,7 +42,9 @@ export default function SplashLanding() {
           {isDriverApp ? (
             <Image source={require("../assets/images/driver-icon.png")} style={styles.driverLogo} resizeMode="contain" />
           ) : (
-            <Image source={require("../assets/images/icon.png")} style={styles.clientLogo} resizeMode="contain" />
+            <View style={styles.clientLogoFrame}>
+              <Image source={require("../assets/images/icon.png")} style={styles.clientLogo} resizeMode="cover" />
+            </View>
           )}
           <Text style={[styles.appName, isDriverApp && styles.driverAppName]}>{appName}</Text>
           <Text style={styles.slogan}>{slogan}</Text>
@@ -143,6 +145,13 @@ const styles = StyleSheet.create({
   clientLogo: {
     width: 80,
     height: 80,
+  },
+  clientLogoFrame: {
+    width: 80,
+    height: 80,
+    borderRadius: 20,
+    backgroundColor: Colors.primary,
+    overflow: "hidden",
     marginBottom: 8,
   },
   loadingLogo: {

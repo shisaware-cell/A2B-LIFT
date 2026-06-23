@@ -191,12 +191,12 @@
         "track": "internal"
       },
       "ios": {
-        "appleId": "kidcornerza@gmail.com"
+        "appleId": "ntokozodlamini12@gmail.com"
       }
     },
     "ios-production": {
       "ios": {
-        "appleId": "kidcornerza@gmail.com"
+        "appleId": "ntokozodlamini12@gmail.com"
       }
     },
     "client-production": {
@@ -205,12 +205,12 @@
         "track": "internal"
       },
       "ios": {
-        "appleId": "kidcornerza@gmail.com"
+        "appleId": "ntokozodlamini12@gmail.com"
       }
     },
     "client-ios-production": {
       "ios": {
-        "appleId": "kidcornerza@gmail.com"
+        "appleId": "ntokozodlamini12@gmail.com"
       }
     }
   }
