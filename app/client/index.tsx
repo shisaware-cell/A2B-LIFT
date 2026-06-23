@@ -1576,7 +1576,7 @@ export default function ClientHomeScreen() {
         }).catch(() => {});
       }
       if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else if (ride.status === "chauffeur_arriving") {
+    } else if (ride.status === "chauffeur_arriving" || ride.status === "chauffeur_arrived") {
       setRideStatus("arriving");
     } else if (ride.status === "trip_started") {
       setRideStatus("in_trip");
@@ -2277,6 +2277,9 @@ export default function ClientHomeScreen() {
                 <Text style={styles.liveEtaUnit}>min</Text>
               </View>
             </View>
+            {currentRide?.status === "chauffeur_arrived" && (
+              <Text style={styles.waitingNotice}>Your driver has arrived. Waiting is free for 5 minutes, then R1 per minute up to R30.</Text>
+            )}
             {/* Progress bar track */}
             <View style={styles.liveProgressTrack}>
               <View style={[
@@ -2680,7 +2683,15 @@ export default function ClientHomeScreen() {
               <Ionicons name="checkmark" size={32} color={Colors.white} />
             </View>
             <Text style={styles.completedTitle}>Trip Completed</Text>
-            <Text style={styles.completedPrice}>R {currentRide?.price || estimatedPrice}</Text>
+            <Text style={styles.completedPrice}>R {currentRide?.finalFare ?? currentRide?.price ?? estimatedPrice}</Text>
+            {currentRide?.quotedFare != null && currentRide?.finalFare != null && Number(currentRide.quotedFare) !== Number(currentRide.finalFare) && (
+              <View style={styles.settlementCard}>
+                <View style={styles.settlementRow}><Text style={styles.settlementLabel}>Quoted fare</Text><Text style={styles.settlementValue}>R {Number(currentRide.quotedFare).toFixed(2)}</Text></View>
+                {Number(currentRide.waitingFee || 0) > 0 && <View style={styles.settlementRow}><Text style={styles.settlementLabel}>Waiting time</Text><Text style={styles.settlementValue}>R {Number(currentRide.waitingFee).toFixed(2)}</Text></View>}
+                <View style={styles.settlementRow}><Text style={styles.settlementLabel}>Final fare</Text><Text style={styles.settlementValue}>R {Number(currentRide.finalFare).toFixed(2)}</Text></View>
+                <Text style={styles.settlementNote}>{Number(currentRide.finalFare) > Number(currentRide.quotedFare) ? "Your saved card was charged only for the difference." : "The lower final fare has been refunded to your original payment method."}</Text>
+              </View>
+            )}
             <Text style={styles.completedLabel}>Thank you for riding with A2B LIFT</Text>
           </View>
           <Pressable
@@ -4709,6 +4720,19 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     color: Colors.white,
   },
+  settlementCard: {
+    width: "100%",
+    gap: 8,
+    marginTop: 8,
+    borderRadius: 12,
+    padding: 12,
+    backgroundColor: Colors.surface,
+  },
+  settlementRow: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
+  settlementLabel: { color: Colors.textSecondary, fontFamily: "Inter_400Regular", fontSize: 13 },
+  settlementValue: { color: Colors.white, fontFamily: "Inter_700Bold", fontSize: 13 },
+  settlementNote: { color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 12, lineHeight: 17, marginTop: 2 },
+  waitingNotice: { color: Colors.warning, fontFamily: "Inter_600SemiBold", fontSize: 12, lineHeight: 17, textAlign: "center", marginTop: 4 },
   completedLabel: {
     fontSize: 13,
     fontFamily: "Inter_400Regular",
