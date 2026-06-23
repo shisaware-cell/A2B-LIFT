@@ -6516,6 +6516,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       if (!ride) return res.status(404).json({ message: "Ride not found" });
 
+      if (status === "trip_completed" && ride.paymentMethod === "card") {
+        const adjustment = Number(ride.price || 0) - Number(rideBeforeUpdate?.price || existingRide.price || 0);
+        if (adjustment > 0) await chargeFinalFareAdjustment(ride, adjustment);
+      }
+
       // ── Cancellation: refunds + notifications for all parties ──
       if (status === "cancelled" && rideBeforeUpdate) {
         try {
@@ -7546,6 +7551,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       "Content-Type": "application/json",
     },
   });
+
+  async function chargeFinalFareAdjustment(ride: any, amount: number) {
+    const adjustmentKey = `final-fare-charge:${ride.id}:${Math.round(amount * 100)}`;
+    const inserted = await pool.query(
+      "INSERT INTO payment_adjustments (ride_id, adjustment_key, direction, amount, status) VALUES ($1,$2,'charge',$3,'pending') ON CONFLICT (adjustment_key) DO NOTHING RETURNING id",
+      [ride.id, adjustmentKey, amount],
+    );
+    if (!inserted.rowCount) return;
+    const rider = await storage.getUser(ride.clientId);
+    const cards = rider ? await storage.getSavedCardsByUser(rider.id) : [];
+    const card = cards.find((item: any) => item.isDefault) || cards[0];
+    if (!rider || !card) {
+      await pool.query("UPDATE payment_adjustments SET status = 'requires_payment' WHERE adjustment_key = $1", [adjustmentKey]);
+      return;
+    }
+    const reference = `A2B-FINAL-${ride.id}-${Date.now()}`;
+    const response = await paystackAPI.post("/transaction/charge_authorization", {
+      authorization_code: card.paystackAuthCode, email: rider.username, amount: Math.round(amount * 100), currency: "ZAR", reference,
+      metadata: { userId: rider.id, rideId: ride.id, adjustmentKey },
+    });
+    if (response.data?.data?.status !== "success") throw new Error("Final fare card adjustment failed");
+    await storage.createPayment({ rideId: ride.id, payerUserId: rider.id, amount, method: "card", status: "paid", currency: "ZAR", paidAt: new Date(), paystackReference: reference, paystackAuthCode: card.paystackAuthCode });
+    await pool.query("UPDATE payment_adjustments SET status = 'completed', provider_reference = $2, completed_at = now() WHERE adjustment_key = $1", [adjustmentKey, reference]);
+  }
 
   async function recordWalletTx(
     userId: string, type: string, amount: number,
