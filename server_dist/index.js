@@ -1662,7 +1662,7 @@ async function sendExpoPushNotification(tokens, title, body, data, options) {
       vibrate: urgent ? [0, 250, 250, 250] : void 0
     }
   }));
-  if (messages2.length === 0) return;
+  if (messages2.length === 0) return [];
   try {
     const res = await import_axios.default.post("https://exp.host/--/api/v2/push/send", messages2, {
       headers: {
@@ -1678,8 +1678,10 @@ async function sendExpoPushNotification(tokens, title, body, data, options) {
         console.error(`[push] Token ${tokens[i]} error: ${r.message} (${r.details?.error})`);
       }
     });
+    return results;
   } catch (e) {
     console.error("[push] Failed to send Expo push notification:", e.message);
+    return [];
   }
 }
 async function notifyUserEvent(options) {
@@ -6278,6 +6280,26 @@ async function registerRoutes(app2) {
       return res.json(doc);
     }
   );
+  app2.post("/api/admin/notifications/test", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const userId = requireStringField(req.body, "userId");
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      const chauffeur = await storage.getChauffeurByUserId(userId).catch(() => void 0);
+      const notification = await storage.createNotification({ userId, title: "A2B notification test", body: "Your notifications are working.", type: "system" });
+      const tokens = Array.from(new Set([user.pushToken, chauffeur?.pushToken].filter(Boolean)));
+      const tickets = await sendExpoPushNotification(tokens, notification.title, notification.body, { type: "admin:test" });
+      for (const ticket of tickets) {
+        await pool2.query(
+          "INSERT INTO push_delivery_logs (user_id, notification_id, expo_ticket_id, status, error_message, delivered_at) VALUES ($1,$2,$3,$4,$5,$6)",
+          [userId, notification.id, ticket.id || null, ticket.status || "unknown", ticket.message || null, ticket.status === "ok" ? /* @__PURE__ */ new Date() : null]
+        );
+      }
+      return res.json({ notification, tickets, sent: tickets.length });
+    } catch (error) {
+      return res.status(400).json({ message: error.message || "Unable to send test notification" });
+    }
+  });
   app2.post("/api/pricing/estimate", async (req, res) => {
     try {
       const { distanceKm, categoryId, isLateNight } = req.body;

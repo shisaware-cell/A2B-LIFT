@@ -186,7 +186,7 @@ async function sendExpoPushNotification(
         vibrate: urgent ? [0, 250, 250, 250] : undefined,
       },
     }));
-  if (messages.length === 0) return;
+  if (messages.length === 0) return [];
   try {
     const res = await axios.post("https://exp.host/--/api/v2/push/send", messages, {
       headers: {
@@ -203,8 +203,10 @@ async function sendExpoPushNotification(
         console.error(`[push] Token ${tokens[i]} error: ${r.message} (${r.details?.error})`);
       }
     });
+    return results;
   } catch (e: any) {
     console.error("[push] Failed to send Expo push notification:", e.message);
+    return [];
   }
 }
 
@@ -5768,6 +5770,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json(doc);
     },
   );
+
+  app.post("/api/admin/notifications/test", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId = requireStringField(req.body, "userId");
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      const chauffeur = await storage.getChauffeurByUserId(userId).catch(() => undefined);
+      const notification = await storage.createNotification({ userId, title: "A2B notification test", body: "Your notifications are working.", type: "system" });
+      const tokens = Array.from(new Set([user.pushToken, chauffeur?.pushToken].filter(Boolean) as string[]));
+      const tickets = await sendExpoPushNotification(tokens, notification.title, notification.body, { type: "admin:test" });
+      for (const ticket of tickets) {
+        await pool.query(
+          "INSERT INTO push_delivery_logs (user_id, notification_id, expo_ticket_id, status, error_message, delivered_at) VALUES ($1,$2,$3,$4,$5,$6)",
+          [userId, notification.id, ticket.id || null, ticket.status || "unknown", ticket.message || null, ticket.status === "ok" ? new Date() : null],
+        );
+      }
+      return res.json({ notification, tickets, sent: tickets.length });
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message || "Unable to send test notification" });
+    }
+  });
 
   // -----------------------------
   // Pricing
