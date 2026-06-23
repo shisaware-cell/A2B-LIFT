@@ -1539,14 +1539,14 @@ var REFERRAL_REWARD_RATE = 0.025;
 var DRIVER_SHARE_MIN_ACTIVE_MONTHS = 3;
 var DRIVER_SHARE_MIN_WEEKLY_TRIPS = 5;
 var DEMAND_PRICING_CAP = 1.5;
-async function getDemandPricingMultiplier() {
+async function getDemandPricingMultiplier(pickup) {
   const [allRides, chauffeurs2] = await Promise.all([
     storage.getAllRides(),
     storage.getAllChauffeurs()
   ]);
   return calculateDemandMultiplier({
-    searchingRides: allRides.filter((ride) => ride.status === "searching").length + 1,
-    onlineDrivers: chauffeurs2.filter((chauffeur) => chauffeur.isApproved && chauffeur.isOnline).length,
+    searchingRides: allRides.filter((ride) => ride.status === "searching" && (!pickup || haversine(pickup.lat, pickup.lng, Number(ride.pickupLat), Number(ride.pickupLng)) <= 5)).length + 1,
+    onlineDrivers: chauffeurs2.filter((chauffeur) => chauffeur.isApproved && chauffeur.isOnline && (!pickup || chauffeur.lat != null && chauffeur.lng != null && haversine(pickup.lat, pickup.lng, Number(chauffeur.lat), Number(chauffeur.lng)) <= 10)).length,
     maximum: DEMAND_PRICING_CAP
   });
 }
@@ -1941,7 +1941,7 @@ async function registerRoutes(app2) {
       return res.status(500).json({ message: error.message });
     }
   });
-  function haversine(lat1, lng1, lat2, lng2) {
+  function haversine2(lat1, lng1, lat2, lng2) {
     const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLng = (lng2 - lng1) * Math.PI / 180;
@@ -2869,7 +2869,7 @@ async function registerRoutes(app2) {
     const lower = normalized.toLowerCase();
     const startsWithNumber = /^\d+\s+/.test(lower);
     const bias = lat != null && lng != null ? { lat, lng } : SA_DEFAULT_BIAS;
-    const nearPretoria = haversine(bias.lat, bias.lng, -25.7479, 28.2293) < 130;
+    const nearPretoria = haversine2(bias.lat, bias.lng, -25.7479, 28.2293) < 130;
     const looksPretoriaSpecific = /\bpretorius\b/i.test(normalized) || nearPretoria;
     if (!hasLocalityHint(normalized)) {
       if (looksPretoriaSpecific) {
@@ -2935,7 +2935,7 @@ async function registerRoutes(app2) {
     }
     if (prediction.lat != null && prediction.lng != null) {
       const bias = lat != null && lng != null ? { lat, lng } : SA_DEFAULT_BIAS;
-      const distanceKm = haversine(bias.lat, bias.lng, prediction.lat, prediction.lng);
+      const distanceKm = haversine2(bias.lat, bias.lng, prediction.lat, prediction.lng);
       score += Math.max(0, 35 - distanceKm / 4);
     }
     if (haystack.includes("cape town") && normalizedInput.includes("pretorius")) score -= 12;
@@ -3330,7 +3330,7 @@ async function registerRoutes(app2) {
       const starts = cityLower.startsWith(query);
       const includes = cityLower.includes(query);
       if (!starts && !includes) return null;
-      const distanceBoost = bias ? Math.max(0, 10 - haversine(bias.lat, bias.lng, cityLat, cityLng) / 80) : 0;
+      const distanceBoost = bias ? Math.max(0, 10 - haversine2(bias.lat, bias.lng, cityLat, cityLng) / 80) : 0;
       return {
         placeId: `sa-city:${cityLower.replace(/\s+/g, "-")}`,
         description: `${city}, ${province}, South Africa`,
@@ -6302,8 +6302,8 @@ async function registerRoutes(app2) {
   });
   app2.post("/api/pricing/estimate", async (req, res) => {
     try {
-      const { distanceKm, categoryId, isLateNight } = req.body;
-      const demandMultiplier = await getDemandPricingMultiplier();
+      const { distanceKm, categoryId, isLateNight, pickupLat, pickupLng } = req.body;
+      const demandMultiplier = await getDemandPricingMultiplier(Number.isFinite(Number(pickupLat)) && Number.isFinite(Number(pickupLng)) ? { lat: Number(pickupLat), lng: Number(pickupLng) } : void 0);
       const estimate = calculatePrice(distanceKm, categoryId || "budget", { isLateNight, demandMultiplier });
       return res.json(estimate);
     } catch (error) {
@@ -6333,7 +6333,7 @@ async function registerRoutes(app2) {
           [activeRide.id]
         );
         const previous = last.rows[0];
-        const travelledKm = previous ? haversine(Number(previous.latitude), Number(previous.longitude), lat, lng) : 0;
+        const travelledKm = previous ? haversine2(Number(previous.latitude), Number(previous.longitude), lat, lng) : 0;
         await pool2.query(
           "INSERT INTO ride_location_samples (ride_id, chauffeur_id, latitude, longitude) VALUES ($1, $2, $3, $4)",
           [activeRide.id, chauffeur.id, lat, lng]
@@ -6507,7 +6507,7 @@ async function registerRoutes(app2) {
       const normalizedDurationMin = Number(rideData.durationMin ?? 0);
       const safeDurationMin = Number.isFinite(normalizedDurationMin) && normalizedDurationMin > 0 ? normalizedDurationMin : null;
       const selectedRouteId = typeof rideData.selectedRouteId === "string" && rideData.selectedRouteId.trim() ? rideData.selectedRouteId.trim() : null;
-      const demandMultiplier = await getDemandPricingMultiplier();
+      const demandMultiplier = await getDemandPricingMultiplier({ lat: Number(rideData.pickupLat), lng: Number(rideData.pickupLng) });
       const priceEstimate = calculatePrice(safeDistanceKm, categoryId, { isLateNight, demandMultiplier });
       const safeFare = priceEstimate.totalPrice;
       const routeCurrency = typeof rideData.routeCurrency === "string" && rideData.routeCurrency.trim() ? rideData.routeCurrency.trim().toUpperCase() : priceEstimate.currency;
@@ -6557,7 +6557,7 @@ async function registerRoutes(app2) {
       const pickupLng = parseFloat(rideData.pickupLng);
       const nearbyChauffeurs = allChauffeurs.filter((c) => c.isOnline && c.isApproved && hasFreshChauffeurLocation(c)).map((c) => ({
         ...c,
-        distKm: haversine(pickupLat, pickupLng, Number(c.lat), Number(c.lng))
+        distKm: haversine2(pickupLat, pickupLng, Number(c.lat), Number(c.lng))
       })).filter((c) => c.distKm <= RIDE_MATCH_RADIUS_KM).sort((a, b) => a.distKm - b.distKm).slice(0, 10);
       async function getDriverPushTokens(drivers) {
         const tokens = /* @__PURE__ */ new Set();
@@ -6907,6 +6907,7 @@ async function registerRoutes(app2) {
       if (status === "trip_completed" && ride.paymentMethod === "card") {
         const adjustment = Number(ride.price || 0) - Number(rideBeforeUpdate?.price || existingRide.price || 0);
         if (adjustment > 0) await chargeFinalFareAdjustment(ride, adjustment);
+        if (adjustment < 0) await refundFinalFareAdjustment(ride, Math.abs(adjustment));
       }
       if (status === "cancelled" && rideBeforeUpdate) {
         try {
@@ -7326,7 +7327,7 @@ async function registerRoutes(app2) {
       if (chauffeur.lat && chauffeur.lng) {
         candidates = searching.map((r) => ({
           ...r,
-          distKm: haversine(
+          distKm: haversine2(
             Number(chauffeur.lat),
             Number(chauffeur.lng),
             parseFloat(r.pickupLat),
@@ -7371,7 +7372,7 @@ async function registerRoutes(app2) {
       if (hasFreshChauffeurLocation(chauffeur)) {
         const withDist = searching.map((r) => ({
           ...r,
-          distKm: haversine(
+          distKm: haversine2(
             Number(chauffeur.lat),
             Number(chauffeur.lng),
             parseFloat(r.pickupLat),
@@ -7833,6 +7834,18 @@ async function registerRoutes(app2) {
     if (response.data?.data?.status !== "success") throw new Error("Final fare card adjustment failed");
     await storage.createPayment({ rideId: ride.id, payerUserId: rider.id, amount, method: "card", status: "paid", currency: "ZAR", paidAt: /* @__PURE__ */ new Date(), paystackReference: reference, paystackAuthCode: card.paystackAuthCode });
     await pool2.query("UPDATE payment_adjustments SET status = 'completed', provider_reference = $2, completed_at = now() WHERE adjustment_key = $1", [adjustmentKey, reference]);
+  }
+  async function refundFinalFareAdjustment(ride, amount) {
+    const adjustmentKey = `final-fare-refund:${ride.id}:${Math.round(amount * 100)}`;
+    const inserted = await pool2.query("INSERT INTO payment_adjustments (ride_id, adjustment_key, direction, amount, status) VALUES ($1,$2,'refund',$3,'pending') ON CONFLICT (adjustment_key) DO NOTHING RETURNING id", [ride.id, adjustmentKey, amount]);
+    if (!inserted.rowCount) return;
+    const payment = (await storage.getPaymentsByRide(ride.id)).find((item) => item.method === "card" && item.status === "paid" && item.paystackReference);
+    if (!payment?.paystackReference) {
+      await pool2.query("UPDATE payment_adjustments SET status = 'requires_payment' WHERE adjustment_key = $1", [adjustmentKey]);
+      return;
+    }
+    await paystackAPI.post("/refund", { transaction: payment.paystackReference, amount: Math.round(amount * 100) });
+    await pool2.query("UPDATE payment_adjustments SET status = 'completed', provider_reference = $2, completed_at = now() WHERE adjustment_key = $1", [adjustmentKey, payment.paystackReference]);
   }
   async function recordWalletTx(userId, type, amount, balanceBefore, description, reference, rideId) {
     const balanceAfter = type === "ride_charge" || type === "withdrawal" ? balanceBefore - amount : balanceBefore + amount;

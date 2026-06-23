@@ -29,14 +29,14 @@ const DRIVER_SHARE_MIN_ACTIVE_MONTHS = 3;
 const DRIVER_SHARE_MIN_WEEKLY_TRIPS = 5;
 const DEMAND_PRICING_CAP = 1.5;
 
-async function getDemandPricingMultiplier() {
+async function getDemandPricingMultiplier(pickup?: { lat: number; lng: number }) {
   const [allRides, chauffeurs] = await Promise.all([
     storage.getAllRides(),
     storage.getAllChauffeurs(),
   ]);
   return calculateDemandMultiplier({
-    searchingRides: allRides.filter((ride) => ride.status === "searching").length + 1,
-    onlineDrivers: chauffeurs.filter((chauffeur) => chauffeur.isApproved && chauffeur.isOnline).length,
+    searchingRides: allRides.filter((ride) => ride.status === "searching" && (!pickup || haversine(pickup.lat, pickup.lng, Number(ride.pickupLat), Number(ride.pickupLng)) <= 5)).length + 1,
+    onlineDrivers: chauffeurs.filter((chauffeur) => chauffeur.isApproved && chauffeur.isOnline && (!pickup || (chauffeur.lat != null && chauffeur.lng != null && haversine(pickup.lat, pickup.lng, Number(chauffeur.lat), Number(chauffeur.lng)) <= 10))).length,
     maximum: DEMAND_PRICING_CAP,
   });
 }
@@ -5797,8 +5797,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // -----------------------------
   app.post("/api/pricing/estimate", async (req: Request, res: Response) => {
     try {
-      const { distanceKm, categoryId, isLateNight } = req.body;
-      const demandMultiplier = await getDemandPricingMultiplier();
+      const { distanceKm, categoryId, isLateNight, pickupLat, pickupLng } = req.body;
+      const demandMultiplier = await getDemandPricingMultiplier(Number.isFinite(Number(pickupLat)) && Number.isFinite(Number(pickupLng)) ? { lat: Number(pickupLat), lng: Number(pickupLng) } : undefined);
       const estimate = calculatePrice(distanceKm, categoryId || "budget", { isLateNight, demandMultiplier });
       return res.json(estimate);
     } catch (error: any) {
@@ -6042,7 +6042,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const selectedRouteId = typeof rideData.selectedRouteId === "string" && rideData.selectedRouteId.trim()
         ? rideData.selectedRouteId.trim()
         : null;
-      const demandMultiplier = await getDemandPricingMultiplier();
+      const demandMultiplier = await getDemandPricingMultiplier({ lat: Number(rideData.pickupLat), lng: Number(rideData.pickupLng) });
       const priceEstimate = calculatePrice(safeDistanceKm, categoryId, { isLateNight, demandMultiplier });
       const safeFare = priceEstimate.totalPrice;
       const routeCurrency = typeof rideData.routeCurrency === "string" && rideData.routeCurrency.trim()
@@ -6542,6 +6542,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (status === "trip_completed" && ride.paymentMethod === "card") {
         const adjustment = Number(ride.price || 0) - Number(rideBeforeUpdate?.price || existingRide.price || 0);
         if (adjustment > 0) await chargeFinalFareAdjustment(ride, adjustment);
+        if (adjustment < 0) await refundFinalFareAdjustment(ride, Math.abs(adjustment));
       }
 
       // ── Cancellation: refunds + notifications for all parties ──
@@ -7597,6 +7598,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (response.data?.data?.status !== "success") throw new Error("Final fare card adjustment failed");
     await storage.createPayment({ rideId: ride.id, payerUserId: rider.id, amount, method: "card", status: "paid", currency: "ZAR", paidAt: new Date(), paystackReference: reference, paystackAuthCode: card.paystackAuthCode });
     await pool.query("UPDATE payment_adjustments SET status = 'completed', provider_reference = $2, completed_at = now() WHERE adjustment_key = $1", [adjustmentKey, reference]);
+  }
+
+  async function refundFinalFareAdjustment(ride: any, amount: number) {
+    const adjustmentKey = `final-fare-refund:${ride.id}:${Math.round(amount * 100)}`;
+    const inserted = await pool.query("INSERT INTO payment_adjustments (ride_id, adjustment_key, direction, amount, status) VALUES ($1,$2,'refund',$3,'pending') ON CONFLICT (adjustment_key) DO NOTHING RETURNING id", [ride.id, adjustmentKey, amount]);
+    if (!inserted.rowCount) return;
+    const payment = (await storage.getPaymentsByRide(ride.id)).find((item: any) => item.method === "card" && item.status === "paid" && item.paystackReference);
+    if (!payment?.paystackReference) { await pool.query("UPDATE payment_adjustments SET status = 'requires_payment' WHERE adjustment_key = $1", [adjustmentKey]); return; }
+    await paystackAPI.post("/refund", { transaction: payment.paystackReference, amount: Math.round(amount * 100) });
+    await pool.query("UPDATE payment_adjustments SET status = 'completed', provider_reference = $2, completed_at = now() WHERE adjustment_key = $1", [adjustmentKey, payment.paystackReference]);
   }
 
   async function recordWalletTx(
