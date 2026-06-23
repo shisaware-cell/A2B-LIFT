@@ -5799,6 +5799,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const lng = Number(req.body?.lng);
       if (!isValidLocationSample(lat, lng)) return res.status(400).json({ message: "A valid latitude and longitude are required" });
       const updated = await storage.updateChauffeur(chauffeur.id, { lat, lng, locationUpdatedAt: new Date() });
+      const activeRide = (await storage.getRidesByChauffeur(chauffeur.id)).find((ride) =>
+        ["chauffeur_assigned", "chauffeur_arriving", "chauffeur_arrived", "trip_started"].includes(ride.status),
+      );
+      if (activeRide) {
+        const last = await pool.query(
+          "SELECT latitude, longitude FROM ride_location_samples WHERE ride_id = $1 ORDER BY recorded_at DESC LIMIT 1",
+          [activeRide.id],
+        );
+        const previous = last.rows[0];
+        const travelledKm = previous ? haversine(Number(previous.latitude), Number(previous.longitude), lat, lng) : 0;
+        await pool.query(
+          "INSERT INTO ride_location_samples (ride_id, chauffeur_id, latitude, longitude) VALUES ($1, $2, $3, $4)",
+          [activeRide.id, chauffeur.id, lat, lng],
+        );
+        if (travelledKm > 0 && travelledKm < 5) {
+          await storage.updateRide(activeRide.id, { actualDistanceKm: Number(activeRide.actualDistanceKm || 0) + travelledKm });
+        }
+      }
       return res.json(updated);
     } catch (error: any) {
       return res.status(400).json({ message: error.message || "Unable to update location" });
@@ -6482,10 +6500,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             arrived: !!existingRide.arrivedAt,
           })
         : null;
+      const finalEstimate = status === "trip_completed"
+        ? calculatePrice(Number(existingRide.actualDistanceKm || existingRide.distanceKm || 0), existingRide.vehicleType || "budget", {
+            demandMultiplier: Number(existingRide.demandMultiplier || 1),
+          })
+        : null;
 
       const ride = await storage.updateRide(req.params.id, {
         status,
         ...(status === "trip_completed" ? { completedAt: new Date() } : {}),
+        ...(finalEstimate ? { price: finalEstimate.totalPrice, finalFare: finalEstimate.totalPrice, settlementStatus: "finalised" } : {}),
         ...(status === "chauffeur_arriving" && isChauffeur && !existingRide.pickupTravelStartedAt ? { pickupTravelStartedAt: now } : {}),
         ...(status === "chauffeur_arrived" && isChauffeur ? { arrivedAt: now } : {}),
         ...(cancellation ? { waitingFee, cancellationFee: cancellation.feeCents / 100, finalFare: cancellation.feeCents / 100, settlementStatus: cancellation.feeCents > 0 ? "cancellation_due" : "cancelled" } : {}),
