@@ -53,6 +53,16 @@ export function reconcileDriverProfileStatus(options: {
   return options.profileStatus;
 }
 
+export function resolveOperatorSubmissionStatus(options: {
+  existingStatus?: string | null;
+  requestedStatus?: string | null;
+}): string {
+  const existingStatus = String(options.existingStatus || "").trim();
+  const requestedStatus = String(options.requestedStatus || "").trim();
+  if (existingStatus === "approved" && requestedStatus === "pending") return "approved";
+  return requestedStatus || existingStatus || "pending";
+}
+
 export function isValidLocationSample(lat: number, lng: number): boolean {
   return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 }

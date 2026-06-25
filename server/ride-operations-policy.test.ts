@@ -6,6 +6,7 @@ import {
   calculateRiderCancellationFee,
   calculateWaitingFee,
   reconcileDriverProfileStatus,
+  resolveOperatorSubmissionStatus,
   resolveCancellation,
   isValidLocationSample,
 } from "./ride-operations-policy";
@@ -36,6 +37,12 @@ test("charges the selected vehicle base fare only after three driving minutes", 
 test("reconciles only an approved driver's stale operator profile", () => {
   assert.equal(reconcileDriverProfileStatus({ profileType: "driver", profileStatus: "pending", chauffeurApproved: true }), "approved");
   assert.equal(reconcileDriverProfileStatus({ profileType: "partner", profileStatus: "pending", chauffeurApproved: true }), "pending");
+});
+
+test("keeps approved operator profiles approved when profile details are resubmitted", () => {
+  assert.equal(resolveOperatorSubmissionStatus({ existingStatus: "approved", requestedStatus: "pending" }), "approved");
+  assert.equal(resolveOperatorSubmissionStatus({ existingStatus: "pending", requestedStatus: "pending" }), "pending");
+  assert.equal(resolveOperatorSubmissionStatus({ existingStatus: "rejected", requestedStatus: "pending" }), "pending");
 });
 
 test("charges a rider but never a driver for an eligible cancellation", () => {

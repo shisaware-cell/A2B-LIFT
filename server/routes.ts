@@ -18,7 +18,14 @@ import {
 import { authOptional, requireAuth, requireRole, type AuthedRequest } from "./auth-middleware";
 import { signAccessToken, type UserRole } from "./auth";
 import { externalApiService } from "./external-api-service";
-import { calculateDemandMultiplier, calculateWaitingFee, isValidLocationSample, reconcileDriverProfileStatus, resolveCancellation } from "./ride-operations-policy";
+import {
+  calculateDemandMultiplier,
+  calculateWaitingFee,
+  isValidLocationSample,
+  reconcileDriverProfileStatus,
+  resolveCancellation,
+  resolveOperatorSubmissionStatus,
+} from "./ride-operations-policy";
 import { validateAdminPassword } from "./admin-password-policy";
 import { getReleaseFingerprint } from "./release-info";
 
@@ -3227,7 +3234,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         throw new Error(`This account is already registered as a ${existing.type}`);
       }
       return storage.updateOperatorProfile(existing.id, {
-        status: options.status || existing.status,
+        status: resolveOperatorSubmissionStatus({
+          existingStatus: existing.status,
+          requestedStatus: options.status,
+        }),
         submittedAt: new Date(),
       });
     }
@@ -3237,6 +3247,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       type: options.type,
       status: options.status || "pending",
       submittedAt: new Date(),
+    });
+  }
+
+  async function syncDriverOperatorReview(options: {
+    userId?: string | null;
+    status: string;
+    adminId?: string | null;
+    reason?: string | null;
+  }) {
+    const userId = String(options.userId || "").trim();
+    if (!userId) return null;
+
+    const existing = await storage.getOperatorProfileByUserId(userId).catch(() => undefined);
+    const reviewUpdate = {
+      status: options.status,
+      rejectionReason: options.status === "rejected" || options.status === "waitlisted"
+        ? String(options.reason || "").trim() || null
+        : null,
+      reviewedAt: new Date(),
+      reviewerAdminId: options.adminId || null,
+    };
+
+    if (existing) {
+      if (existing.type !== "driver") return existing;
+      return storage.updateOperatorProfile(existing.id, reviewUpdate);
+    }
+
+    return storage.createOperatorProfile({
+      userId,
+      type: "driver",
+      submittedAt: new Date(),
+      ...reviewUpdate,
     });
   }
 
@@ -4486,6 +4528,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
       await storage.updateChauffeur(req.params.id, { isApproved: true });
       if (chauffeur.userId) {
+        await syncDriverOperatorReview({
+          userId: chauffeur.userId,
+          status: "approved",
+          adminId: req.auth!.sub,
+        });
         await notifyUserEvent({
           userId: chauffeur.userId,
           type: "approval",
@@ -4528,6 +4575,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
       await storage.updateChauffeur(req.params.id, { isApproved: false });
       if (chauffeur.userId) {
+        await syncDriverOperatorReview({
+          userId: chauffeur.userId,
+          status: "rejected",
+          adminId: req.auth!.sub,
+          reason: reason.trim(),
+        });
         await notifyUserEvent({
           userId: chauffeur.userId,
           type: "rejection",
@@ -4560,6 +4613,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
       await storage.updateChauffeur(req.params.id, { isApproved: false, isOnline: false });
       if (chauffeur.userId) {
+        await syncDriverOperatorReview({
+          userId: chauffeur.userId,
+          status: "waitlisted",
+          adminId: req.auth!.sub,
+          reason: reason.trim(),
+        });
         const app = await storage.getDriverApplicationByUserId(chauffeur.userId);
         if (app) {
           await storage.updateDriverApplication(app.id, {
@@ -4597,6 +4656,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
       await storage.updateChauffeur(req.params.id, { isApproved: true, isOnline: false });
       if (chauffeur.userId) {
+        await syncDriverOperatorReview({
+          userId: chauffeur.userId,
+          status: "approved",
+          adminId: req.auth!.sub,
+        });
         const app = await storage.getDriverApplicationByUserId(chauffeur.userId);
         if (app) {
           await storage.updateDriverApplication(app.id, {
@@ -5571,15 +5635,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await storage.updateChauffeur(updated.chauffeurId, { isApproved: false, isOnline: false });
         }
       }
-      const profile = await storage.getOperatorProfileByUserId(updated.userId).catch(() => undefined);
-      if (profile?.type === "driver") {
-        await storage.updateOperatorProfile(profile.id, {
-          status,
-          rejectionReason: status === "rejected" || status === "waitlisted" ? String(notes || "").trim() : null,
-          reviewedAt: new Date(),
-          reviewerAdminId: req.auth!.sub,
-        });
-      }
+      const profile = await syncDriverOperatorReview({
+        userId: updated.userId,
+        status,
+        adminId: req.auth!.sub,
+        reason: notes,
+      });
       if (status === "approved" || status === "rejected" || status === "waitlisted") {
         await notifyUserEvent({
           userId: updated.userId,
