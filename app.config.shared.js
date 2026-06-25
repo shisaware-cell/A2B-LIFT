@@ -10,7 +10,7 @@ const defaultPamolProjectId = "f282a582-7512-48d6-b563-13aa571d9115";
 const defaultPascalProjectId = "eb3b8747-40b2-4aad-b118-e64339bfeea0";
 const defaultClientProjectId = "9932543b-f023-4dec-8213-5d0fe99ad749";
 const defaultClientSlug = "a2b-lift-client-eas-mFdHJz";
-const currentAndroidVersionCode = 101;
+const currentAndroidVersionCode = 102;
 
 function normalizeAssetPrefix(assetPrefix = ".") {
   return String(assetPrefix || ".").replace(/\/$/, "");
@@ -41,7 +41,7 @@ function getVariantConfig(variant) {
       iosBundleIdentifier: "com.a2blift.client",
       androidPackage: "com.a2blift.client",
       androidVersionCode: currentAndroidVersionCode,
-      iosBuildNumber: "7",
+      iosBuildNumber: "8",
       runtimeVersion: "1.0.0-client",
       notificationChannel: "client-alerts",
     };
@@ -59,7 +59,7 @@ function getVariantConfig(variant) {
     iosBundleIdentifier: "com.a2blift",
     androidPackage: "com.a2blift",
     androidVersionCode: currentAndroidVersionCode,
-    iosBuildNumber: "12",
+    iosBuildNumber: "14",
     runtimeVersion: "1.0.44",
     notificationChannel: "ride-alerts-v3",
     icon: "assets/images/driver-icon.png",
