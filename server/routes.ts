@@ -1322,7 +1322,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Maps helpers — Google Places API only
   // -----------------------------
 
-  const GOOGLE_KEY = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_WEB_SERVICE_API_KEY || "";
+  const GOOGLE_KEY =
+    process.env.GOOGLE_PLACES_API_KEY ||
+    process.env.GOOGLE_MAPS_SERVER_API_KEY ||
+    process.env.GOOGLE_MAPS_WEB_SERVICE_API_KEY ||
+    process.env.GOOGLE_MAPS_API_KEY ||
+    "";
   const NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org";
   const PHOTON_BASE_URL = "https://photon.komoot.io/api";
   const MAPS_USER_AGENT = "A2B-LIFT/1.0 (support@a2blift.app)";
@@ -1555,6 +1560,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   const ADDRESS_TERM_NORMALIZATIONS: Array<[RegExp, string]> = [
+    [/\bpretoriou+s\b/gi, "Pretorius"],
     [/\bpretorious\b/gi, "Pretorius"],
     [/\bpretoriaus\b/gi, "Pretorius"],
     [/\bst\.?\b/gi, "Street"],

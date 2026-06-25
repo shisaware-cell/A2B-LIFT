@@ -309,6 +309,7 @@ const SIGNIFICANT_LOCATION_SHIFT_KM = 0.03;
 const DRIVER_MARKER_SHIFT_KM = 0.01;
 const AUTOCOMPLETE_DEBOUNCE_MS = 220;
 const ADDRESS_TERM_NORMALIZATIONS: Array<[RegExp, string]> = [
+  [/\bpretoriou+s\b/gi, "Pretorius"],
   [/\bpretorious\b/gi, "Pretorius"],
   [/\bpretoriaus\b/gi, "Pretorius"],
   [/\bst\.?\b/gi, "Street"],
