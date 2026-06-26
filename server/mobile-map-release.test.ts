@@ -7,11 +7,27 @@ import {
   buildGoogleMapsNavigationUrl,
   buildGoogleMapsWebNavigationUrl,
 } from "../lib/google-navigation";
+import { createRequire } from "node:module";
 
 const projectRoot = process.cwd();
+const requireFromProject = createRequire(path.join(projectRoot, "server/mobile-map-release.test.ts"));
 
 function readProjectFile(relativePath: string) {
   return fs.readFileSync(path.join(projectRoot, relativePath), "utf8");
+}
+
+function loadAppConfigWithEnv(env: Record<string, string | undefined>) {
+  const configPath = requireFromProject.resolve("../app.config.shared.js");
+  const previousEnv = { ...process.env };
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  delete requireFromProject.cache[configPath];
+  const config = requireFromProject("../app.config.shared.js");
+  process.env = previousEnv;
+  delete requireFromProject.cache[configPath];
+  return config;
 }
 
 test("uses the Google map provider on every native platform", () => {
@@ -19,6 +35,20 @@ test("uses the Google map provider on every native platform", () => {
 
   assert.match(mapSource, /provider=\{PROVIDER_GOOGLE\}/);
   assert.doesNotMatch(mapSource, /Platform\.OS === "android" \? PROVIDER_GOOGLE : undefined/);
+});
+
+test("uses the iOS Google Maps key for iOS builds even when Android key is present", () => {
+  const config = loadAppConfigWithEnv({
+    MAPS_BUILD_PLATFORM: "ios",
+    APP_VARIANT: "driver",
+    EXPO_PUBLIC_APP_VARIANT: "driver",
+    EXPO_PUBLIC_GOOGLE_MAPS_IOS_API_KEY: "ios-key",
+    EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: "android-key",
+  });
+  const appConfig = config.createMobileAppConfig({ variant: "driver" });
+
+  assert.equal(appConfig.ios.config.googleMapsApiKey, "ios-key");
+  assert.equal(appConfig.extra.googleMapsApiKey, "ios-key");
 });
 
 test("keeps the QR code inside a padded card with room for its copy", () => {

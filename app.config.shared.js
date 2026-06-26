@@ -1,10 +1,21 @@
 const withReactNativeMapsAndroidKey = require("./plugins/withReactNativeMapsAndroidKey");
 
-const googleMapsApiKey =
+const buildPlatform = String(process.env.MAPS_BUILD_PLATFORM || process.env.EAS_BUILD_PLATFORM || "").trim().toLowerCase();
+const googleMapsIosApiKey =
+  process.env.EXPO_PUBLIC_GOOGLE_MAPS_IOS_API_KEY ||
+  process.env.GOOGLE_MAPS_IOS_API_KEY ||
+  "";
+const googleMapsAndroidApiKey =
+  process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY ||
   process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
+  process.env.GOOGLE_MAPS_ANDROID_API_KEY ||
   process.env.GOOGLE_MAPS_API_KEY ||
   process.env.GOOGLE_API_KEY ||
   "";
+const googleMapsApiKey =
+  buildPlatform === "ios"
+    ? googleMapsIosApiKey || googleMapsAndroidApiKey
+    : googleMapsAndroidApiKey || googleMapsIosApiKey;
 
 const defaultPamolProjectId = "f282a582-7512-48d6-b563-13aa571d9115";
 const defaultPascalProjectId = "eb3b8747-40b2-4aad-b118-e64339bfeea0";
