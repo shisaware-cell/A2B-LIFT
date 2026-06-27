@@ -341,7 +341,7 @@ tbody tr:hover { background:#fafaf8; }
         <div class="filter-group">
           <button class="ftab active" onclick="fChauf('all',this)">All</button>
           <button class="ftab" onclick="fChauf('online',this)">Online</button>
-          <button class="ftab" onclick="fChauf('approved',this)">Approved</button>
+          <button class="ftab" onclick="fChauf('approved',this)">Whitelisted</button>
           <button class="ftab" onclick="fChauf('waitlisted',this)">Waitlisted</button>
           <button class="ftab" onclick="fChauf('pending',this)">Pending Approval</button>
         </div>
@@ -742,7 +742,7 @@ function renderFilteredChauf() {
 function chaufStatus(c) {
   const status = c.applicationStatus || (c.isApproved ? 'approved' : 'pending');
   if (status === 'waitlisted') return { label: 'Waitlisted', cls: 'b-waitlisted' };
-  if (c.isApproved || status === 'approved') return { label: 'Approved', cls: 'b-approved' };
+  if (c.isApproved || status === 'approved') return { label: 'Whitelisted', cls: 'b-approved' };
   if (status === 'rejected') return { label: 'Rejected', cls: 'b-rejected' };
   return { label: 'Pending', cls: 'b-pending' };
 }
@@ -769,9 +769,9 @@ function renderChauffeurTable(tableId, data, showActions) {
       <td><span class="badge ${c.isOnline ? 'b-online' : 'b-offline'}">${c.isOnline ? 'Online' : 'Offline'}</span></td>
       <td><span class="badge ${st.cls}">${st.label}</span></td>
       <td><div class="action-cell">
-        ${c.applicationStatus === 'waitlisted' ? `<button class="btn-sm btn-approve" onclick="reactivateChauf('${c.id}')">✓ Reactivate</button>` : ''}
-        ${!c.isApproved && c.applicationStatus !== 'waitlisted' ? `<button class="btn-sm btn-approve" onclick="approveChauf('${c.id}')">✓ Approve</button>` : ''}
-        ${c.applicationStatus !== 'waitlisted' ? `<button class="btn-sm btn-detail" onclick="waitlistChauf('${c.id}')">⏸ Waitlist</button>` : ''}
+        ${c.applicationStatus === 'waitlisted' ? `<button class="btn-sm btn-approve" onclick="reactivateChauf('${c.id}')">✓ Whitelist again</button>` : ''}
+        ${!c.isApproved && c.applicationStatus !== 'waitlisted' ? `<button class="btn-sm btn-approve" onclick="approveChauf('${c.id}')">✓ Whitelist</button>` : ''}
+        ${c.applicationStatus !== 'waitlisted' ? `<button class="btn-sm btn-detail" onclick="waitlistChauf('${c.id}')">⏸ Remove whitelist</button>` : ''}
         ${!c.isApproved && c.applicationStatus !== 'waitlisted' ? `<button class="btn-sm btn-reject" onclick="rejectChauf('${c.id}')">✕ Reject</button>` : ''}
         <button class="btn-sm btn-detail" onclick="chaufDetail('${c.id}')">Details</button>
         <button class="btn-sm btn-detail" onclick="editChauf('${c.id}')">✏ Edit</button>
@@ -794,18 +794,18 @@ function showChauffeurConfirm(id, action) {
   const isWaitlist = action === 'waitlist';
   const isReactivate = action === 'reactivate';
   document.getElementById('m-title').textContent = isApprove
-    ? '✓ Approve Driver'
+    ? '✓ Whitelist Driver'
     : isWaitlist
-      ? '⏸ Waitlist Driver'
+      ? '⏸ Remove Driver From Whitelist'
       : isReactivate
-        ? '✓ Reactivate Driver'
+        ? '✓ Whitelist Driver Again'
         : '✕ Reject Driver';
   document.getElementById('m-sub').textContent = isApprove
-    ? 'Review all details before approving. The driver will be notified immediately.'
+    ? 'Review all details before whitelisting. Whitelisted drivers are allowed to receive trip requests.'
     : isWaitlist
-      ? 'Waitlisted drivers are forced offline and cannot receive trips until reactivated.'
+      ? 'Removing a driver from the whitelist forces them offline and blocks trip requests until they are whitelisted again.'
       : isReactivate
-        ? 'The driver will be restored to approved status but remains offline until they go online.'
+        ? 'The driver will be restored to whitelisted status but remains offline until they go online.'
         : 'Review details and provide a rejection reason. The driver will be notified immediately.';
   document.getElementById('m-body').innerHTML = `
     <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
@@ -824,17 +824,17 @@ function showChauffeurConfirm(id, action) {
       <div class="info-row"><div class="info-label">Capacity</div><div class="info-val">${c.passengerCapacity || 4} passengers · ${c.luggageCapacity || 2} bags</div></div>
       <div class="info-row"><div class="info-label">Registered</div><div class="info-val">${fmt(c.createdAt)}</div></div>
       ${isReject ? `<div style="margin-top:8px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Rejection Reason <span style="color:var(--red)">*</span></label><textarea id="chauf-reject-reason" class="f-input" style="width:100%;min-height:80px;resize:vertical;box-sizing:border-box" placeholder="Explain why this application was not approved…"></textarea></div>` : ''}
-      ${isWaitlist ? `<div style="margin-top:8px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Waitlist Reason <span style="color:var(--red)">*</span></label><textarea id="chauf-waitlist-reason" class="f-input" style="width:100%;min-height:110px;resize:vertical;box-sizing:border-box" placeholder="Example: Your profile has been waitlisted because your rating dropped below the required level, you have been inactive, or retraining is required."></textarea></div>` : ''}
+      ${isWaitlist ? `<div style="margin-top:8px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Reason For Removing Whitelist <span style="color:var(--red)">*</span></label><textarea id="chauf-waitlist-reason" class="f-input" style="width:100%;min-height:110px;resize:vertical;box-sizing:border-box" placeholder="Example: Rating below required level, inactivity, retraining required, document issue, safety concern, or policy review."></textarea></div>` : ''}
     </div>`;
   document.getElementById('m-foot').innerHTML = isApprove
     ? `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
-       <button class="btn-lg btn-green" onclick="doApproveChauf('${id}')">✓ Confirm Approval</button>`
+       <button class="btn-lg btn-green" onclick="doApproveChauf('${id}')">✓ Confirm Whitelist</button>`
     : isWaitlist
       ? `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
-         <button class="btn-lg" style="background:#9a5b00;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer" onclick="doWaitlistChauf('${id}')">⏸ Confirm Waitlist</button>`
+         <button class="btn-lg" style="background:#9a5b00;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer" onclick="doWaitlistChauf('${id}')">⏸ Confirm Removal</button>`
       : isReactivate
         ? `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
-           <button class="btn-lg btn-green" onclick="doReactivateChauf('${id}')">✓ Confirm Reactivation</button>`
+           <button class="btn-lg btn-green" onclick="doReactivateChauf('${id}')">✓ Confirm Whitelist</button>`
         : `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
            <button class="btn-lg" style="background:var(--red);color:#fff;border:none;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer" onclick="doRejectChauf('${id}')">✕ Confirm Rejection</button>`;
   openModal();
@@ -845,7 +845,7 @@ async function doApproveChauf(id) {
   try {
     const res = await apiFetch('/api/chauffeurs/' + id + '/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
     if (!res.ok) throw new Error(await res.text());
-    toast('✅ Chauffeur approved! Notification sent to driver.', 'ok');
+    toast('✅ Driver whitelisted and allowed to receive trips.', 'ok');
     loadChauf();
   } catch(e) { toast('❌ ' + e.message, 'err'); }
 }
@@ -883,7 +883,7 @@ async function doWaitlistChauf(id) {
       body: JSON.stringify({ reason }),
     });
     if (!res.ok) throw new Error(await res.text());
-    toast('⏸ Driver waitlisted and taken offline.', 'ok');
+    toast('⏸ Driver removed from whitelist and taken offline.', 'ok');
     loadChauf(); loadApps();
   } catch(e) { toast('❌ ' + e.message, 'err'); }
 }
@@ -893,7 +893,7 @@ async function doReactivateChauf(id) {
   try {
     const res = await apiFetch('/api/chauffeurs/' + id + '/reactivate', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
     if (!res.ok) throw new Error(await res.text());
-    toast('✅ Driver reactivated.', 'ok');
+    toast('✅ Driver whitelisted again.', 'ok');
     loadChauf(); loadApps();
   } catch(e) { toast('❌ ' + e.message, 'err'); }
 }

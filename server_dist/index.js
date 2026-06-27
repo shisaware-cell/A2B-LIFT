@@ -2312,7 +2312,14 @@ async function registerRoutes(app2) {
       const safeUser = await hydrateAuthUser(user);
       return res.json({ user: safeUser, accessToken: token });
     } catch (error) {
-      return res.status(500).json({ message: error.message });
+      const message = String(error?.message || "");
+      if (error?.code === "28P01" || message.includes("password authentication failed") || message.includes("ENETUNREACH") || message.includes("ECONNREFUSED") || message.includes("timeout")) {
+        console.error("[auth/login] database connection/authentication failed:", message);
+        return res.status(503).json({
+          message: "Authentication service is temporarily unavailable. Please try again shortly."
+        });
+      }
+      return res.status(500).json({ message: "Login failed. Please try again shortly." });
     }
   });
   app2.post("/api/auth/logout", async (_req, res) => {
