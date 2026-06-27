@@ -3718,7 +3718,10 @@ async function registerRoutes(app2) {
   app2.get("/api/users", requireAuth, requireRole(["admin"]), async (_req, res) => {
     try {
       const allUsers = await db2.select().from(users).orderBy((0, import_drizzle_orm4.desc)(users.createdAt));
-      return res.json(allUsers);
+      return res.json(allUsers.map((user) => {
+        const { password: _pw, ...safeUser } = user;
+        return safeUser;
+      }));
     } catch (error) {
       return res.status(500).json({ message: error.message });
     }

@@ -592,7 +592,7 @@ async function doLogout() {
 
 // ── NAV ──
 let curView = 'overview';
-let allChauf = [], allWd = [], allSafe = [], allApps = [], allPartners = [], allVehicles = [], allDocuments = [], allSelfies = [], chaufFilter = 'all', wdFilter = 'all', safeFilter = 'all', appsFilter = 'all', partnersFilter = 'all', vehiclesFilter = 'all', documentsFilter = 'all';
+let allChauf = [], allWd = [], allSafe = [], allApps = [], allPartners = [], allVehicles = [], allDocuments = [], allSelfies = [], allUsers = [], chaufFilter = 'all', wdFilter = 'all', safeFilter = 'all', appsFilter = 'all', partnersFilter = 'all', vehiclesFilter = 'all', documentsFilter = 'all';
 const VIEW_TITLES = { overview:'Dashboard', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', documents:'Document Review', rides:'Rides', payments:'Payments', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users' };
 
 function go(view, el) {
@@ -2051,21 +2051,22 @@ async function loadUsers() {
     const res = await apiFetch('/api/users');
     if (!res.ok) throw new Error(res.status);
     const users = await res.json();
+    allUsers = Array.isArray(users) ? users : [];
     if (!Array.isArray(users) || !users.length) {
       document.getElementById('users-table').innerHTML = emptyState('👤', 'No users yet', 'Registered user accounts will appear here');
       return;
     }
     document.getElementById('users-table').innerHTML = `<table>
-      <thead><tr><th>Name</th><th>Username</th><th>Phone</th><th>Role</th><th>Rating</th><th>Wallet Balance</th><th>Joined</th><th></th></tr></thead>
-      <tbody>${users.map(u => `<tr>
-        <td style="font-weight:600">${u.name || '—'}</td>
-        <td style="color:var(--muted);font-size:13px">@${u.username || '—'}</td>
-        <td>${u.phone || '—'}</td>
-        <td><span class="badge b-${u.role || 'client'}">${u.role || 'client'}</span></td>
+      <thead><tr><th>Name</th><th>Username</th><th>Phone</th><th>Role</th><th>Rating</th><th>Wallet Balance</th><th>Joined</th><th>Actions</th></tr></thead>
+      <tbody>${users.map(u => `<tr onclick="userDetail('${u.id}')" style="cursor:pointer">
+        <td style="font-weight:600">${escapeHtml(u.name || '—')}</td>
+        <td style="color:var(--muted);font-size:13px">@${escapeHtml(u.username || '—')}</td>
+        <td>${escapeHtml(u.phone || '—')}</td>
+        <td><span class="badge b-${u.role || 'client'}">${escapeHtml(u.role || 'client')}</span></td>
         <td>⭐ ${Number(u.rating || 5).toFixed(1)}</td>
         <td style="font-weight:600;color:var(--green)">R ${Number(u.walletBalance || 0).toFixed(2)}</td>
         <td style="font-size:12px">${fmt(u.createdAt)}</td>
-        <td><div class="action-cell"><button class="btn-sm btn-detail" onclick="adminSetPassword('${u.id}','${(u.name||u.username||'this user').replace(/'/g,"\\'")}')">Set password</button>${u.role !== 'admin' ? `<button class="btn-sm btn-delete" onclick="event.stopPropagation();adminDelete('user','${u.id}','${(u.name||u.username||'this user').replace(/'/g,"\\'")}')">🗑</button>` : ''}</div></td>
+        <td><div class="action-cell"><button class="btn-sm btn-detail" onclick="event.stopPropagation();userDetail('${u.id}')">View</button>${u.role !== 'admin' ? `<button class="btn-sm btn-delete" onclick="event.stopPropagation();adminDelete('user','${u.id}','${(u.name||u.username||'this user').replace(/'/g,"\\'")}')">🗑</button>` : ''}</div></td>
       </tr>`).join('')}
       </tbody></table>`;
   } catch(e) {
@@ -2073,18 +2074,34 @@ async function loadUsers() {
   }
 }
 
-function adminSetPassword(id, label) {
-  document.getElementById('m-title').textContent = 'Set user password';
-  document.getElementById('m-sub').textContent = `Set a new password for ${label}. Existing passwords are never displayed.`;
+function userDetail(id) {
+  const u = allUsers.find(item => item.id === id);
+  if (!u) { toast('❌ User not found in current list.', 'err'); return; }
+  const label = u.name || u.username || 'User';
+  document.getElementById('m-title').textContent = label;
+  document.getElementById('m-sub').textContent = `User account · ${u.role || 'client'}`;
   document.getElementById('m-body').innerHTML = `
-    <div class="field" style="margin-top:4px">
+    <div class="info-grid">
+      <div class="info-row"><div class="info-label">Name</div><div class="info-val">${escapeHtml(u.name || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Email / Username</div><div class="info-val">${escapeHtml(u.username || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Phone</div><div class="info-val">${escapeHtml(u.phone || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Role</div><div class="info-val"><span class="badge b-${u.role || 'client'}">${escapeHtml(u.role || 'client')}</span></div></div>
+      <div class="info-row"><div class="info-label">Rating</div><div class="info-val">⭐ ${Number(u.rating || 5).toFixed(1)}</div></div>
+      <div class="info-row"><div class="info-label">Wallet Balance</div><div class="info-val" style="font-weight:700;color:var(--green)">R ${Number(u.walletBalance || 0).toFixed(2)}</div></div>
+      <div class="info-row"><div class="info-label">Joined</div><div class="info-val">${fmtFull(u.createdAt)}</div></div>
+      <div class="info-row"><div class="info-label">User ID</div><div class="info-val" style="font-family:var(--mono);font-size:12px">${escapeHtml(u.id || '—')}</div></div>
+    </div>
+    <div class="notice" style="margin-top:18px">🔐 <span>Set a new password for this user. Current passwords are never displayed.</span></div>
+    <div class="field" style="margin-top:14px">
       <div class="f-label">New password</div>
-      <input id="admin-user-password" class="f-input" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" />
+      <input id="admin-user-password" class="f-input" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" onkeydown="if(event.key==='Enter')saveAdminPassword('${id}')" />
     </div>`;
   document.getElementById('m-foot').innerHTML = `
     <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    ${u.role !== 'admin' ? `<button class="btn-lg btn-delete" onclick="closeModal();adminDelete('user','${u.id}','${(u.name||u.username||'this user').replace(/'/g,"\\'")}')">Delete user</button>` : ''}
     <button class="btn-lg btn-green" onclick="saveAdminPassword('${id}')">Update password</button>`;
   openModal();
+  setTimeout(() => document.getElementById('admin-user-password')?.focus(), 50);
 }
 
 async function saveAdminPassword(id) {

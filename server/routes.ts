@@ -2805,7 +2805,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/users", requireAuth, requireRole(["admin"]), async (_req: AuthedRequest, res: Response) => {
     try {
       const allUsers = await db.select().from(users).orderBy(desc(users.createdAt));
-      return res.json(allUsers);
+      return res.json(allUsers.map((user) => {
+        const { password: _pw, ...safeUser } = user;
+        return safeUser;
+      }));
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
