@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "scripts": {
     "server:dev": "tsx server/index.ts",
-    "server:build": "esbuild server/index.ts --bundle --platform=node --packages=external --outfile=server_dist/index.js",
+    "server:build": "rm -rf server_dist && esbuild server/index.ts --bundle --platform=node --packages=external --outfile=server_dist/index.js",
     "server:prod": "NODE_ENV=production node server_dist/index.js",
     "server:seed-admin": "tsx server/seed-admin.ts",
     "test": "tsx --test server/*.test.ts",
