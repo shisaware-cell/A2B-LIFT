@@ -216,7 +216,7 @@
           try {
             const params = new URLSearchParams({ input: query });
             if (cityOnly) params.set('cityOnly', '1');
-            const res = await fetch(`https://api.a2blift.com/api/places/autocomplete?${params.toString()}`, {
+            const res = await fetch(`https://a2blift.com/api/places/autocomplete?${params.toString()}`, {
               signal: activeController.signal,
             });
             if (!res.ok) return;
@@ -338,7 +338,7 @@
 
       // POST to API so the booking is tracked and admins are notified
       try {
-        const res = await fetch('https://api.a2blift.com/api/airport-transfers/book', {
+        const res = await fetch('https://a2blift.com/api/airport-transfers/book', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
           body: JSON.stringify({ airport: airport.name, destination, date, time, flightNumber, passengers, phone }),

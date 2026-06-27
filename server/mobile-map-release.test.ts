@@ -16,6 +16,16 @@ function readProjectFile(relativePath: string) {
   return fs.readFileSync(path.join(projectRoot, relativePath), "utf8");
 }
 
+function listFilesRecursive(relativePath: string): string[] {
+  const absolutePath = path.join(projectRoot, relativePath);
+  const entries = fs.readdirSync(absolutePath, { withFileTypes: true });
+  return entries.flatMap((entry) => {
+    const entryPath = path.join(relativePath, entry.name);
+    if (entry.isDirectory()) return listFilesRecursive(entryPath);
+    return entryPath;
+  });
+}
+
 function loadAppConfigWithEnv(env: Record<string, string | undefined>) {
   const configPath = requireFromProject.resolve("../app.config.shared.js");
   const previousEnv = { ...process.env };
@@ -49,6 +59,32 @@ test("uses the iOS Google Maps key for iOS builds even when Android key is prese
 
   assert.equal(appConfig.ios.config.googleMapsApiKey, "ios-key");
   assert.equal(appConfig.extra.googleMapsApiKey, "ios-key");
+});
+
+test("uses a2blift.com as the app and website API host", () => {
+  const easConfig = JSON.parse(readProjectFile("eas.json"));
+  for (const [profileName, profile] of Object.entries<any>(easConfig.build)) {
+    assert.equal(
+      profile.env?.EXPO_PUBLIC_DOMAIN,
+      "https://a2blift.com",
+      `${profileName} should call the live a2blift.com backend`,
+    );
+    assert.equal(
+      profile.env?.EXPO_PUBLIC_REFERRAL_BASE_URL,
+      "https://a2blift.com",
+      `${profileName} should keep referral links on a2blift.com`,
+    );
+  }
+
+  const activeFiles = [
+    "app/login.tsx",
+    "app/register.tsx",
+    ...listFilesRecursive("website").filter((file) => /\.(html|js)$/.test(file)),
+  ];
+
+  for (const file of activeFiles) {
+    assert.doesNotMatch(readProjectFile(file), /https:\/\/api\.a2blift\.com/, file);
+  }
 });
 
 test("keeps the QR code inside a padded card with room for its copy", () => {

@@ -13,7 +13,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 WebBrowser.maybeCompleteAuthSession();
 
-const GOOGLE_OAUTH_START = "https://api.a2blift.com/api/auth/google/start";
+const GOOGLE_OAUTH_START = "https://a2blift.com/api/auth/google/start";
 const NEEDS_ROLE_SELECT_KEY = "a2b_needs_role_select";
 const NEEDS_OPERATOR_CHOICE_KEY = "a2b_needs_operator_choice";
 

@@ -2,7 +2,7 @@
 
 // ─── Shared backend-powered address suggestions ───────────────────────────
 (function initSharedAddressAutocomplete() {
-  const API = window.A2B_API_BASE || 'https://api.a2blift.com';
+  const API = window.A2B_API_BASE || 'https://a2blift.com';
   const knownFields = [
     ['airportDestination', {}],
     ['ldFrom', { cityOnly: true }],

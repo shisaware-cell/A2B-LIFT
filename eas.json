@@ -12,7 +12,7 @@
         "APP_VARIANT": "driver",
         "EXPO_PUBLIC_APP_VARIANT": "driver",
         "EXPO_ROUTER_APP_ROOT": "apps/driver-mobile/app",
-        "EXPO_PUBLIC_DOMAIN": "https://api.a2blift.com",
+        "EXPO_PUBLIC_DOMAIN": "https://a2blift.com",
         "EXPO_PUBLIC_REFERRAL_BASE_URL": "https://a2blift.com",
         "EXPO_PUBLIC_SUPABASE_URL": "https://zzwkieiktbhptvgsqerd.supabase.co"
       },
@@ -31,7 +31,7 @@
         "EXPO_PUBLIC_EAS_OWNER": "pamol-digital",
         "EXPO_PUBLIC_EAS_PROJECT_ID": "f282a582-7512-48d6-b563-13aa571d9115",
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDhC2aHuhOQ8ZwuWj2K5XZ5nAElB572-wo",
-        "EXPO_PUBLIC_DOMAIN": "https://api.a2blift.com",
+        "EXPO_PUBLIC_DOMAIN": "https://a2blift.com",
         "EXPO_PUBLIC_REFERRAL_BASE_URL": "https://a2blift.com",
         "EXPO_PUBLIC_SUPABASE_URL": "https://zzwkieiktbhptvgsqerd.supabase.co"
       },
@@ -51,7 +51,7 @@
         "EXPO_PUBLIC_EAS_OWNER": "pascal225",
         "EXPO_PUBLIC_EAS_PROJECT_ID": "eb3b8747-40b2-4aad-b118-e64339bfeea0",
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDhC2aHuhOQ8ZwuWj2K5XZ5nAElB572-wo",
-        "EXPO_PUBLIC_DOMAIN": "https://api.a2blift.com",
+        "EXPO_PUBLIC_DOMAIN": "https://a2blift.com",
         "EXPO_PUBLIC_REFERRAL_BASE_URL": "https://a2blift.com",
         "EXPO_PUBLIC_SUPABASE_URL": "https://zzwkieiktbhptvgsqerd.supabase.co"
       },
@@ -74,7 +74,7 @@
         "EXPO_PUBLIC_EAS_OWNER": "a2bliftclub",
         "EXPO_PUBLIC_EAS_PROJECT_ID": "8ccd04f4-997e-44f6-9a40-bac2550cb75f",
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDhC2aHuhOQ8ZwuWj2K5XZ5nAElB572-wo",
-        "EXPO_PUBLIC_DOMAIN": "https://api.a2blift.com",
+        "EXPO_PUBLIC_DOMAIN": "https://a2blift.com",
         "EXPO_PUBLIC_REFERRAL_BASE_URL": "https://a2blift.com",
         "EXPO_PUBLIC_SUPABASE_URL": "https://zzwkieiktbhptvgsqerd.supabase.co"
       },
@@ -94,7 +94,7 @@
         "EXPO_PUBLIC_EAS_OWNER": "a2bliftclub",
         "EXPO_PUBLIC_EAS_PROJECT_ID": "8ccd04f4-997e-44f6-9a40-bac2550cb75f",
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDhC2aHuhOQ8ZwuWj2K5XZ5nAElB572-wo",
-        "EXPO_PUBLIC_DOMAIN": "https://api.a2blift.com",
+        "EXPO_PUBLIC_DOMAIN": "https://a2blift.com",
         "EXPO_PUBLIC_REFERRAL_BASE_URL": "https://a2blift.com",
         "EXPO_PUBLIC_SUPABASE_URL": "https://zzwkieiktbhptvgsqerd.supabase.co"
       },
@@ -114,7 +114,7 @@
         "EXPO_PUBLIC_EAS_OWNER_CLIENT": "a2bliftclub",
         "EXPO_PUBLIC_EAS_PROJECT_ID_CLIENT": "9932543b-f023-4dec-8213-5d0fe99ad749",
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDhC2aHuhOQ8ZwuWj2K5XZ5nAElB572-wo",
-        "EXPO_PUBLIC_DOMAIN": "https://api.a2blift.com",
+        "EXPO_PUBLIC_DOMAIN": "https://a2blift.com",
         "EXPO_PUBLIC_REFERRAL_BASE_URL": "https://a2blift.com",
         "EXPO_PUBLIC_SUPABASE_URL": "https://zzwkieiktbhptvgsqerd.supabase.co"
       },
@@ -137,7 +137,7 @@
         "EXPO_PUBLIC_EAS_OWNER_CLIENT": "a2bliftclub",
         "EXPO_PUBLIC_EAS_PROJECT_ID_CLIENT": "9932543b-f023-4dec-8213-5d0fe99ad749",
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDhC2aHuhOQ8ZwuWj2K5XZ5nAElB572-wo",
-        "EXPO_PUBLIC_DOMAIN": "https://api.a2blift.com",
+        "EXPO_PUBLIC_DOMAIN": "https://a2blift.com",
         "EXPO_PUBLIC_REFERRAL_BASE_URL": "https://a2blift.com",
         "EXPO_PUBLIC_SUPABASE_URL": "https://zzwkieiktbhptvgsqerd.supabase.co"
       },
@@ -157,7 +157,7 @@
         "EXPO_PUBLIC_EAS_OWNER_CLIENT": "a2bliftclub",
         "EXPO_PUBLIC_EAS_PROJECT_ID_CLIENT": "9932543b-f023-4dec-8213-5d0fe99ad749",
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDhC2aHuhOQ8ZwuWj2K5XZ5nAElB572-wo",
-        "EXPO_PUBLIC_DOMAIN": "https://api.a2blift.com",
+        "EXPO_PUBLIC_DOMAIN": "https://a2blift.com",
         "EXPO_PUBLIC_REFERRAL_BASE_URL": "https://a2blift.com",
         "EXPO_PUBLIC_SUPABASE_URL": "https://zzwkieiktbhptvgsqerd.supabase.co"
       },
@@ -177,7 +177,7 @@
         "EXPO_PUBLIC_EAS_OWNER": "a2bliftclub",
         "EXPO_PUBLIC_EAS_PROJECT_ID": "8ccd04f4-997e-44f6-9a40-bac2550cb75f",
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDhC2aHuhOQ8ZwuWj2K5XZ5nAElB572-wo",
-        "EXPO_PUBLIC_DOMAIN": "https://api.a2blift.com",
+        "EXPO_PUBLIC_DOMAIN": "https://a2blift.com",
         "EXPO_PUBLIC_REFERRAL_BASE_URL": "https://a2blift.com",
         "EXPO_PUBLIC_SUPABASE_URL": "https://zzwkieiktbhptvgsqerd.supabase.co"
       },
