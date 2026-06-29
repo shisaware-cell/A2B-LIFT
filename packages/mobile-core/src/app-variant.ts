@@ -1,10 +1,12 @@
 import Constants from "expo-constants";
+import * as Application from "expo-application";
 import { resolveAppVariant } from "./app-variant-resolver";
 
 export type AppVariant = "mixed" | "driver" | "client";
 
 export function getAppVariant(): AppVariant {
   return resolveAppVariant(
+    Application.applicationId,
     process.env.EXPO_PUBLIC_APP_VARIANT,
     Constants.expoConfig?.extra?.appVariant,
   );
