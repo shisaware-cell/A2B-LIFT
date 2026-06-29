@@ -498,11 +498,15 @@ tbody tr:hover { background:#fafaf8; }
 <div class="toast" id="toast"></div>
 
 <script>
-// Use same-origin only when the admin is served by the API host or local dev.
-// Static Netlify admin deployments must target the Railway API explicitly.
-const PROD_API = 'https://api-production-0783.up.railway.app';
+// Use same-origin when the admin is served by the production API host.
+// Static/legacy admin deployments may still override this in localStorage.
+const PROD_API = 'https://a2blift.com';
 const API = (() => {
   const host = window.location.hostname || '';
+  if (host === 'a2blift.com' || host === 'www.a2blift.com') {
+    localStorage.removeItem('a2b_admin_api_base');
+    return '';
+  }
   if (!host || host === 'localhost' || host === '127.0.0.1' || host.endsWith('.up.railway.app')) {
     return '';
   }
