@@ -13,7 +13,7 @@ export function getApiUrl(): string {
   const domain = process.env.EXPO_PUBLIC_DOMAIN;
 
   if (!domain) {
-    return "https://api-production-0783.up.railway.app/";
+    return "https://a2blift.com/";
   }
 
   // If already a full URL with protocol, use it directly
