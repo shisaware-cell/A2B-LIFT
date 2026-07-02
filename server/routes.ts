@@ -3468,12 +3468,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       storage.getDocumentsByVehicle(vehicle.id).catch(() => []),
       storage.getVehicleAssignments({ vehicleId: vehicle.id }).catch(() => []),
     ]);
-    const owner = ownerProfile ? await serializeOperatorProfile(ownerProfile) : null;
+    const owner = ownerProfile
+      ? await serializeOperatorProfile(ownerProfile).catch((error) => ({
+          ...ownerProfile,
+          serializationWarning: error?.message || "Could not load owner details",
+        }))
+      : null;
     const enrichedAssignments = await Promise.all(assignments.map(async (assignment) => {
       const driverProfile = await storage.getOperatorProfile(assignment.driverOperatorProfileId).catch(() => undefined);
       return {
         ...assignment,
-        driver: driverProfile ? await serializeOperatorProfile(driverProfile) : null,
+        driver: driverProfile
+          ? await serializeOperatorProfile(driverProfile).catch((error) => ({
+              ...driverProfile,
+              serializationWarning: error?.message || "Could not load driver details",
+            }))
+          : null,
       };
     }));
     return { ...vehicle, owner, documents, assignments: enrichedAssignments };
@@ -5504,7 +5514,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const status = typeof req.query.status === "string" ? req.query.status : undefined;
       const vehicles = await storage.getVehicles({ status });
-      return res.json(await Promise.all(vehicles.map(serializeVehicle)));
+      const serialized = await Promise.all(vehicles.map(async (vehicle) => {
+        try {
+          return await serializeVehicle(vehicle);
+        } catch (error: any) {
+          return {
+            ...vehicle,
+            owner: null,
+            documents: [],
+            assignments: [],
+            serializationWarning: error?.message || "Could not load related vehicle details",
+          };
+        }
+      }));
+      return res.json(serialized);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -5541,36 +5564,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
         reviewerAdminId: req.auth!.sub,
       });
       if (status === "approved" && ownerProfile.type === "driver") {
-        const existing = await storage.getActiveVehicleAssignment(vehicle.id, ownerProfile.id);
-        if (!existing) {
-          await storage.createVehicleAssignment({
-            vehicleId: vehicle.id,
-            driverOperatorProfileId: ownerProfile.id,
-            assignedByOperatorProfileId: ownerProfile.id,
-            status: "active",
-          });
+        try {
+          const existing = await storage.getActiveVehicleAssignment(vehicle.id, ownerProfile.id);
+          if (!existing) {
+            await storage.createVehicleAssignment({
+              vehicleId: vehicle.id,
+              driverOperatorProfileId: ownerProfile.id,
+              assignedByOperatorProfileId: ownerProfile.id,
+              status: "active",
+            });
+          }
+        } catch (assignmentError) {
+          console.warn("[admin/vehicles] vehicle approved but self-assignment failed", assignmentError);
         }
       }
       if (status !== "approved") {
-        const activeAssignments = await storage.getVehicleAssignments({ vehicleId: vehicle.id, status: "active" });
-        for (const assignment of activeAssignments) {
-          await storage.updateVehicleAssignment(assignment.id, { status: "removed", removedAt: new Date() });
-          const driverProfile = await storage.getOperatorProfile(assignment.driverOperatorProfileId).catch(() => undefined);
-          if (driverProfile) {
-            const chauffeur = await storage.getChauffeurByUserId(driverProfile.userId).catch(() => undefined);
-            if (chauffeur?.activeVehicleId === vehicle.id) {
-              await storage.updateChauffeur(chauffeur.id, { activeVehicleId: null, isOnline: false });
-            }
-            if (driverProfile.userId !== ownerProfile.userId) {
-              await notifyUserEvent({
-                userId: driverProfile.userId,
-                type: "vehicle_assignment_removed",
-                title: "Vehicle unavailable",
-                body: `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) is no longer available for trips.`,
-                data: { vehicleId: vehicle.id },
-              });
+        try {
+          const activeAssignments = await storage.getVehicleAssignments({ vehicleId: vehicle.id, status: "active" });
+          for (const assignment of activeAssignments) {
+            await storage.updateVehicleAssignment(assignment.id, { status: "removed", removedAt: new Date() });
+            const driverProfile = await storage.getOperatorProfile(assignment.driverOperatorProfileId).catch(() => undefined);
+            if (driverProfile) {
+              const chauffeur = await storage.getChauffeurByUserId(driverProfile.userId).catch(() => undefined);
+              if (chauffeur?.activeVehicleId === vehicle.id) {
+                await storage.updateChauffeur(chauffeur.id, { activeVehicleId: null, isOnline: false });
+              }
+              if (driverProfile.userId !== ownerProfile.userId) {
+                await notifyUserEvent({
+                  userId: driverProfile.userId,
+                  type: "vehicle_assignment_removed",
+                  title: "Vehicle unavailable",
+                  body: `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) is no longer available for trips.`,
+                  data: { vehicleId: vehicle.id },
+                }).catch((notifyError) => {
+                  console.warn("[admin/vehicles] assignment removal notification failed", notifyError);
+                });
+              }
             }
           }
+        } catch (assignmentError) {
+          console.warn("[admin/vehicles] vehicle status updated but assignment cleanup failed", assignmentError);
         }
       }
       await notifyUserEvent({
@@ -5585,6 +5618,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ? `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) was not approved.${reason ? ` Reason: ${reason}.` : ""}`
             : `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) status is now ${status}.`,
         data: { vehicleId: vehicle.id },
+      }).catch((notifyError) => {
+        console.warn("[admin/vehicles] owner notification failed", notifyError);
       });
       return res.json(await serializeVehicle(updated));
     } catch (error: any) {

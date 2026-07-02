@@ -41,7 +41,7 @@ import A2BMap from "@/components/A2BMap";
 import LivenessCamera, { type LivenessChallenge, type LivenessCaptureResult } from "@/components/LivenessCamera";
 
 const VEHICLE_TYPES = [
-  { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", icon: "car" as const, pricePerKm: 35, baseFare: 200, badge: "most popular" },
+  { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", icon: "car" as const, pricePerKm: 35, baseFare: 200, badge: "recommended" },
   { id: "luxury", name: "Luxury", desc: "BMW 3 Series, Mercedes C Class", icon: "car-sport" as const, pricePerKm: 13, baseFare: 100 },
   { id: "business", name: "Business Class", desc: "BMW 5 Series, Mercedes E Class", icon: "briefcase" as const, pricePerKm: 35, baseFare: 150 },
   { id: "van", name: "Van", desc: "Hyundai H1, Mercedes Vito, Staria", icon: "bus" as const, pricePerKm: 13, baseFare: 120 },
