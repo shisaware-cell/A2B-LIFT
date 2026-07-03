@@ -21,7 +21,7 @@ const defaultPamolProjectId = "f282a582-7512-48d6-b563-13aa571d9115";
 const defaultPascalProjectId = "eb3b8747-40b2-4aad-b118-e64339bfeea0";
 const defaultClientProjectId = "9932543b-f023-4dec-8213-5d0fe99ad749";
 const defaultClientSlug = "a2b-lift-client-eas-mFdHJz";
-const currentAndroidVersionCode = 108;
+const currentAndroidVersionCode = 109;
 
 function normalizeAssetPrefix(assetPrefix = ".") {
   return String(assetPrefix || ".").replace(/\/$/, "");
@@ -46,13 +46,13 @@ function getVariantConfig(variant) {
       owner,
       projectId,
       name: "A2B LIFT",
-      version: "1.0.6",
+      version: "1.0.7",
       slug: process.env.EXPO_PUBLIC_EAS_SLUG_CLIENT || defaultClientSlug,
       scheme: "a2bliftclient",
       iosBundleIdentifier: "com.a2blift.client",
       androidPackage: "com.a2blift.client",
       androidVersionCode: currentAndroidVersionCode,
-      iosBuildNumber: "11",
+      iosBuildNumber: "12",
       runtimeVersion: "1.0.0-client",
       notificationChannel: "client-alerts",
     };

@@ -9,6 +9,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest, getApiUrl } from "@/lib/query-client";
 import Colors from "@/constants/colors";
+import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 
 interface SavedCard {
@@ -166,10 +167,7 @@ export default function ClientWalletScreen() {
         } catch {}
       }, 800);
     } else {
-      // ── Mobile: open auth session that intercepts Paystack's redirect ──
-      // The redirect URL must match what the server set as the Paystack callback.
-      const apiUrl = getApiUrl().replace(/\/$/, "");
-      const redirectUrl = `${apiUrl}/api/payments/webview-callback`;
+      const redirectUrl = Linking.createURL("payments/paystack-callback");
       try {
         const result = await WebBrowser.openAuthSessionAsync(
           authorizationUrl,
@@ -201,7 +199,12 @@ export default function ClientWalletScreen() {
         Alert.alert("Invalid amount", "Minimum top-up is R10"); return;
       }
       const res = await apiRequest("POST", "/api/payments/initialize", {
-        amount, email: user.email || user.username, saveCard: true, rideId: null,
+        amount,
+        email: user.email || user.username,
+        saveCard: true,
+        rideId: null,
+        appVariant: "client",
+        appReturnUrl: Platform.OS === "web" ? null : Linking.createURL("payments/paystack-callback"),
       });
       const data = await res.json();
       if (!data.authorizationUrl) throw new Error(data.message || "Could not initialize payment");
@@ -228,7 +231,13 @@ export default function ClientWalletScreen() {
     setAddCardLoading(true);
     try {
       const res = await apiRequest("POST", "/api/payments/initialize", {
-        amount: 1, email: user.email || user.username, saveCard: true, saveCardOnly: true, rideId: null,
+        amount: 1,
+        email: user.email || user.username,
+        saveCard: true,
+        saveCardOnly: true,
+        rideId: null,
+        appVariant: "client",
+        appReturnUrl: Platform.OS === "web" ? null : Linking.createURL("payments/paystack-callback"),
       });
       const data = await res.json();
       if (!data.authorizationUrl) throw new Error(data.message || "Could not initialize payment");

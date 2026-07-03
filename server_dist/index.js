@@ -7971,10 +7971,37 @@ async function registerRoutes(app2) {
     });
     return balanceAfter;
   }
+  function isAllowedPaystackReturnUrl(rawUrl) {
+    if (typeof rawUrl !== "string" || !rawUrl.trim()) return false;
+    try {
+      const url = new URL(rawUrl);
+      if (["a2bliftclient:", "a2blift:", "exp:", "exps:"].includes(url.protocol)) return true;
+      if (url.protocol === "https:" && ["a2blift.com", "www.a2blift.com"].includes(url.hostname)) return true;
+    } catch {
+      return false;
+    }
+    return false;
+  }
+  function appendPaystackReturnParams(rawUrl, params) {
+    try {
+      const url = new URL(rawUrl);
+      Object.entries(params).forEach(([key, value]) => {
+        if (value) url.searchParams.set(key, value);
+      });
+      return url.toString();
+    } catch {
+      return rawUrl;
+    }
+  }
   app2.get("/api/payments/webview-callback", (req, res) => {
     const reference = req.query.reference || req.query.trxref || "";
-    const appBase = getAppBaseUrl(req);
-    const appReturnUrl = process.env.FRONTEND_URL || "https://peaceful-mousse-459c85.netlify.app";
+    const status = String(req.query.status || "");
+    const appVariant = String(req.query.app || "").toLowerCase();
+    const defaultNativeReturnUrl = appVariant === "driver" ? "a2blift://payments/paystack-callback" : appVariant === "client" ? "a2bliftclient://payments/paystack-callback" : "";
+    const requestedReturnUrl = req.query.returnUrl;
+    const nativeReturnUrl = isAllowedPaystackReturnUrl(requestedReturnUrl) ? requestedReturnUrl : defaultNativeReturnUrl;
+    const nativeAppUrl = nativeReturnUrl ? appendPaystackReturnParams(nativeReturnUrl, { reference, status }) : "";
+    const webFallbackUrl = process.env.FRONTEND_URL || getAppBaseUrl(req) || "https://a2blift.com";
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -8008,11 +8035,12 @@ async function registerRoutes(app2) {
     </style>
   </svg>
   <h2>Payment Complete</h2>
-  <p class="sub">Your payment was processed. You can close this window \u2014 the app will update automatically.</p>
+  <p class="sub" id="status-text">Your payment was processed. Returning to A2B LIFT...</p>
   <button class="btn" id="back-btn" style="display:none" onclick="goBack()">Return to App</button>
   <script>
     var ref = ${JSON.stringify(reference)};
-    var appUrl = ${JSON.stringify(appReturnUrl)};
+    var appUrl = ${JSON.stringify(nativeAppUrl)};
+    var fallbackUrl = ${JSON.stringify(webFallbackUrl)};
     var msg = { type: 'paystack-done', reference: ref };
 
     // 1. Send postMessage to any listening parent/opener (web popup flow)
@@ -8020,17 +8048,21 @@ async function registerRoutes(app2) {
     try { if(window.opener){ window.opener.postMessage(msg,'*'); sent=true; } } catch(e){}
     try { if(window.parent && window.parent!==window){ window.parent.postMessage(msg,'*'); sent=true; } } catch(e){}
 
-    // 2. Attempt to close popup/tab
+    // 2. Native app flow: jump back to the app scheme so AuthSession can resolve.
+    if (appUrl && !appUrl.startsWith('https://')) {
+      setTimeout(function(){ window.location.href = appUrl; }, 250);
+    }
+
+    // 3. Attempt to close popup/tab
     function tryClose() {
       try { window.close(); } catch(e){}
     }
 
-    // 3. If window didn't close (mobile browser / standalone tab), show button after 1.5s
+    // 4. If window didn't close or app return failed, show button after 1.5s
     var closeTimer = setTimeout(tryClose, 800);
     setTimeout(function() {
-      // If we're still here, closing failed \u2014 show the back button
       document.getElementById('back-btn').style.display = 'inline-block';
-      document.getElementById('status').textContent = sent
+      document.getElementById('status-text').textContent = sent
         ? 'App notified. Tap the button if the screen did not update.'
         : 'Tap below to return to the app.';
     }, 1600);
@@ -8039,8 +8071,7 @@ async function registerRoutes(app2) {
       // Try postMessage one more time then close / redirect
       try { if(window.opener){ window.opener.postMessage(msg,'*'); } } catch(e){}
       try { window.close(); } catch(e){}
-      // Redirect as last resort (works for native in-app browser scenarios)
-      setTimeout(function(){ window.location.href = appUrl; }, 300);
+      setTimeout(function(){ window.location.href = appUrl || fallbackUrl; }, 300);
     }
   </script>
 </body>
@@ -8050,7 +8081,7 @@ async function registerRoutes(app2) {
   });
   app2.post("/api/payments/initialize", requireAuth, async (req, res) => {
     try {
-      const { amount, email: clientEmail, rideId, saveCard, saveCardOnly } = req.body;
+      const { amount, email: clientEmail, rideId, saveCard, saveCardOnly, appVariant, appReturnUrl } = req.body;
       const userId = req.auth.sub;
       const reference = `A2B-${Date.now()}-${userId.slice(0, 6)}`;
       const user = await storage.getUser(userId);
@@ -8059,7 +8090,11 @@ async function registerRoutes(app2) {
         return res.status(400).json({ message: "A valid email address is required to process payments. Please update your profile email." });
       }
       const domain = getAppBaseUrl(req);
-      const callbackUrl = `${domain}/api/payments/webview-callback?reference=${reference}`;
+      const callback = new URL(`${domain}/api/payments/webview-callback`);
+      callback.searchParams.set("reference", reference);
+      if (appVariant === "client" || appVariant === "driver") callback.searchParams.set("app", appVariant);
+      if (isAllowedPaystackReturnUrl(appReturnUrl)) callback.searchParams.set("returnUrl", appReturnUrl);
+      const callbackUrl = callback.toString();
       const response = await paystackAPI.post("/transaction/initialize", {
         email,
         amount: Math.round(amount * 100),
