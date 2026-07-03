@@ -38,14 +38,26 @@ const DRIVER_SHARE_MIN_ACTIVE_MONTHS = 3;
 const DRIVER_SHARE_MIN_WEEKLY_TRIPS = 5;
 const DEMAND_PRICING_CAP = 1.5;
 
+// Distance helper used by demand pricing, address ranking, ride matching, and route fallbacks.
+// Keep this module-scoped so top-level helpers and route handlers can call it after bundling.
+function calculateHaversineDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 async function getDemandPricingMultiplier(pickup?: { lat: number; lng: number }) {
   const [allRides, chauffeurs] = await Promise.all([
     storage.getAllRides(),
     storage.getAllChauffeurs(),
   ]);
   return calculateDemandMultiplier({
-    searchingRides: allRides.filter((ride) => ride.status === "searching" && (!pickup || haversine(pickup.lat, pickup.lng, Number(ride.pickupLat), Number(ride.pickupLng)) <= 5)).length + 1,
-    onlineDrivers: chauffeurs.filter((chauffeur) => chauffeur.isApproved && chauffeur.isOnline && (!pickup || (chauffeur.lat != null && chauffeur.lng != null && haversine(pickup.lat, pickup.lng, Number(chauffeur.lat), Number(chauffeur.lng)) <= 10))).length,
+    searchingRides: allRides.filter((ride) => ride.status === "searching" && (!pickup || calculateHaversineDistanceKm(pickup.lat, pickup.lng, Number(ride.pickupLat), Number(ride.pickupLng)) <= 5)).length + 1,
+    onlineDrivers: chauffeurs.filter((chauffeur) => chauffeur.isApproved && chauffeur.isOnline && (!pickup || (chauffeur.lat != null && chauffeur.lng != null && calculateHaversineDistanceKm(pickup.lat, pickup.lng, Number(chauffeur.lat), Number(chauffeur.lng)) <= 10))).length,
     maximum: DEMAND_PRICING_CAP,
   });
 }
@@ -594,17 +606,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(500).json({ message: error.message });
     }
   });
-
-  // Haversine distance in km between two lat/lng points
-  function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
-    const R = 6371;
-    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLng = ((lng2 - lng1) * Math.PI) / 180;
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }
 
   function getUserFirstName(user: { name?: string | null; username?: string | null } | null | undefined, fallback = "Rider"): string {
     const candidates = [user?.name, user?.username]
@@ -1733,7 +1734,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const lower = normalized.toLowerCase();
     const startsWithNumber = /^\d+\s+/.test(lower);
     const bias = lat != null && lng != null ? { lat, lng } : SA_DEFAULT_BIAS;
-    const nearPretoria = haversine(bias.lat, bias.lng, -25.7479, 28.2293) < 130;
+    const nearPretoria = calculateHaversineDistanceKm(bias.lat, bias.lng, -25.7479, 28.2293) < 130;
     const looksPretoriaSpecific = /\bpretorius\b/i.test(normalized) || nearPretoria;
 
     if (!hasLocalityHint(normalized)) {
@@ -1815,7 +1816,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     if (prediction.lat != null && prediction.lng != null) {
       const bias = lat != null && lng != null ? { lat, lng } : SA_DEFAULT_BIAS;
-      const distanceKm = haversine(bias.lat, bias.lng, prediction.lat, prediction.lng);
+      const distanceKm = calculateHaversineDistanceKm(bias.lat, bias.lng, prediction.lat, prediction.lng);
       score += Math.max(0, 35 - distanceKm / 4);
     }
     if (haystack.includes("cape town") && normalizedInput.includes("pretorius")) score -= 12;
@@ -2363,7 +2364,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const starts = cityLower.startsWith(query);
         const includes = cityLower.includes(query);
         if (!starts && !includes) return null;
-        const distanceBoost = bias ? Math.max(0, 10 - haversine(bias.lat, bias.lng, cityLat, cityLng) / 80) : 0;
+        const distanceBoost = bias ? Math.max(0, 10 - calculateHaversineDistanceKm(bias.lat, bias.lng, cityLat, cityLng) / 80) : 0;
         return {
           placeId: `sa-city:${cityLower.replace(/\s+/g, "-")}`,
           description: `${city}, ${province}, South Africa`,
@@ -5955,7 +5956,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           [activeRide.id],
         );
         const previous = last.rows[0];
-        const travelledKm = previous ? haversine(Number(previous.latitude), Number(previous.longitude), lat, lng) : 0;
+        const travelledKm = previous ? calculateHaversineDistanceKm(Number(previous.latitude), Number(previous.longitude), lat, lng) : 0;
         await pool.query(
           "INSERT INTO ride_location_samples (ride_id, chauffeur_id, latitude, longitude) VALUES ($1, $2, $3, $4)",
           [activeRide.id, chauffeur.id, lat, lng],
@@ -6229,7 +6230,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .filter(c => c.isOnline && c.isApproved && hasFreshChauffeurLocation(c))
         .map(c => ({
           ...c,
-          distKm: haversine(pickupLat, pickupLng, Number(c.lat), Number(c.lng)),
+          distKm: calculateHaversineDistanceKm(pickupLat, pickupLng, Number(c.lat), Number(c.lng)),
         }))
         .filter(c => c.distKm <= RIDE_MATCH_RADIUS_KM)
         .sort((a, b) => a.distKm - b.distKm)
@@ -7132,7 +7133,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         candidates = searching
           .map((r) => ({
             ...r,
-            distKm: haversine(
+            distKm: calculateHaversineDistanceKm(
               Number(chauffeur.lat), Number(chauffeur.lng),
               parseFloat(r.pickupLat as any), parseFloat(r.pickupLng as any)
             ),
@@ -7186,7 +7187,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const withDist = searching
           .map((r) => ({
             ...r,
-            distKm: haversine(
+            distKm: calculateHaversineDistanceKm(
               Number(chauffeur.lat), Number(chauffeur.lng),
               parseFloat(r.pickupLat as any), parseFloat(r.pickupLng as any)
             ),
