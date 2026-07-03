@@ -3241,7 +3241,8 @@ async function registerRoutes(app2) {
   }
   async function fetchGoogleAutocompleteNewPredictions(options) {
     const bias = options.hasLocationBias && options.lat !== null && options.lng !== null ? { lat: options.lat, lng: options.lng } : SA_DEFAULT_BIAS;
-    const radius = options.hasLocationBias ? options.cityOnly ? 22e4 : 9e4 : options.cityOnly ? 45e4 : 16e4;
+    const requestedRadius = options.hasLocationBias ? options.cityOnly ? 22e4 : 9e4 : options.cityOnly ? 45e4 : 16e4;
+    const radius = Math.min(requestedRadius, 5e4);
     const body = {
       input: options.input,
       includedRegionCodes: ["za"],

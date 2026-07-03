@@ -2202,9 +2202,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const bias = options.hasLocationBias && options.lat !== null && options.lng !== null
       ? { lat: options.lat, lng: options.lng }
       : SA_DEFAULT_BIAS;
-    const radius = options.hasLocationBias
+    const requestedRadius = options.hasLocationBias
       ? options.cityOnly ? 220000 : 90000
       : options.cityOnly ? 450000 : 160000;
+    const radius = Math.min(requestedRadius, 50000);
     const body: any = {
       input: options.input,
       includedRegionCodes: ["za"],
