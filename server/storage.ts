@@ -818,11 +818,18 @@ export class DatabaseStorage implements IStorage {
   async acceptRideAtomic(rideId: string, chauffeurId: string, vehicleId?: string | null): Promise<Ride | undefined> {
     const [ride] = await db
       .update(rides)
-      .set({ chauffeurId, vehicleId: vehicleId || null, status: "chauffeur_assigned" })
+      .set({
+        chauffeurId,
+        vehicleId: vehicleId || null,
+        status: "chauffeur_assigned",
+        acceptedAt: new Date(),
+      } as any)
       .where(
         and(
           eq(rides.id, rideId),
-          sql`${rides.status} IN ('requested', 'searching')`
+          sql`${rides.status} IN ('requested', 'searching')`,
+          eq(rides.currentOfferedChauffeurId, chauffeurId),
+          sql`${rides.currentOfferExpiresAt} > now()`
         )
       )
       .returning();

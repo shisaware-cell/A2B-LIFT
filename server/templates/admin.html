@@ -1798,12 +1798,23 @@ async function loadRides() {
       return;
     }
     document.getElementById('rides-table').innerHTML = `<table>
-      <thead><tr><th>Pickup</th><th>Dropoff</th><th>Status</th><th>Price</th><th>Payment</th><th>Date</th><th></th></tr></thead>
+      <thead><tr><th>Pickup</th><th>Dropoff</th><th>Category</th><th>Dispatch</th><th>Status</th><th>Price</th><th>Adjustments</th><th>Payment</th><th>Date</th><th></th></tr></thead>
       <tbody>${rides.map(r => `<tr>
         <td style="max-width:180px;font-size:13px">${r.pickupAddress || 'N/A'}</td>
         <td style="max-width:180px;font-size:13px">${r.dropoffAddress || 'N/A'}</td>
+        <td style="font-size:12px;text-transform:capitalize">${r.vehicleType || 'budget'}</td>
+        <td style="font-size:12px">
+          ${r.chauffeurId ? 'Assigned' : r.currentOfferedChauffeurId ? 'Offered' : r.status === 'searching' ? 'Searching' : '—'}
+          ${r.currentOfferExpiresAt ? `<div style="color:var(--muted)">expires ${fmt(r.currentOfferExpiresAt)}</div>` : ''}
+        </td>
         <td><span class="badge ${r.status === 'trip_completed' ? 'b-completed' : r.status === 'cancelled' ? 'b-cancelled' : 'b-pending'}">${r.status || '—'}</span></td>
         <td style="font-weight:700;color:var(--green)">R ${r.price || '—'}</td>
+        <td style="font-size:12px">
+          ${Number(r.surgeMultiplier || 1) > 1 ? `<div>Surge ${Number(r.surgeMultiplier).toFixed(1)}x</div>` : ''}
+          ${Number(r.cancellationFee || 0) > 0 ? `<div>Cancel R ${Number(r.cancellationFee).toFixed(0)}</div>` : ''}
+          ${Number(r.perMinuteAdjustment || 0) > 0 ? `<div>Time R ${Number(r.perMinuteAdjustment).toFixed(0)}</div>` : ''}
+          ${Number(r.surgeMultiplier || 1) <= 1 && !Number(r.cancellationFee || 0) && !Number(r.perMinuteAdjustment || 0) ? '—' : ''}
+        </td>
         <td><span class="badge ${r.paymentStatus === 'paid' ? 'b-paid' : 'b-pending'}">${r.paymentStatus || 'unpaid'}</span></td>
         <td style="font-size:12px">${fmt(r.createdAt)}</td>
         <td><button class="btn-sm btn-delete" onclick="event.stopPropagation();adminDelete('ride','${r.id}','trip from ${(r.pickupAddress||'').slice(0,20).replace(/'/g,"\\'")}')">🗑</button></td>

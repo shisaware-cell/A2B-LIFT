@@ -1,21 +1,18 @@
 const withReactNativeMapsAndroidKey = require("./plugins/withReactNativeMapsAndroidKey");
 
-const buildPlatform = String(process.env.MAPS_BUILD_PLATFORM || process.env.EAS_BUILD_PLATFORM || "").trim().toLowerCase();
-const googleMapsIosApiKey =
-  process.env.EXPO_PUBLIC_GOOGLE_MAPS_IOS_API_KEY ||
-  process.env.GOOGLE_MAPS_IOS_API_KEY ||
-  "";
-const googleMapsAndroidApiKey =
-  process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY ||
+const googleMapsApiKey =
   process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
-  process.env.GOOGLE_MAPS_ANDROID_API_KEY ||
   process.env.GOOGLE_MAPS_API_KEY ||
   process.env.GOOGLE_API_KEY ||
   "";
-const googleMapsApiKey =
-  buildPlatform === "ios"
-    ? googleMapsIosApiKey || googleMapsAndroidApiKey
-    : googleMapsAndroidApiKey || googleMapsIosApiKey;
+const iosGoogleMapsApiKey =
+  process.env.EXPO_PUBLIC_GOOGLE_MAPS_IOS_API_KEY ||
+  process.env.GOOGLE_MAPS_IOS_API_KEY ||
+  googleMapsApiKey;
+const androidGoogleMapsApiKey =
+  process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY ||
+  process.env.GOOGLE_MAPS_ANDROID_API_KEY ||
+  googleMapsApiKey;
 
 const defaultPamolProjectId = "f282a582-7512-48d6-b563-13aa571d9115";
 const defaultPascalProjectId = "eb3b8747-40b2-4aad-b118-e64339bfeea0";
@@ -52,7 +49,7 @@ function getVariantConfig(variant) {
       iosBundleIdentifier: "com.a2blift.client",
       androidPackage: "com.a2blift.client",
       androidVersionCode: currentAndroidVersionCode,
-      iosBuildNumber: "13",
+      iosBuildNumber: "18",
       runtimeVersion: "1.0.0-client",
       notificationChannel: "client-alerts",
     };
@@ -64,13 +61,13 @@ function getVariantConfig(variant) {
     owner,
     projectId: getDriverProjectId(owner),
     name: "A2B DRIVER",
-    version: "1.0.5",
+    version: "1.0.8",
     slug: "a2b-lift",
     scheme: "a2blift",
     iosBundleIdentifier: "com.a2blift",
     androidPackage: "com.a2blift",
     androidVersionCode: currentAndroidVersionCode,
-    iosBuildNumber: "17",
+    iosBuildNumber: "18",
     runtimeVersion: "1.0.44",
     notificationChannel: "ride-alerts-v3",
     icon: "assets/images/driver-icon.png",
@@ -79,12 +76,6 @@ function getVariantConfig(variant) {
 }
 
 function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
-  const declaredBuildVariant = String(process.env.EXPO_PUBLIC_APP_VARIANT || "").trim().toLowerCase();
-  if (declaredBuildVariant && declaredBuildVariant !== variant) {
-    throw new Error(
-      `APP_VARIANT (${variant}) and EXPO_PUBLIC_APP_VARIANT (${declaredBuildVariant}) must match.`,
-    );
-  }
   const config = getVariantConfig(variant);
   const easProjectConfig = config.projectId
     ? {
@@ -98,7 +89,7 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
     name: config.name,
     slug: config.slug,
     owner: config.owner,
-    version: config.version || "1.0.0",
+    version: "1.0.8",
     orientation: "portrait",
     icon: assetPath(assetPrefix, config.icon || "assets/images/icon.png"),
     scheme: config.scheme,
@@ -121,10 +112,9 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
         NSPhotoLibraryAddUsageDescription: "A2B LIFT saves trip-related photos to your library.",
         ITSAppUsesNonExemptEncryption: false,
         UIBackgroundModes: ["location", "fetch"],
-        LSApplicationQueriesSchemes: ["comgooglemaps"],
       },
       config: {
-        googleMapsApiKey,
+        googleMapsApiKey: iosGoogleMapsApiKey,
       },
       privacyManifests: {
         NSPrivacyAccessedAPITypes: [
@@ -155,7 +145,7 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
       ],
       config: {
         googleMaps: {
-          apiKey: googleMapsApiKey,
+          apiKey: androidGoogleMapsApiKey,
         },
       },
     },
@@ -174,7 +164,6 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
             targetSdkVersion: 35,
             minSdkVersion: 24,
             ndkVersion: "27.1.12297006",
-            useLegacyPackaging: false,
             buildArchs: ["armeabi-v7a", "arm64-v8a", "x86", "x86_64"],
           },
         },
@@ -213,8 +202,9 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
     extra: {
       ...easProjectConfig,
       appVariant: config.variant,
-      releaseIdentity: `${config.variant}:${config.iosBundleIdentifier}`,
       googleMapsApiKey,
+      iosGoogleMapsApiKey,
+      androidGoogleMapsApiKey,
     },
     runtimeVersion: config.runtimeVersion,
     ...(config.projectId

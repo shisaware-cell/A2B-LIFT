@@ -121,8 +121,12 @@ interface RouteChoice extends DirectionRoute {
   baseFare: number;
   pricePerKm: number;
   lateNightPremium: number;
-  demandMultiplier: number;
   currency: string;
+  surgeMultiplier?: number;
+  surgeReason?: string | null;
+  highDemand?: boolean;
+  surgeAmount?: number;
+  perMinuteRate?: number;
 }
 
 interface AutocompleteDebugEntry {
@@ -1577,7 +1581,7 @@ export default function ClientHomeScreen() {
         }).catch(() => {});
       }
       if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else if (ride.status === "chauffeur_arriving" || ride.status === "chauffeur_arrived") {
+    } else if (ride.status === "chauffeur_arriving") {
       setRideStatus("arriving");
     } else if (ride.status === "trip_started") {
       setRideStatus("in_trip");
@@ -1773,6 +1777,9 @@ export default function ClientHomeScreen() {
             distanceKm: route.distanceKm,
             categoryId: selectedVehicle.id,
             isLateNight: lateNightRide,
+            pickupLat: origin.lat,
+            pickupLng: origin.lng,
+            durationMin: route.durationMin,
           });
           const estimate = await estimateRes.json();
           return {
@@ -1786,8 +1793,12 @@ export default function ClientHomeScreen() {
             baseFare: Number(estimate.baseFare ?? fallbackEstimate.baseFare),
             pricePerKm: Number(estimate.pricePerKm ?? fallbackEstimate.pricePerKm),
             lateNightPremium: Number(estimate.lateNightPremium ?? fallbackEstimate.lateNightPremium),
-            demandMultiplier: Number(estimate.demandMultiplier ?? 1),
             currency: estimate.currency || fallbackEstimate.currency,
+            surgeMultiplier: Number(estimate.surgeMultiplier || 1),
+            surgeReason: estimate.surgeReason || null,
+            highDemand: !!estimate.highDemand,
+            surgeAmount: Number(estimate.surgeAmount || 0),
+            perMinuteRate: Number(estimate.perMinuteRate || 1),
           } as RouteChoice;
         } catch {
           return {
@@ -1801,7 +1812,6 @@ export default function ClientHomeScreen() {
             baseFare: fallbackEstimate.baseFare,
             pricePerKm: fallbackEstimate.pricePerKm,
             lateNightPremium: fallbackEstimate.lateNightPremium,
-            demandMultiplier: 1,
             currency: fallbackEstimate.currency,
           } as RouteChoice;
         }
@@ -2115,6 +2125,16 @@ export default function ClientHomeScreen() {
     setEtaText(null);
   }
 
+  function getCancellationWarningText() {
+    const acceptedAt = currentRide?.acceptedAt ? new Date(currentRide.acceptedAt).getTime() : null;
+    const elapsedMin = acceptedAt ? (Date.now() - acceptedAt) / 60000 : 0;
+    const baseFare = Number(currentRide?.baseFare || selectedRouteChoice?.baseFare || selectedVehicle.baseFare || 0);
+    if (acceptedAt && elapsedMin >= 3 && baseFare > 0) {
+      return `The driver has already been assigned for more than 3 minutes. Cancelling now may charge the base fare of R ${baseFare}.`;
+    }
+    return "Are you sure you want to cancel this ride?";
+  }
+
   async function submitRating() {
     if (!currentRide || rating === 0) {
       Alert.alert("Rating Required", "Please select a rating");
@@ -2278,9 +2298,6 @@ export default function ClientHomeScreen() {
                 <Text style={styles.liveEtaUnit}>min</Text>
               </View>
             </View>
-            {currentRide?.status === "chauffeur_arrived" && (
-              <Text style={styles.waitingNotice}>Your driver has arrived. Waiting is free for 5 minutes, then R1 per minute up to R30.</Text>
-            )}
             {/* Progress bar track */}
             <View style={styles.liveProgressTrack}>
               <View style={[
@@ -2421,12 +2438,16 @@ export default function ClientHomeScreen() {
                   </View>
                 </View>
               ) : null}
-              {Number(selectedRouteChoice?.demandMultiplier || 1) > 1 && (
-                <View style={styles.highDemandBadge}>
-                  <Ionicons name="trending-up" size={14} color={Colors.warning} />
-                  <Text style={styles.highDemandBadgeText}>High demand pricing</Text>
+              {selectedRouteChoice?.highDemand ? (
+                <View style={styles.estimateBadgeRow}>
+                  <View style={[styles.estimateBadge, { backgroundColor: "rgba(245, 158, 11, 0.16)" }]}>
+                    <Ionicons name="flash" size={14} color={Colors.warning} />
+                    <Text style={[styles.estimateBadgeText, { color: Colors.warning }]}>
+                      High demand {selectedRouteChoice.surgeMultiplier?.toFixed(1)}x
+                    </Text>
+                  </View>
                 </View>
-              )}
+              ) : null}
             </View>
 
             {routeChoices.length > 0 && (
@@ -2478,12 +2499,16 @@ export default function ClientHomeScreen() {
                   <Text style={styles.fareValue}>R {lateNightPremium}</Text>
                 </View>
               )}
-              {Number(selectedRouteChoice?.demandMultiplier || 1) > 1 && (
+              {selectedRouteChoice?.highDemand && (
                 <View style={styles.fareRow}>
-                  <Text style={styles.fareLabel}>High demand multiplier</Text>
-                  <Text style={styles.fareValue}>× {selectedRouteChoice?.demandMultiplier.toFixed(2)}</Text>
+                  <Text style={styles.fareLabel}>{selectedRouteChoice.surgeReason || "High demand surcharge"}</Text>
+                  <Text style={styles.fareValue}>R {Math.round(selectedRouteChoice.surgeAmount || 0)}</Text>
                 </View>
               )}
+              <View style={styles.fareRow}>
+                <Text style={styles.fareLabel}>Traffic adjustment after estimate</Text>
+                <Text style={styles.fareValue}>R {selectedRouteChoice?.perMinuteRate || 1}/min extra</Text>
+              </View>
             </View>
 
             <View style={styles.routeSummary}>
@@ -2663,7 +2688,7 @@ export default function ClientHomeScreen() {
                     cancelRide();
                   }
                 } else {
-                  Alert.alert("Cancel Ride", "Are you sure you want to cancel?", [
+                  Alert.alert("Cancel Ride", getCancellationWarningText(), [
                     { text: "Keep Ride", style: "cancel" },
                     { text: "Cancel Ride", style: "destructive", onPress: cancelRide },
                   ]);
@@ -2684,14 +2709,11 @@ export default function ClientHomeScreen() {
               <Ionicons name="checkmark" size={32} color={Colors.white} />
             </View>
             <Text style={styles.completedTitle}>Trip Completed</Text>
-            <Text style={styles.completedPrice}>R {currentRide?.finalFare ?? currentRide?.price ?? estimatedPrice}</Text>
-            {currentRide?.quotedFare != null && currentRide?.finalFare != null && Number(currentRide.quotedFare) !== Number(currentRide.finalFare) && (
-              <View style={styles.settlementCard}>
-                <View style={styles.settlementRow}><Text style={styles.settlementLabel}>Quoted fare</Text><Text style={styles.settlementValue}>R {Number(currentRide.quotedFare).toFixed(2)}</Text></View>
-                {Number(currentRide.waitingFee || 0) > 0 && <View style={styles.settlementRow}><Text style={styles.settlementLabel}>Waiting time</Text><Text style={styles.settlementValue}>R {Number(currentRide.waitingFee).toFixed(2)}</Text></View>}
-                <View style={styles.settlementRow}><Text style={styles.settlementLabel}>Final fare</Text><Text style={styles.settlementValue}>R {Number(currentRide.finalFare).toFixed(2)}</Text></View>
-                <Text style={styles.settlementNote}>{Number(currentRide.finalFare) > Number(currentRide.quotedFare) ? "Your saved card was charged only for the difference." : "The lower final fare has been refunded to your original payment method."}</Text>
-              </View>
+            <Text style={styles.completedPrice}>R {currentRide?.price || estimatedPrice}</Text>
+            {Number(currentRide?.perMinuteAdjustment || 0) > 0 && (
+              <Text style={styles.completedLabel}>
+                Includes R {Math.round(Number(currentRide.perMinuteAdjustment))} traffic time adjustment.
+              </Text>
             )}
             <Text style={styles.completedLabel}>Thank you for riding with A2B LIFT</Text>
           </View>
@@ -3830,22 +3852,6 @@ const styles = StyleSheet.create({
   routeChoiceFareSelected: {
     color: Colors.white,
   },
-  highDemandBadge: {
-    marginTop: 10,
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: "rgba(255,193,7,0.14)",
-  },
-  highDemandBadgeText: {
-    color: Colors.warning,
-    fontFamily: "Inter_700Bold",
-    fontSize: 12,
-  },
   fareBreakdown: {
     backgroundColor: Colors.surface,
     borderRadius: 12,
@@ -4721,19 +4727,6 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     color: Colors.white,
   },
-  settlementCard: {
-    width: "100%",
-    gap: 8,
-    marginTop: 8,
-    borderRadius: 12,
-    padding: 12,
-    backgroundColor: Colors.surface,
-  },
-  settlementRow: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
-  settlementLabel: { color: Colors.textSecondary, fontFamily: "Inter_400Regular", fontSize: 13 },
-  settlementValue: { color: Colors.white, fontFamily: "Inter_700Bold", fontSize: 13 },
-  settlementNote: { color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 12, lineHeight: 17, marginTop: 2 },
-  waitingNotice: { color: Colors.warning, fontFamily: "Inter_600SemiBold", fontSize: 12, lineHeight: 17, textAlign: "center", marginTop: 4 },
   completedLabel: {
     fontSize: 13,
     fontFamily: "Inter_400Regular",

@@ -11,6 +11,9 @@ const PRICING_CONFIG = {
   commissionRate: 0.25,
   platformFeeRate: 0.2,
   driverAnnualShareRate: 0.05,
+  maxSurgeMultiplier: 5,
+  perMinuteAdjustmentRate: 1,
+  cancellationGracePeriodMin: 3,
 };
 
 export interface PriceEstimate {
@@ -22,7 +25,45 @@ export interface PriceEstimate {
   category: string;
   currency: string;
   lateNightPremium: number;
-  demandMultiplier: number;
+  surgeMultiplier: number;
+  surgeAmount: number;
+  surgeReason: string | null;
+  highDemand: boolean;
+  estimatedDurationMin: number | null;
+  perMinuteRate: number;
+}
+
+export interface SurgeInput {
+  activeRequests: number;
+  eligibleDrivers: number;
+}
+
+export interface SurgeDetails {
+  multiplier: number;
+  reason: string | null;
+  highDemand: boolean;
+}
+
+export function calculateSurgeMultiplier(input: SurgeInput): SurgeDetails {
+  const activeRequests = Math.max(0, Math.floor(Number(input.activeRequests) || 0));
+  const eligibleDrivers = Math.max(0, Math.floor(Number(input.eligibleDrivers) || 0));
+
+  if (activeRequests <= 0 || activeRequests <= eligibleDrivers) {
+    return { multiplier: 1, reason: null, highDemand: false };
+  }
+
+  const driverCount = Math.max(eligibleDrivers, 1);
+  const rawMultiplier = activeRequests / driverCount;
+  const multiplier = Math.min(
+    PRICING_CONFIG.maxSurgeMultiplier,
+    Math.max(1, Math.ceil(rawMultiplier * 10) / 10),
+  );
+
+  return {
+    multiplier,
+    reason: "High demand: more ride requests than nearby matching cars",
+    highDemand: multiplier > 1,
+  };
 }
 
 export function calculatePrice(
@@ -30,7 +71,9 @@ export function calculatePrice(
   categoryId: string,
   options?: {
     isLateNight?: boolean;
-    demandMultiplier?: number;
+    surgeMultiplier?: number;
+    surgeReason?: string | null;
+    estimatedDurationMin?: number | null;
   }
 ): PriceEstimate {
   const category = VEHICLE_CATEGORIES[categoryId] || VEHICLE_CATEGORIES.budget;
@@ -45,9 +88,13 @@ export function calculatePrice(
     subtotal += lateNightPremium;
   }
 
-  const demandMultiplier = Math.max(1, Number(options?.demandMultiplier || 1));
-  const demandPremium = subtotal * (demandMultiplier - 1);
-  subtotal += demandPremium;
+  const requestedSurge = Number(options?.surgeMultiplier ?? 1);
+  const surgeMultiplier = Math.min(
+    PRICING_CONFIG.maxSurgeMultiplier,
+    Math.max(1, Number.isFinite(requestedSurge) ? requestedSurge : 1),
+  );
+  const surgeAmount = subtotal * (surgeMultiplier - 1);
+  subtotal += surgeAmount;
 
   return {
     baseFare: Math.round(baseFare),
@@ -58,8 +105,59 @@ export function calculatePrice(
     category: category.name,
     currency: "ZAR",
     lateNightPremium: Math.round(lateNightPremium),
-    demandMultiplier,
+    surgeMultiplier,
+    surgeAmount: Math.round(surgeAmount),
+    surgeReason: surgeMultiplier > 1 ? options?.surgeReason || "High demand" : null,
+    highDemand: surgeMultiplier > 1,
+    estimatedDurationMin:
+      typeof options?.estimatedDurationMin === "number"
+        ? Math.max(0, Math.round(options.estimatedDurationMin * 10) / 10)
+        : null,
+    perMinuteRate: PRICING_CONFIG.perMinuteAdjustmentRate,
   };
+}
+
+export function calculatePerMinuteAdjustment(
+  estimatedDurationMin?: number | null,
+  actualDurationMin?: number | null,
+  ratePerMinute = PRICING_CONFIG.perMinuteAdjustmentRate,
+) {
+  const estimated = Number(estimatedDurationMin);
+  const actual = Number(actualDurationMin);
+  const extraMinutes =
+    Number.isFinite(estimated) && Number.isFinite(actual)
+      ? Math.max(0, Math.ceil(actual - estimated))
+      : 0;
+
+  return {
+    extraMinutes,
+    adjustmentAmount: Math.round(extraMinutes * Math.max(0, ratePerMinute)),
+    ratePerMinute: Math.max(0, ratePerMinute),
+  };
+}
+
+export function calculateCancellationFee(
+  categoryId: string,
+  acceptedAt?: Date | string | null,
+  cancelledAt: Date | string = new Date(),
+  cancelledBy: "client" | "driver" | "admin" | string = "client",
+) {
+  if (cancelledBy !== "client" || !acceptedAt) {
+    return { fee: 0, eligible: false, elapsedMinutes: 0 };
+  }
+
+  const accepted = new Date(acceptedAt).getTime();
+  const cancelled = new Date(cancelledAt).getTime();
+  const elapsedMinutes = Number.isFinite(accepted) && Number.isFinite(cancelled)
+    ? Math.max(0, (cancelled - accepted) / 60000)
+    : 0;
+
+  if (elapsedMinutes < PRICING_CONFIG.cancellationGracePeriodMin) {
+    return { fee: 0, eligible: false, elapsedMinutes };
+  }
+
+  const category = VEHICLE_CATEGORIES[categoryId] || VEHICLE_CATEGORIES.budget;
+  return { fee: Math.round(category.baseFare), eligible: true, elapsedMinutes };
 }
 
 export function calculateChauffeurEarnings(totalPrice: number) {

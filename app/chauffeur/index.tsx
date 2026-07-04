@@ -161,6 +161,7 @@ export default function ChauffeurDashboard() {
   const [loading, setLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(false);
   const [incomingRide, setIncomingRide] = useState<any>(null);
+  const [incomingOfferSeconds, setIncomingOfferSeconds] = useState<number>(45);
   const [currentRide, setCurrentRide] = useState<any>(null);
   const [locationInterval, setLocationIntervalId] = useState<any>(null);
   const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -586,6 +587,26 @@ export default function ChauffeurDashboard() {
     }
   }, [incomingRide]);
 
+  useEffect(() => {
+    if (!incomingRide?.currentOfferExpiresAt) {
+      setIncomingOfferSeconds(45);
+      return;
+    }
+
+    const updateCountdown = () => {
+      const remaining = Math.max(0, Math.ceil((new Date(incomingRide.currentOfferExpiresAt).getTime() - Date.now()) / 1000));
+      setIncomingOfferSeconds(remaining);
+      if (remaining <= 0) {
+        suppressRideAlert(incomingRide.id);
+        stopTripAlert();
+        setIncomingRide(null);
+      }
+    };
+    updateCountdown();
+    const timer = setInterval(updateCountdown, 1000);
+    return () => clearInterval(timer);
+  }, [incomingRide?.id, incomingRide?.currentOfferExpiresAt]);
+
   // ─── Unread notifications ────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
@@ -606,6 +627,8 @@ export default function ChauffeurDashboard() {
     const handleNewRide = (ride: any) => {
       if (isOnline && chauffeur?.isApproved && !currentRide) {
         if (isRideAlertSuppressed(ride?.id)) return;
+        if (ride?.currentOfferedChauffeurId && ride.currentOfferedChauffeurId !== chauffeur.id) return;
+        if (ride?.currentOfferExpiresAt && new Date(ride.currentOfferExpiresAt).getTime() <= Date.now()) return;
         seenRideIdRef.current = ride.id || null;
         setAvailableTrips((prev) => prev.filter((trip) => trip.id !== ride.id));
         void enrichRideClientDetails(ride, "Client").then((enrichedRide) => {
@@ -1515,7 +1538,13 @@ export default function ChauffeurDashboard() {
   async function updateRideStatus(status: string) {
     if (!currentRide) return;
     try {
-      const res = await apiRequest("PUT", `/api/rides/${currentRide.id}/status`, { status });
+      const actualDurationMin = status === "trip_completed" && currentRide.tripStartedAt
+        ? Math.max(0, (Date.now() - new Date(currentRide.tripStartedAt).getTime()) / 60000)
+        : undefined;
+      const res = await apiRequest("PUT", `/api/rides/${currentRide.id}/status`, {
+        status,
+        ...(actualDurationMin ? { actualDurationMin } : {}),
+      });
       const ride = await res.json();
       const rideWithName = await enrichRideClientDetails({
         ...ride,
@@ -2032,6 +2061,9 @@ export default function ChauffeurDashboard() {
                 </Text>
                 <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
               </Pressable>
+              <View style={styles.offerTimerPill}>
+                <Text style={styles.offerTimerText}>{incomingOfferSeconds}s</Text>
+              </View>
               {getRideFare(incomingRide) ? <Text style={styles.incomingPrice}>R {getRideFare(incomingRide)}</Text> : null}
             </View>
             <View style={styles.addrRow}>
@@ -2385,6 +2417,8 @@ const styles = StyleSheet.create({
   incomingClientButton: { flex: 1, flexDirection: "row", alignItems: "center", gap: 4 },
   incomingTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.warning, flex: 1 },
   incomingPrice: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.white },
+  offerTimerPill: { minWidth: 38, alignItems: "center", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: "rgba(255,183,77,0.16)", borderWidth: 1, borderColor: "rgba(255,183,77,0.32)" },
+  offerTimerText: { fontSize: 11, fontFamily: "Inter_700Bold", color: Colors.warning },
   incomingActions: { flexDirection: "row", gap: 10, marginTop: 2 },
   declineBtn: { width: 52, height: 52, borderRadius: 14, backgroundColor: "rgba(255,77,77,0.1)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,77,77,0.25)" },
   acceptBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: Colors.white, borderRadius: 14, paddingVertical: 14 },

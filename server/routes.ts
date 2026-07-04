@@ -10,24 +10,22 @@ import { users, livenessSessions, rides as ridesTable } from "../shared/schema";
 import { desc, eq, sql } from "drizzle-orm";
 import { uploadLivenessPhoto, getAdminSignedUrl } from "./livenessPhotoService";
 import {
+  calculateCancellationFee,
   calculatePrice,
   calculateChauffeurEarnings,
+  calculatePerMinuteAdjustment,
+  calculateSurgeMultiplier,
   getPricingConfig,
   getVehicleCategories,
 } from "./luxuryPricingEngine";
+import {
+  getRideOfferExpiresAt,
+  isRideOfferActive,
+  isVehicleEligibleForRide,
+} from "./rideOperations";
 import { authOptional, requireAuth, requireRole, type AuthedRequest } from "./auth-middleware";
 import { signAccessToken, type UserRole } from "./auth";
 import { externalApiService } from "./external-api-service";
-import {
-  calculateDemandMultiplier,
-  calculateWaitingFee,
-  isValidLocationSample,
-  reconcileDriverProfileStatus,
-  resolveCancellation,
-  resolveOperatorSubmissionStatus,
-} from "./ride-operations-policy";
-import { validateAdminPassword } from "./admin-password-policy";
-import { getReleaseFingerprint } from "./release-info";
 
 const RIDE_MATCH_RADIUS_KM = 25;
 const CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
@@ -36,7 +34,6 @@ const DRIVER_ANNUAL_SHARE_RATE = 0.05;
 const REFERRAL_REWARD_RATE = 0.025;
 const DRIVER_SHARE_MIN_ACTIVE_MONTHS = 3;
 const DRIVER_SHARE_MIN_WEEKLY_TRIPS = 5;
-const DEMAND_PRICING_CAP = 1.5;
 
 // Distance helper used by demand pricing, address ranking, ride matching, and route fallbacks.
 // Keep this module-scoped so top-level helpers and route handlers can call it after bundling.
@@ -48,18 +45,6 @@ function calculateHaversineDistanceKm(lat1: number, lng1: number, lat2: number, 
     Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-async function getDemandPricingMultiplier(pickup?: { lat: number; lng: number }) {
-  const [allRides, chauffeurs] = await Promise.all([
-    storage.getAllRides(),
-    storage.getAllChauffeurs(),
-  ]);
-  return calculateDemandMultiplier({
-    searchingRides: allRides.filter((ride) => ride.status === "searching" && (!pickup || calculateHaversineDistanceKm(pickup.lat, pickup.lng, Number(ride.pickupLat), Number(ride.pickupLng)) <= 5)).length + 1,
-    onlineDrivers: chauffeurs.filter((chauffeur) => chauffeur.isApproved && chauffeur.isOnline && (!pickup || (chauffeur.lat != null && chauffeur.lng != null && calculateHaversineDistanceKm(pickup.lat, pickup.lng, Number(chauffeur.lat), Number(chauffeur.lng)) <= 10))).length,
-    maximum: DEMAND_PRICING_CAP,
-  });
 }
 
 function getAnnualShareGrossFromEarning(earning: any): number {
@@ -207,7 +192,7 @@ async function sendExpoPushNotification(
         vibrate: urgent ? [0, 250, 250, 250] : undefined,
       },
     }));
-  if (messages.length === 0) return [];
+  if (messages.length === 0) return;
   try {
     const res = await axios.post("https://exp.host/--/api/v2/push/send", messages, {
       headers: {
@@ -224,10 +209,8 @@ async function sendExpoPushNotification(
         console.error(`[push] Token ${tokens[i]} error: ${r.message} (${r.details?.error})`);
       }
     });
-    return results;
   } catch (e: any) {
     console.error("[push] Failed to send Expo push notification:", e.message);
-    return [];
   }
 }
 
@@ -472,6 +455,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
   try {
     await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo text");
     await pool.query("ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS vehicle_year integer");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS dispatch_started_at timestamp");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS current_offered_chauffeur_id varchar REFERENCES chauffeurs(id) ON DELETE SET NULL");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS current_offer_expires_at timestamp");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS accepted_at timestamp");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS trip_started_at timestamp");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancelled_by text");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancellation_fee real DEFAULT 0");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS surge_multiplier real DEFAULT 1");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS surge_reason text");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS estimated_duration_min real");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS actual_duration_min real");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS per_minute_adjustment real DEFAULT 0");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_rides_current_offer ON rides(current_offered_chauffeur_id, current_offer_expires_at)");
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS lift_club_memberships (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id varchar NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        status text NOT NULL DEFAULT 'pending_payment',
+        fee_amount real NOT NULL DEFAULT 100,
+        proof_document_id varchar REFERENCES documents(id) ON DELETE SET NULL,
+        rejection_reason text,
+        submitted_at timestamp DEFAULT now(),
+        paid_at timestamp,
+        reviewed_at timestamp,
+        reviewer_admin_id varchar REFERENCES users(id) ON DELETE SET NULL,
+        created_at timestamp DEFAULT now(),
+        updated_at timestamp DEFAULT now()
+      )
+    `);
+    await pool.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS fee_amount real NOT NULL DEFAULT 100");
+    await pool.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS proof_document_id varchar REFERENCES documents(id) ON DELETE SET NULL");
+    await pool.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS rejection_reason text");
+    await pool.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS submitted_at timestamp DEFAULT now()");
+    await pool.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS paid_at timestamp");
+    await pool.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS reviewed_at timestamp");
+    await pool.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS reviewer_admin_id varchar REFERENCES users(id) ON DELETE SET NULL");
+    await pool.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS created_at timestamp DEFAULT now()");
+    await pool.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS updated_at timestamp DEFAULT now()");
+    await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_lift_club_memberships_user_id ON lift_club_memberships(user_id)");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_lift_club_memberships_status ON lift_club_memberships(status)");
   } catch (error) {
     console.warn("[routes] startup schema checks skipped:", error instanceof Error ? error.message : error);
   }
@@ -512,8 +535,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     });
 
-    socket.on("ride:request", async (data) => {
-      io.emit("ride:new", data);
+    socket.on("ride:request", async () => {
+      // Ride dispatch must go through POST /api/rides so the backend can enforce
+      // sequential offers, category matching, and 45-second expiry.
+      console.warn("[socket] ignored ride:request event; use POST /api/rides");
     });
 
     // ride:accept and ride:status are intentionally NOT relayed from socket events.
@@ -530,13 +555,177 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  const skippedChauffeursByRide = new Map<string, Set<string>>();
+  const dispatchTimers = new Map<string, NodeJS.Timeout>();
+
+  async function getDriverPushTokens(drivers: any[]) {
+    const tokens = new Set<string>();
+    await Promise.all(drivers.map(async (driver) => {
+      if (driver?.pushToken) tokens.add(driver.pushToken);
+      if (!driver?.userId) return;
+      try {
+        const driverUser = await storage.getUser(driver.userId);
+        if ((driverUser as any)?.pushToken) tokens.add((driverUser as any).pushToken);
+      } catch {}
+    }));
+    return Array.from(tokens);
+  }
+
+  async function getApprovedActiveVehicle(chauffeur: any) {
+    if (!chauffeur?.activeVehicleId) return null;
+    const vehicle = await storage.getVehicle(chauffeur.activeVehicleId).catch(() => undefined);
+    if (
+      vehicle &&
+      vehicle.status === "approved" &&
+      Number(vehicle.vehicleYear || 0) >= 2015
+    ) {
+      return vehicle;
+    }
+    return null;
+  }
+
+  async function getEligibleChauffeursForRide(ride: any, options: { excludeSkipped?: boolean } = {}) {
+    const pickupLat = Number(ride.pickupLat);
+    const pickupLng = Number(ride.pickupLng);
+    const hasPickup = Number.isFinite(pickupLat) && Number.isFinite(pickupLng);
+    const skipped = options.excludeSkipped ? skippedChauffeursByRide.get(ride.id) : null;
+    const chauffeurs = await storage.getAllChauffeurs();
+    const eligible: any[] = [];
+
+    for (const chauffeur of chauffeurs) {
+      if (!chauffeur?.isOnline || !chauffeur?.isApproved) continue;
+      if (skipped?.has(chauffeur.id)) continue;
+      if (hasPickup && !hasFreshChauffeurLocation(chauffeur)) continue;
+
+      const activeVehicle = await getApprovedActiveVehicle(chauffeur);
+      if (!activeVehicle || !isVehicleEligibleForRide(ride.vehicleType || "budget", activeVehicle.vehicleType)) {
+        continue;
+      }
+
+      const distKm = hasPickup
+        ? calculateHaversineDistanceKm(pickupLat, pickupLng, Number(chauffeur.lat), Number(chauffeur.lng))
+        : 0;
+      if (hasPickup && distKm > RIDE_MATCH_RADIUS_KM) continue;
+
+      eligible.push({ ...chauffeur, activeVehicle, distKm });
+    }
+
+    return eligible.sort((a, b) => Number(a.distKm || 0) - Number(b.distKm || 0));
+  }
+
+  async function countActiveDemandForRide(ride: any) {
+    const pickupLat = Number(ride.pickupLat);
+    const pickupLng = Number(ride.pickupLng);
+    const hasPickup = Number.isFinite(pickupLat) && Number.isFinite(pickupLng);
+    const allRides = await storage.getAllRides();
+    return allRides.filter((candidate: any) => {
+      if (
+        candidate.id === ride.id ||
+        !["requested", "searching"].includes(candidate.status) ||
+        !isVehicleEligibleForRide(candidate.vehicleType || "budget", ride.vehicleType || "budget")
+      ) {
+        return false;
+      }
+
+      if (!hasPickup) return true;
+
+      const candidateLat = Number(candidate.pickupLat);
+      const candidateLng = Number(candidate.pickupLng);
+      if (!Number.isFinite(candidateLat) || !Number.isFinite(candidateLng)) {
+        return false;
+      }
+
+      return calculateHaversineDistanceKm(pickupLat, pickupLng, candidateLat, candidateLng) <= RIDE_MATCH_RADIUS_KM;
+    }).length + 1;
+  }
+
+  function scheduleOfferExpiry(rideId: string) {
+    const existingTimer = dispatchTimers.get(rideId);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const timer = setTimeout(async () => {
+      dispatchTimers.delete(rideId);
+      try {
+        const ride = await storage.getRide(rideId);
+        if (!ride || ride.status !== "searching") return;
+        if (ride.currentOfferedChauffeurId && isRideOfferActive(ride as any, ride.currentOfferedChauffeurId, new Date())) {
+          scheduleOfferExpiry(rideId);
+          return;
+        }
+        if (ride.currentOfferedChauffeurId) {
+          const skipped = skippedChauffeursByRide.get(rideId) || new Set<string>();
+          skipped.add(ride.currentOfferedChauffeurId);
+          skippedChauffeursByRide.set(rideId, skipped);
+        }
+        await dispatchNextRideOffer(ride);
+      } catch (error: any) {
+        console.error("[dispatch] offer expiry failed:", error.message);
+      }
+    }, 46_000);
+
+    dispatchTimers.set(rideId, timer);
+  }
+
+  async function dispatchNextRideOffer(ride: any) {
+    const latestRide = await storage.getRide(ride.id);
+    if (!latestRide || latestRide.status !== "searching") return { offered: null, ride: latestRide };
+
+    const eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true });
+    if (!eligible.length) {
+      const updated = await storage.updateRide(latestRide.id, {
+        currentOfferedChauffeurId: null,
+        currentOfferExpiresAt: null,
+      } as any);
+      return { offered: null, ride: updated || latestRide };
+    }
+
+    const offered = eligible[0];
+    const expiresAt = getRideOfferExpiresAt();
+    const updated = await storage.updateRide(latestRide.id, {
+      dispatchStartedAt: latestRide.dispatchStartedAt || new Date(),
+      currentOfferedChauffeurId: offered.id,
+      currentOfferExpiresAt: expiresAt,
+    } as any);
+
+    let clientFirstName = "Rider";
+    try {
+      const client = await storage.getUser(latestRide.clientId);
+      clientFirstName = getUserFirstName(client, "Rider");
+    } catch {}
+    const offerPayload = {
+      ...(updated || latestRide),
+      clientFirstName,
+      distanceToPickup: offered.distKm,
+      currentOfferExpiresAt: expiresAt,
+      assignedVehicleType: offered.activeVehicle?.vehicleType || null,
+    };
+
+    const sockets = await io.fetchSockets();
+    for (const socket of sockets) {
+      const socketData = socket.data as any;
+      if (socketData?.chauffeurId === offered.id) {
+        socket.emit("ride:new", offerPayload);
+      }
+    }
+
+    const pushTokens = await getDriverPushTokens([offered]);
+    if (pushTokens.length > 0) {
+      sendExpoPushNotification(
+        pushTokens,
+        "🚗 New Ride Request",
+        `Pickup: ${latestRide.pickupAddress || "Nearby"} — 45 seconds to accept`,
+        { rideId: latestRide.id, type: "ride:new" },
+        { urgent: true },
+      );
+    }
+
+    scheduleOfferExpiry(latestRide.id);
+    return { offered, ride: updated || latestRide };
+  }
+
   // Health check for Railway / Render uptime monitoring
   app.get("/api/health", (_req: Request, res: Response) => {
-    res.json({
-      status: "ok",
-      timestamp: new Date().toISOString(),
-      release: getReleaseFingerprint(),
-    });
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
   // Public config for the website (safe, non-secret values only)
@@ -715,228 +904,98 @@ export async function registerRoutes(app: Express): Promise<Server> {
       safeUser?.rewards_balance ??
       (await getUserRewardsBalance(user.id)),
     );
+    const liftClubMembership = await storage.getLiftClubMembershipByUser(user.id).catch(() => undefined);
 
     return {
       ...safeUser,
       referralCode,
       rewardsBalance,
+      liftClubMembership: liftClubMembership
+        ? {
+            id: liftClubMembership.id,
+            status: liftClubMembership.status,
+            feeAmount: liftClubMembership.feeAmount,
+            rejectionReason: liftClubMembership.rejectionReason,
+            proofDocumentId: liftClubMembership.proofDocumentId,
+            isApproved: liftClubMembership.status === "approved",
+      }
+        : null,
     };
   }
 
-  function normalizeEmail(value: unknown): string {
-    return String(value || "").trim().toLowerCase();
-  }
+  const LIFT_CLUB_APPLICATION_FEE = 100;
+  const LIFT_CLUB_BANKING_DETAILS_URL = "https://a2blift.com/lift-club-payment.html";
 
-  function hashPasswordResetToken(token: string): string {
-    return crypto.createHash("sha256").update(token).digest("hex");
-  }
-
-  function getPasswordResetBaseUrl(): string {
-    return (
-      process.env.A2B_WEB_URL ||
-      process.env.PUBLIC_APP_URL ||
-      process.env.EXPO_PUBLIC_REFERRAL_BASE_URL ||
-      "https://a2blift.com"
-    ).replace(/\/$/, "");
-  }
-
-  function buildPasswordResetEmail(options: {
-    resetUrl: string;
-    name?: string | null;
-    expiresInMinutes: number;
-  }) {
-    const safeName = escapeHtml(options.name || "there");
-    const safeUrl = escapeHtml(options.resetUrl);
-    const subject = "Reset your A2B LIFT password";
-    const text = [
-      `Hello ${options.name || "there"},`,
-      "",
-      "We received a request to reset your A2B LIFT password.",
-      `Open this secure link to create a new password: ${options.resetUrl}`,
-      "",
-      `This link expires in ${options.expiresInMinutes} minutes. If you did not request it, you can ignore this email.`,
-      "",
-      "A2B LIFT",
-    ].join("\n");
-
-    const html = `
-      <!doctype html>
-      <html>
-        <body style="margin:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#111;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:28px 12px;">
-            <tr>
-              <td align="center">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;background:#ffffff;border-radius:22px;overflow:hidden;border:1px solid #e5e7eb;">
-                  <tr>
-                    <td style="background:#050505;padding:30px 32px;color:#fff;">
-                      <div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#bdbdbd;font-weight:700;">A2B LIFT Account</div>
-                      <h1 style="margin:12px 0 0;font-size:28px;line-height:1.15;">Reset your password</h1>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="padding:30px 32px;">
-                      <p style="margin:0 0 16px;font-size:16px;line-height:1.65;">Hello ${safeName},</p>
-                      <p style="margin:0 0 20px;font-size:16px;line-height:1.65;">We received a request to reset your A2B LIFT password. Use the secure button below to create a new one.</p>
-                      <a href="${safeUrl}" style="display:inline-block;background:#050505;color:#fff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 22px;border-radius:999px;">Reset password</a>
-                      <p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#777;">This link expires in ${options.expiresInMinutes} minutes. If you did not request it, you can ignore this email.</p>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-          </table>
-        </body>
-      </html>
-    `;
-
-    return { subject, html, text };
-  }
-
-  async function sendPasswordResetEmail(options: {
-    to: string;
-    name?: string | null;
-    resetUrl: string;
-    expiresInMinutes: number;
-  }) {
-    const apiKey = process.env.RESEND_API_KEY;
-    const email = buildPasswordResetEmail(options);
-    if (!apiKey) {
-      if (process.env.NODE_ENV === "production") {
-        console.warn("[Password reset] RESEND_API_KEY is not configured.");
-      } else {
-        console.warn(`[Password reset] RESEND_API_KEY is not configured. Reset link for ${options.to}: ${options.resetUrl}`);
-      }
-      return { emailStatus: "pending_configuration", emailError: "RESEND_API_KEY is not configured", resendId: null };
-    }
-
-    const from = process.env.RESEND_FROM_EMAIL || "A2B LIFT <support@a2blift.com>";
-    try {
-      const response = await axios.post(
-        "https://api.resend.com/emails",
-        {
-          from,
-          to: [options.to],
-          subject: email.subject,
-          html: email.html,
-          text: email.text,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          timeout: 12000,
-        },
-      );
-      return { emailStatus: "sent", emailError: null, resendId: response.data?.id || null };
-    } catch (error: any) {
+  function serializeLiftClubMembership(membership: any | undefined | null) {
+    if (!membership) {
       return {
-        emailStatus: "failed",
-        emailError: error?.response?.data?.message || error?.message || "Resend email failed",
-        resendId: null,
+        status: "not_applied",
+        feeAmount: LIFT_CLUB_APPLICATION_FEE,
+        proofDocument: null,
+        rejectionReason: null,
+        isApproved: false,
+        bankingDetailsUrl: LIFT_CLUB_BANKING_DETAILS_URL,
       };
     }
+    return {
+      ...membership,
+      feeAmount: Number(membership.feeAmount || membership.fee_amount || LIFT_CLUB_APPLICATION_FEE),
+      isApproved: membership.status === "approved",
+      bankingDetailsUrl: LIFT_CLUB_BANKING_DETAILS_URL,
+    };
+  }
+
+  async function creditLiftClubMonthlyReferralBonus(referredUserId: string) {
+    const referredUser = await storage.getUser(referredUserId);
+    const referrerUserId = referredUser?.referredByUserId;
+    if (!referredUser || !referrerUserId) return;
+
+    const reference = `lift_club_monthly_member_${referredUser.id}`;
+    const existing = await storage.getRewardTransactionByReference(reference);
+    if (existing) return;
+
+    const referrer = await storage.getUser(referrerUserId);
+    if (!referrer) return;
+
+    const reward = 50;
+    const balanceBefore = Number(referrer.rewardsBalance || 0);
+    const balanceAfter = Math.round((balanceBefore + reward) * 100) / 100;
+    const referralEvent = await storage.getReferralEventByReferredUserId(referredUser.id);
+
+    await storage.updateUser(referrer.id, { rewardsBalance: balanceAfter });
+    await storage.createRewardTransaction({
+      userId: referrer.id,
+      referralEventId: referralEvent?.id || null,
+      sourceUserId: referredUser.id,
+      rideId: null,
+      reference,
+      amount: reward,
+      balanceBefore,
+      balanceAfter,
+      type: "lift_club_monthly_member_bonus",
+      description: `${referredUser.name || "A referred member"} completed their first monthly Lift Club booking.`,
+      status: "completed",
+    });
+
+    if (referralEvent) {
+      await storage.updateReferralEvent(referralEvent.id, {
+        totalRewards: Number(referralEvent.totalRewards || 0) + reward,
+        lastRewardAt: new Date(),
+        status: "active",
+      });
+    }
+
+    await storage.createNotification({
+      userId: referrer.id,
+      title: "Lift Club Reward",
+      body: `You earned R${reward.toFixed(2)} because your referred Lift Club member completed their first monthly booking.`,
+      type: "reward",
+    });
   }
 
   // -----------------------------
   // Auth (JWT)
   // -----------------------------
-  app.post("/api/auth/password-reset/request", async (req: Request, res: Response) => {
-    const genericResponse = {
-      ok: true,
-      message: "If an A2B LIFT account exists for that email, a password reset link will be sent.",
-    };
-
-    try {
-      const email = normalizeEmail(req.body?.email || req.body?.username);
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        return res.status(400).json({ message: "Please enter a valid email address." });
-      }
-
-      const user = await storage.getUserByUsername(email);
-      if (!user) {
-        return res.json(genericResponse);
-      }
-
-      const token = crypto.randomBytes(32).toString("base64url");
-      const tokenHash = hashPasswordResetToken(token);
-      const expiresInMinutes = 60;
-      const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
-
-      await pool.query(
-        "UPDATE password_reset_tokens SET used_at = now() WHERE user_id = $1 AND used_at IS NULL",
-        [user.id],
-      );
-      await pool.query(
-        `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
-         VALUES ($1, $2, $3)`,
-        [user.id, tokenHash, expiresAt],
-      );
-
-      const resetUrl = `${getPasswordResetBaseUrl()}/login.html?resetToken=${encodeURIComponent(token)}`;
-      const emailResult = await sendPasswordResetEmail({
-        to: email,
-        name: user.name,
-        resetUrl,
-        expiresInMinutes,
-      });
-
-      if (emailResult.emailError) {
-        console.warn("[Password reset] Email was not sent:", emailResult.emailError);
-      }
-
-      return res.json(genericResponse);
-    } catch (error: any) {
-      console.error("[Password reset] Request error:", error);
-      return res.status(500).json({ message: "Unable to process password reset right now. Please try again." });
-    }
-  });
-
-  app.post("/api/auth/password-reset/confirm", async (req: Request, res: Response) => {
-    try {
-      const token = String(req.body?.token || "").trim();
-      const password = String(req.body?.password || "");
-      if (!token) {
-        return res.status(400).json({ message: "Reset token is required." });
-      }
-      if (password.length < 8) {
-        return res.status(400).json({ message: "Password must be at least 8 characters." });
-      }
-
-      const tokenHash = hashPasswordResetToken(token);
-      const tokenResult = await pool.query(
-        `
-          SELECT id, user_id
-          FROM password_reset_tokens
-          WHERE token_hash = $1
-            AND used_at IS NULL
-            AND expires_at > now()
-          LIMIT 1
-        `,
-        [tokenHash],
-      );
-
-      const reset = tokenResult.rows?.[0];
-      if (!reset) {
-        return res.status(400).json({ message: "This reset link is invalid or has expired." });
-      }
-
-      const hashedPassword = await bcrypt.hash(password, 10);
-      await pool.query("UPDATE users SET password = $1 WHERE id = $2", [hashedPassword, reset.user_id]);
-      await pool.query("UPDATE password_reset_tokens SET used_at = now() WHERE id = $1", [reset.id]);
-      await pool.query(
-        "UPDATE password_reset_tokens SET used_at = now() WHERE user_id = $1 AND used_at IS NULL",
-        [reset.user_id],
-      );
-
-      return res.json({ ok: true, message: "Password updated. You can now log in with your new password." });
-    } catch (error: any) {
-      console.error("[Password reset] Confirm error:", error);
-      return res.status(500).json({ message: "Unable to reset password right now. Please try again." });
-    }
-  });
-
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
       const { username, password, name, phone, role, referralCode } = req.body;
@@ -1025,20 +1084,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const safeUser = await hydrateAuthUser(user);
       return res.json({ user: safeUser, accessToken: token });
     } catch (error: any) {
-      const message = String(error?.message || "");
-      if (
-        error?.code === "28P01" ||
-        message.includes("password authentication failed") ||
-        message.includes("ENETUNREACH") ||
-        message.includes("ECONNREFUSED") ||
-        message.includes("timeout")
-      ) {
-        console.error("[auth/login] database connection/authentication failed:", message);
-        return res.status(503).json({
-          message: "Authentication service is temporarily unavailable. Please try again shortly.",
-        });
-      }
-      return res.status(500).json({ message: "Login failed. Please try again shortly." });
+      return res.status(500).json({ message: error.message });
     }
   });
 
@@ -1262,20 +1308,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (event) => Number(event.totalRewards || 0) > 0 || event.status === "rewarded",
       ).length;
 
-      const configuredReferralBase =
+      const referralBase =
         process.env.EXPO_PUBLIC_REFERRAL_LINK_BASE_URL ||
-        process.env.EXPO_PUBLIC_REFERRAL_BASE_URL ||
-        process.env.A2B_PUBLIC_SITE_URL ||
-        process.env.PUBLIC_SITE_URL ||
-        "https://a2blift.com";
-      const referralBase = String(configuredReferralBase)
-        .replace(/\/$/, "")
-        .replace(/^https:\/\/api\.a2blift\.com$/i, "https://a2blift.com");
+        process.env.EXPO_PUBLIC_DOMAIN ||
+        "https://api.a2blift.com";
       const rewardApp = hydratedUser.role === "chauffeur" ? "driver" : "client";
 
       return res.json({
         referralCode: hydratedUser.referralCode,
-        shareUrl: `${referralBase}/r/${encodeURIComponent(hydratedUser.referralCode)}?app=${encodeURIComponent(rewardApp)}`,
+        shareUrl: `${String(referralBase).replace(/\/$/, "")}/r/${encodeURIComponent(hydratedUser.referralCode)}?app=${encodeURIComponent(rewardApp)}`,
         rewardsBalance: Number(hydratedUser.rewardsBalance || 0),
         referredCount: referralEvents.length,
         rewardedReferrals,
@@ -2820,10 +2861,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/users", requireAuth, requireRole(["admin"]), async (_req: AuthedRequest, res: Response) => {
     try {
       const allUsers = await db.select().from(users).orderBy(desc(users.createdAt));
-      return res.json(allUsers.map((user) => {
-        const { password: _pw, ...safeUser } = user;
-        return safeUser;
+      const enrichedUsers = await Promise.all(allUsers.map(async (user: any) => {
+        const { password: _password, ...safeUser } = user;
+        const membership = await storage.getLiftClubMembershipByUser(user.id).catch(() => undefined);
+        return {
+          ...safeUser,
+          liftClubMembership: membership
+            ? {
+                id: membership.id,
+                status: membership.status,
+                isApproved: membership.status === "approved",
+              }
+            : null,
+        };
       }));
+      return res.json(enrichedUsers);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -3221,8 +3273,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   const PARTNER_REQUIRED_DOCS = new Set([
+    "partner:company_registration",
     "partner:director_id",
     "partner:proof_of_address",
+    "partner:operating_permit",
     "partner:bank_account_details",
   ]);
   const VEHICLE_REQUIRED_DOCS = new Set([
@@ -3237,10 +3291,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return value;
   }
 
-  function optionalStringField(body: any, field: string) {
-    return String(body?.[field] || "").trim();
-  }
-
   async function getOrCreateOperatorProfile(options: {
     userId: string;
     type: "driver" | "partner";
@@ -3252,10 +3302,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         throw new Error(`This account is already registered as a ${existing.type}`);
       }
       return storage.updateOperatorProfile(existing.id, {
-        status: resolveOperatorSubmissionStatus({
-          existingStatus: existing.status,
-          requestedStatus: options.status,
-        }),
+        status: options.status || existing.status,
         submittedAt: new Date(),
       });
     }
@@ -3268,200 +3315,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   }
 
-  async function syncDriverOperatorReview(options: {
-    userId?: string | null;
-    status: string;
-    adminId?: string | null;
-    reason?: string | null;
-  }) {
-    const userId = String(options.userId || "").trim();
-    if (!userId) return null;
-
-    const existing = await storage.getOperatorProfileByUserId(userId).catch(() => undefined);
-    const reviewUpdate = {
-      status: options.status,
-      rejectionReason: options.status === "rejected" || options.status === "waitlisted"
-        ? String(options.reason || "").trim() || null
-        : null,
-      reviewedAt: new Date(),
-      reviewerAdminId: options.adminId || null,
-    };
-
-    if (existing) {
-      if (existing.type !== "driver") return existing;
-      return storage.updateOperatorProfile(existing.id, reviewUpdate);
-    }
-
-    return storage.createOperatorProfile({
-      userId,
-      type: "driver",
-      submittedAt: new Date(),
-      ...reviewUpdate,
-    });
-  }
-
   async function serializeOperatorProfile(profile: any) {
     const [user, chauffeur, partnerProfile] = await Promise.all([
       storage.getUser(profile.userId).catch(() => undefined),
       profile.type === "driver" ? storage.getChauffeurByUserId(profile.userId).catch(() => undefined) : Promise.resolve(null),
       profile.type === "partner" ? storage.getPartnerProfileByOperatorId(profile.id).catch(() => undefined) : Promise.resolve(null),
     ]);
-    const safeUser = user ? (({ password: _password, ...rest }) => rest)(user as any) : null;
-    return { ...profile, user: safeUser, chauffeur: chauffeur || null, partnerProfile: partnerProfile || null };
-  }
-
-  function escapeHtml(value: unknown): string {
-    return String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-  }
-
-  function getOperatorDisplayName(profile: any, partnerProfile?: any | null, user?: any | null): string {
-    return (
-      partnerProfile?.companyName ||
-      partnerProfile?.company_name ||
-      user?.name ||
-      (profile?.type === "partner" ? "A2B fleet partner" : "A2B operator")
-    );
-  }
-
-  function buildFleetInviteEmail(options: {
-    inviteId: string;
-    driverName: string;
-    managerName: string;
-    managerEmail?: string | null;
-    message?: string | null;
-  }) {
-    const appUrl = (
-      process.env.EXPO_PUBLIC_REFERRAL_LINK_BASE_URL ||
-      process.env.PUBLIC_APP_URL ||
-      process.env.EXPO_PUBLIC_DOMAIN ||
-      "https://a2blift.com"
-    ).replace(/\/$/, "");
-    const acceptUrl = `${appUrl}/dashboard.html?fleetInvite=${encodeURIComponent(options.inviteId)}`;
-    const note = options.message?.trim();
-    const safeDriverName = escapeHtml(options.driverName || "Driver");
-    const safeManagerName = escapeHtml(options.managerName);
-    const safeManagerEmail = escapeHtml(options.managerEmail || "support@a2blift.com");
-
-    const text = [
-      `Hello ${options.driverName || "Driver"},`,
-      "",
-      `${options.managerName} has invited you to join their A2B LIFT fleet/team.`,
-      note ? `Message: ${note}` : "",
-      "",
-      `Open A2B LIFT Driver to accept or decline this invite. Invite link: ${acceptUrl}`,
-      "",
-      "A2B LIFT",
-    ].filter(Boolean).join("\n");
-
-    const html = `
-      <!doctype html>
-      <html>
-        <body style="margin:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#111;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:28px 12px;">
-            <tr>
-              <td align="center">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;background:#ffffff;border-radius:22px;overflow:hidden;border:1px solid #e5e7eb;">
-                  <tr>
-                    <td style="background:#050505;padding:30px 32px;color:#fff;">
-                      <div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#bdbdbd;font-weight:700;">A2B LIFT Fleet Invite</div>
-                      <h1 style="margin:12px 0 0;font-size:28px;line-height:1.15;">You have been invited to join a fleet</h1>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="padding:30px 32px;">
-                      <p style="margin:0 0 16px;font-size:16px;line-height:1.65;">Hello ${safeDriverName},</p>
-                      <p style="margin:0 0 16px;font-size:16px;line-height:1.65;"><strong>${safeManagerName}</strong> has invited you to join their A2B LIFT fleet/team.</p>
-                      ${note ? `<div style="margin:20px 0;padding:16px;border-radius:14px;background:#f7f7f7;border:1px solid #ececec;"><div style="font-size:12px;text-transform:uppercase;letter-spacing:1.4px;color:#777;font-weight:700;margin-bottom:8px;">Message</div><div style="font-size:15px;line-height:1.6;">${escapeHtml(note)}</div></div>` : ""}
-                      <p style="margin:0 0 20px;font-size:15px;line-height:1.65;color:#444;">Open your A2B LIFT Driver app to review the invite. You can accept or decline it from your Fleet screen.</p>
-                      <a href="${acceptUrl}" style="display:inline-block;background:#050505;color:#fff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 22px;border-radius:999px;">Review fleet invite</a>
-                      <p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#777;">If you have questions, contact ${safeManagerName} or reply to A2B support at ${safeManagerEmail}.</p>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-          </table>
-        </body>
-      </html>
-    `;
-
-    return { subject: `${options.managerName} invited you to join their A2B LIFT fleet`, html, text };
-  }
-
-  async function sendFleetInviteEmail(options: {
-    inviteId: string;
-    to: string;
-    driverName: string;
-    managerName: string;
-    managerEmail?: string | null;
-    message?: string | null;
-  }) {
-    const apiKey = process.env.RESEND_API_KEY;
-    if (!apiKey) {
-      return { emailStatus: "pending_configuration", emailError: "RESEND_API_KEY is not configured", resendId: null };
-    }
-    const from = process.env.RESEND_FROM_EMAIL || "A2B LIFT <support@a2blift.com>";
-    const email = buildFleetInviteEmail(options);
-    try {
-      const response = await axios.post(
-        "https://api.resend.com/emails",
-        {
-          from,
-          to: [options.to],
-          subject: email.subject,
-          html: email.html,
-          text: email.text,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          timeout: 12000,
-        },
-      );
-      return { emailStatus: "sent", emailError: null, resendId: response.data?.id || null };
-    } catch (error: any) {
-      return {
-        emailStatus: "failed",
-        emailError: error?.response?.data?.message || error?.message || "Resend email failed",
-        resendId: null,
-      };
-    }
-  }
-
-  async function serializeFleetInvite(row: any) {
-    const [driverProfile, managerProfile] = await Promise.all([
-      storage.getOperatorProfile(row.driver_operator_profile_id || row.driverOperatorProfileId).catch(() => undefined),
-      storage.getOperatorProfile(row.invited_by_operator_profile_id || row.invitedByOperatorProfileId).catch(() => undefined),
-    ]);
-    const [driver, manager] = await Promise.all([
-      driverProfile ? serializeOperatorProfile(driverProfile) : Promise.resolve(null),
-      managerProfile ? serializeOperatorProfile(managerProfile) : Promise.resolve(null),
-    ]);
-    return {
-      id: row.id,
-      driverOperatorProfileId: row.driver_operator_profile_id || row.driverOperatorProfileId,
-      invitedByOperatorProfileId: row.invited_by_operator_profile_id || row.invitedByOperatorProfileId,
-      invitedByUserId: row.invited_by_user_id || row.invitedByUserId,
-      status: row.status,
-      emailStatus: row.email_status || row.emailStatus,
-      emailError: row.email_error || row.emailError,
-      message: row.message,
-      resendId: row.resend_id || row.resendId,
-      sentAt: row.sent_at || row.sentAt,
-      acceptedAt: row.accepted_at || row.acceptedAt,
-      declinedAt: row.declined_at || row.declinedAt,
-      createdAt: row.created_at || row.createdAt,
-      updatedAt: row.updated_at || row.updatedAt,
-      driver,
-      manager,
-    };
+    return { ...profile, user: user || null, chauffeur: chauffeur || null, partnerProfile: partnerProfile || null };
   }
 
   async function serializeVehicle(vehicle: any) {
@@ -3470,23 +3330,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       storage.getDocumentsByVehicle(vehicle.id).catch(() => []),
       storage.getVehicleAssignments({ vehicleId: vehicle.id }).catch(() => []),
     ]);
-    const owner = ownerProfile
-      ? await serializeOperatorProfile(ownerProfile).catch((error) => ({
-          ...ownerProfile,
-          serializationWarning: error?.message || "Could not load owner details",
-        }))
-      : null;
+    const owner = ownerProfile ? await serializeOperatorProfile(ownerProfile) : null;
     const enrichedAssignments = await Promise.all(assignments.map(async (assignment) => {
-      const driverProfile = await storage.getOperatorProfile(assignment.driverOperatorProfileId).catch(() => undefined);
-      return {
-        ...assignment,
-        driver: driverProfile
-          ? await serializeOperatorProfile(driverProfile).catch((error) => ({
-              ...driverProfile,
-              serializationWarning: error?.message || "Could not load driver details",
-            }))
-          : null,
-      };
+      try {
+        const driverProfile = await storage.getOperatorProfile(assignment.driverOperatorProfileId).catch(() => undefined);
+        return {
+          ...assignment,
+          driver: driverProfile ? await serializeOperatorProfile(driverProfile) : null,
+        };
+      } catch (error: any) {
+        console.warn("[admin/vehicles] assignment enrichment skipped:", error?.message || error);
+        return { ...assignment, driver: null };
+      }
     }));
     return { ...vehicle, owner, documents, assignments: enrichedAssignments };
   }
@@ -3503,22 +3358,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: chauffeur.isApproved ? "approved" : "pending",
         submittedAt: chauffeur.createdAt || new Date(),
       });
-    }
-
-    if (profile.type !== "driver") return profile;
-
-    const reconciledStatus = reconcileDriverProfileStatus({
-      profileType: profile.type,
-      profileStatus: profile.status,
-      chauffeurApproved: chauffeur.isApproved,
-    });
-    if (reconciledStatus !== profile.status) {
+    } else if (profile.type === "driver" && chauffeur.isApproved && profile.status !== "approved") {
       profile = await storage.updateOperatorProfile(profile.id, {
-        status: reconciledStatus,
-        rejectionReason: null,
+        status: "approved",
         reviewedAt: new Date(),
       }) || profile;
     }
+
+    if (profile.type !== "driver") return profile;
 
     const ownedVehicles = await storage.getVehiclesByOwnerOperator(profile.id).catch(() => []);
     const hasLegacyVehicle = !!(chauffeur.carMake || chauffeur.vehicleModel || chauffeur.plateNumber);
@@ -3668,8 +3515,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/operator-profile/partner", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
       const partnerData = {
-        companyName: optionalStringField(req.body, "companyName"),
-        registrationNumber: optionalStringField(req.body, "registrationNumber"),
+        companyName: requireStringField(req.body, "companyName"),
+        registrationNumber: requireStringField(req.body, "registrationNumber"),
         contactPersonName: requireStringField(req.body, "contactPersonName"),
         contactPhone: requireStringField(req.body, "contactPhone"),
         contactEmail: requireStringField(req.body, "contactEmail"),
@@ -3941,202 +3788,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({ drivers: filtered });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.get("/api/fleet/invites", requireAuth, async (req: AuthedRequest, res: Response) => {
-    try {
-      const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
-      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
-      const [sentResult, receivedResult] = await Promise.all([
-        pool.query(
-          `
-            SELECT *
-            FROM fleet_driver_invites
-            WHERE invited_by_operator_profile_id = $1
-            ORDER BY created_at DESC
-            LIMIT 100
-          `,
-          [profile.id],
-        ),
-        pool.query(
-          `
-            SELECT *
-            FROM fleet_driver_invites
-            WHERE driver_operator_profile_id = $1
-            ORDER BY created_at DESC
-            LIMIT 100
-          `,
-          [profile.id],
-        ),
-      ]);
-      const [sentInvites, receivedInvites] = await Promise.all([
-        Promise.all(sentResult.rows.map(serializeFleetInvite)),
-        Promise.all(receivedResult.rows.map(serializeFleetInvite)),
-      ]);
-      return res.json({ sentInvites, receivedInvites });
-    } catch (error: any) {
-      return res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.post("/api/fleet/invites", requireAuth, async (req: AuthedRequest, res: Response) => {
-    try {
-      const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
-      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
-      if (profile.status !== "approved") {
-        return res.status(403).json({ message: "Your operator profile must be approved first." });
-      }
-      if (profile.type !== "partner") {
-        return res.status(403).json({ message: "Only approved fleet partners can invite drivers to a fleet." });
-      }
-
-      const driverOperatorProfileId = requireStringField(req.body, "driverOperatorProfileId");
-      const message = typeof req.body.message === "string" ? req.body.message.trim().slice(0, 600) : "";
-      if (driverOperatorProfileId === profile.id) {
-        return res.status(400).json({ message: "You cannot invite yourself." });
-      }
-
-      const [driverProfile, managerUser, managerPartner] = await Promise.all([
-        storage.getOperatorProfile(driverOperatorProfileId),
-        storage.getUser(profile.userId),
-        storage.getPartnerProfileByOperatorId(profile.id).catch(() => undefined),
-      ]);
-      if (!driverProfile || driverProfile.type !== "driver" || driverProfile.status !== "approved") {
-        return res.status(400).json({ message: "Only approved A2B drivers can be invited." });
-      }
-      const driverUser = await storage.getUser(driverProfile.userId);
-      if (!driverUser?.username) {
-        return res.status(400).json({ message: "This driver does not have an email address on file." });
-      }
-
-      const pending = await pool.query(
-        `
-          SELECT *
-          FROM fleet_driver_invites
-          WHERE driver_operator_profile_id = $1
-            AND invited_by_operator_profile_id = $2
-            AND status = 'pending'
-          LIMIT 1
-        `,
-        [driverProfile.id, profile.id],
-      );
-      if (pending.rowCount && pending.rowCount > 0 && pending.rows[0]?.email_status === "sent") {
-        return res.status(409).json({ message: "You already have a pending invite for this driver." });
-      }
-      let invite = pending.rows[0];
-      if (invite) {
-        const refreshed = await pool.query(
-          `
-            UPDATE fleet_driver_invites
-            SET message = COALESCE($2, message),
-                email_status = 'queued',
-                email_error = NULL,
-                updated_at = NOW()
-            WHERE id = $1
-            RETURNING *
-          `,
-          [invite.id, message || null],
-        );
-        invite = refreshed.rows[0];
-      } else {
-        const inserted = await pool.query(
-          `
-            INSERT INTO fleet_driver_invites (
-              driver_operator_profile_id,
-              invited_by_operator_profile_id,
-              invited_by_user_id,
-              status,
-              email_status,
-              message
-            )
-            VALUES ($1, $2, $3, 'pending', 'queued', $4)
-            RETURNING *
-          `,
-          [driverProfile.id, profile.id, req.auth!.sub, message || null],
-        );
-        invite = inserted.rows[0];
-      }
-      const managerName = getOperatorDisplayName(profile, managerPartner, managerUser);
-      const emailResult = await sendFleetInviteEmail({
-        inviteId: invite.id,
-        to: driverUser.username,
-        driverName: driverUser.name || "Driver",
-        managerName,
-        managerEmail: managerUser?.username || managerPartner?.contactEmail || null,
-        message,
-      });
-      const updated = await pool.query(
-        `
-          UPDATE fleet_driver_invites
-          SET email_status = $2,
-              email_error = $3,
-              resend_id = $4,
-              sent_at = CASE WHEN $2 = 'sent' THEN NOW() ELSE sent_at END,
-              updated_at = NOW()
-          WHERE id = $1
-          RETURNING *
-        `,
-        [invite.id, emailResult.emailStatus, emailResult.emailError, emailResult.resendId],
-      );
-
-      await notifyUserEvent({
-        userId: driverProfile.userId,
-        type: "fleet_invite",
-        title: "Fleet invite received",
-        body: `${managerName} invited you to join their A2B LIFT fleet/team.`,
-        data: { inviteId: invite.id, invitedByOperatorProfileId: profile.id },
-      });
-
-      return res.status(201).json({ invite: await serializeFleetInvite(updated.rows[0]) });
-    } catch (error: any) {
-      return res.status(400).json({ message: error.message });
-    }
-  });
-
-  app.put("/api/fleet/invites/:id/respond", requireAuth, async (req: AuthedRequest, res: Response) => {
-    try {
-      const status = String(req.body?.status || "").toLowerCase();
-      if (!["accepted", "declined"].includes(status)) {
-        return res.status(400).json({ message: "Invite status must be accepted or declined." });
-      }
-      const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
-      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
-      const existing = await pool.query("SELECT * FROM fleet_driver_invites WHERE id = $1 LIMIT 1", [req.params.id]);
-      const invite = existing.rows[0];
-      if (!invite) return res.status(404).json({ message: "Invite not found" });
-      if (invite.driver_operator_profile_id !== profile.id) {
-        return res.status(403).json({ message: "Only the invited driver can respond to this invite." });
-      }
-      if (invite.status !== "pending") {
-        return res.status(409).json({ message: "This invite has already been responded to." });
-      }
-      const updated = await pool.query(
-        `
-          UPDATE fleet_driver_invites
-          SET status = $2,
-              accepted_at = CASE WHEN $2 = 'accepted' THEN NOW() ELSE accepted_at END,
-              declined_at = CASE WHEN $2 = 'declined' THEN NOW() ELSE declined_at END,
-              updated_at = NOW()
-          WHERE id = $1
-          RETURNING *
-        `,
-        [invite.id, status],
-      );
-      const managerProfile = await storage.getOperatorProfile(invite.invited_by_operator_profile_id).catch(() => undefined);
-      if (managerProfile) {
-        const driverUser = await storage.getUser(profile.userId).catch(() => undefined);
-        await notifyUserEvent({
-          userId: managerProfile.userId,
-          type: "fleet_invite_response",
-          title: status === "accepted" ? "Fleet invite accepted" : "Fleet invite declined",
-          body: `${driverUser?.name || "A driver"} ${status} your fleet invite.`,
-          data: { inviteId: invite.id, driverOperatorProfileId: profile.id },
-        });
-      }
-      return res.json({ invite: await serializeFleetInvite(updated.rows[0]) });
-    } catch (error: any) {
-      return res.status(400).json({ message: error.message });
     }
   });
 
@@ -4556,11 +4207,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
       await storage.updateChauffeur(req.params.id, { isApproved: true });
       if (chauffeur.userId) {
-        await syncDriverOperatorReview({
-          userId: chauffeur.userId,
-          status: "approved",
-          adminId: req.auth!.sub,
-        });
         await notifyUserEvent({
           userId: chauffeur.userId,
           type: "approval",
@@ -4603,12 +4249,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
       await storage.updateChauffeur(req.params.id, { isApproved: false });
       if (chauffeur.userId) {
-        await syncDriverOperatorReview({
-          userId: chauffeur.userId,
-          status: "rejected",
-          adminId: req.auth!.sub,
-          reason: reason.trim(),
-        });
         await notifyUserEvent({
           userId: chauffeur.userId,
           type: "rejection",
@@ -4641,12 +4281,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
       await storage.updateChauffeur(req.params.id, { isApproved: false, isOnline: false });
       if (chauffeur.userId) {
-        await syncDriverOperatorReview({
-          userId: chauffeur.userId,
-          status: "waitlisted",
-          adminId: req.auth!.sub,
-          reason: reason.trim(),
-        });
         const app = await storage.getDriverApplicationByUserId(chauffeur.userId);
         if (app) {
           await storage.updateDriverApplication(app.id, {
@@ -4684,11 +4318,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
       await storage.updateChauffeur(req.params.id, { isApproved: true, isOnline: false });
       if (chauffeur.userId) {
-        await syncDriverOperatorReview({
-          userId: chauffeur.userId,
-          status: "approved",
-          adminId: req.auth!.sub,
-        });
         const app = await storage.getDriverApplicationByUserId(chauffeur.userId);
         if (app) {
           await storage.updateDriverApplication(app.id, {
@@ -5199,6 +4828,136 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/lift-club/membership/me", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const membership = await storage.getLiftClubMembershipByUser(req.auth!.sub);
+      return res.json(serializeLiftClubMembership(membership));
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || "Unable to load Lift Club membership" });
+    }
+  });
+
+  app.post("/api/lift-club/membership/apply", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.auth!.sub);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const existing = await storage.getLiftClubMembershipByUser(user.id);
+      if (existing?.status === "approved") {
+        return res.json(serializeLiftClubMembership(existing));
+      }
+
+      const membership = await storage.upsertLiftClubMembership({
+        userId: user.id,
+        status: existing?.status === "pending_review" ? "pending_review" : "pending_payment",
+        feeAmount: LIFT_CLUB_APPLICATION_FEE,
+        rejectionReason: existing?.status === "rejected" ? existing.rejectionReason : null,
+        submittedAt: existing?.submittedAt || new Date(),
+      });
+
+      return res.json(serializeLiftClubMembership(membership));
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || "Unable to apply for Lift Club membership" });
+    }
+  });
+
+  app.post("/api/lift-club/membership/proof", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.auth!.sub);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const proofUrl = String(req.body?.url || req.body?.proofUrl || "").trim();
+      const proofDocumentId = String(req.body?.documentId || "").trim();
+      if (!proofUrl && !proofDocumentId) {
+        return res.status(400).json({ message: "Proof document URL or documentId is required" });
+      }
+
+      const existing = await storage.getLiftClubMembershipByUser(user.id);
+      const baseMembership = existing || await storage.upsertLiftClubMembership({
+        userId: user.id,
+        status: "pending_payment",
+        feeAmount: LIFT_CLUB_APPLICATION_FEE,
+        submittedAt: new Date(),
+      });
+
+      let documentId = proofDocumentId || "";
+      if (!documentId) {
+        const doc = await storage.createDocument({
+          userId: user.id,
+          type: "lift_club_payment_proof",
+          url: proofUrl,
+          status: "pending",
+        });
+        documentId = doc.id;
+      }
+
+      const membership = await storage.updateLiftClubMembership(baseMembership.id, {
+        status: "pending_review",
+        proofDocumentId: documentId,
+        paidAt: new Date(),
+        rejectionReason: null,
+      } as any);
+
+      const admins = (await storage.getAllUsers()).filter((admin: any) => admin.role === "admin");
+      await Promise.all(admins.map((admin: any) => storage.createNotification({
+        userId: admin.id,
+        title: "Lift Club proof uploaded",
+        body: `${user.name || user.username || "A rider"} uploaded Lift Club payment proof for review.`,
+        type: "lift_club_membership",
+      }).catch(() => undefined)));
+
+      return res.json(serializeLiftClubMembership(membership));
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || "Unable to upload Lift Club proof" });
+    }
+  });
+
+  app.get("/api/admin/lift-club-memberships", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
+    try {
+      const status = typeof req.query.status === "string" && req.query.status !== "all" ? req.query.status : undefined;
+      const memberships = await storage.getLiftClubMemberships({ status });
+      return res.json(memberships);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || "Unable to load Lift Club applications" });
+    }
+  });
+
+  app.put("/api/admin/lift-club-memberships/:id/status", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
+    try {
+      const status = String(req.body?.status || "").trim();
+      if (!["pending_payment", "pending_review", "approved", "rejected"].includes(status)) {
+        return res.status(400).json({ message: "Invalid Lift Club membership status" });
+      }
+      const rejectionReason = String(req.body?.rejectionReason || "").trim();
+      if (status === "rejected" && !rejectionReason) {
+        return res.status(400).json({ message: "Rejection reason is required" });
+      }
+
+      const membership = await storage.updateLiftClubMembership(req.params.id, {
+        status,
+        rejectionReason: status === "rejected" ? rejectionReason : null,
+        reviewedAt: ["approved", "rejected"].includes(status) ? new Date() : null,
+        reviewerAdminId: ["approved", "rejected"].includes(status) ? req.auth!.sub : null,
+      } as any);
+      if (!membership) return res.status(404).json({ message: "Lift Club membership not found" });
+
+      await storage.createNotification({
+        userId: membership.userId,
+        title: status === "approved" ? "Lift Club approved" : status === "rejected" ? "Lift Club proof needs attention" : "Lift Club updated",
+        body: status === "approved"
+          ? "Your Lift Club membership is approved. You can now book Lift Club seats."
+          : status === "rejected"
+            ? `Your Lift Club application was rejected: ${rejectionReason}. Upload a new proof when ready.`
+            : "Your Lift Club application status has been updated.",
+        type: "lift_club_membership",
+      }).catch(() => undefined);
+
+      return res.json(serializeLiftClubMembership(membership));
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || "Unable to update Lift Club membership" });
+    }
+  });
+
   app.get("/api/lift-club/my-route", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
       const chauffeur = await storage.getChauffeurByUserId(req.auth!.sub);
@@ -5310,6 +5069,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (route.chauffeurUserId === rider.id) return res.status(400).json({ message: "You cannot book your own lift club car." });
       if (Number(route.vehicleYear || 0) < 2015) return res.status(409).json({ message: "This vehicle is not eligible for Daily Lift Club." });
 
+      const membership = await storage.getLiftClubMembershipByUser(rider.id);
+      if (membership?.status !== "approved") {
+        return res.status(403).json({
+          message: "Approved Lift Club membership is required before booking a seat.",
+          membership: serializeLiftClubMembership(membership),
+        });
+      }
+
       const seatsLeft = Number(route.totalSeats || 0) - Number(route.bookedSeats || 0);
       if (seatsLeft <= 0) return res.status(409).json({ message: "This lift club car is already full." });
 
@@ -5354,6 +5121,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           title: "New lift club rider",
           body: `${rider.name || "A rider"} booked a ${normalizedPassType} seat for ${route.pickupArea} to ${route.destinationArea}.`,
           type: "lift_club",
+        });
+      }
+      if (normalizedPassType === "monthly") {
+        await creditLiftClubMonthlyReferralBonus(rider.id).catch((error) => {
+          console.warn("[lift-club] monthly referral bonus skipped:", error instanceof Error ? error.message : error);
         });
       }
 
@@ -5520,17 +5292,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           return await serializeVehicle(vehicle);
         } catch (error: any) {
-          return {
-            ...vehicle,
-            owner: null,
-            documents: [],
-            assignments: [],
-            serializationWarning: error?.message || "Could not load related vehicle details",
-          };
+          console.error("[admin/vehicles] serialize failed:", vehicle?.id, error?.message || error);
+          return { ...vehicle, owner: null, documents: [], assignments: [], serializationWarning: error?.message || "Vehicle details partially unavailable" };
         }
       }));
       return res.json(serialized);
     } catch (error: any) {
+      console.error("[admin/vehicles] load failed:", error?.message || error);
       return res.status(500).json({ message: error.message });
     }
   });
@@ -5538,7 +5306,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/admin/vehicles/:id/status", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
     try {
       const status = requireStringField(req.body, "status");
-      if (!["approved", "rejected", "suspended", "waitlisted", "pending"].includes(status)) {
+      if (!["approved", "rejected", "suspended", "pending"].includes(status)) {
         return res.status(400).json({ message: "Invalid vehicle status" });
       }
       const vehicle = await storage.getVehicle(req.params.id);
@@ -5546,22 +5314,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ownerProfile = await storage.getOperatorProfile(vehicle.ownerOperatorProfileId);
       if (!ownerProfile) return res.status(404).json({ message: "Vehicle owner profile not found" });
       const reason = String(req.body.reason || "").trim();
-      if ((status === "rejected" || status === "suspended" || status === "waitlisted") && !reason) {
-        return res.status(400).json({ message: "A reason is required for this vehicle status." });
-      }
-      if (status === "approved") {
-        const documents = await storage.getDocumentsByVehicle(vehicle.id);
-        const approvedTypes = new Set(documents.filter((document) => document.status === "approved").map((document) => document.type));
-        const missingApproval = [...VEHICLE_REQUIRED_DOCS].filter((type) => !approvedTypes.has(type));
-        if (missingApproval.length > 0) {
-          return res.status(400).json({
-            message: `Approve all required vehicle documents first: ${missingApproval.map((type) => type.replace("vehicle:", "")).join(", ")}`,
-          });
-        }
-      }
       const updated = await storage.updateVehicle(vehicle.id, {
         status,
-        rejectionReason: status === "rejected" || status === "suspended" || status === "waitlisted" ? reason : null,
+        rejectionReason: status === "rejected" || status === "suspended" ? reason : null,
         reviewedAt: new Date(),
         reviewerAdminId: req.auth!.sub,
       });
@@ -5576,14 +5331,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               status: "active",
             });
           }
-        } catch (assignmentError) {
-          console.warn("[admin/vehicles] vehicle approved but self-assignment failed", assignmentError);
+        } catch (error: any) {
+          console.warn("[admin/vehicles] self-assignment skipped:", error?.message || error);
         }
       }
       if (status !== "approved") {
-        try {
-          const activeAssignments = await storage.getVehicleAssignments({ vehicleId: vehicle.id, status: "active" });
-          for (const assignment of activeAssignments) {
+        const activeAssignments = await storage.getVehicleAssignments({ vehicleId: vehicle.id, status: "active" }).catch(() => []);
+        for (const assignment of activeAssignments) {
+          try {
             await storage.updateVehicleAssignment(assignment.id, { status: "removed", removedAt: new Date() });
             const driverProfile = await storage.getOperatorProfile(assignment.driverOperatorProfileId).catch(() => undefined);
             if (driverProfile) {
@@ -5598,30 +5353,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   title: "Vehicle unavailable",
                   body: `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) is no longer available for trips.`,
                   data: { vehicleId: vehicle.id },
-                }).catch((notifyError) => {
-                  console.warn("[admin/vehicles] assignment removal notification failed", notifyError);
-                });
+                }).catch(() => undefined);
               }
             }
+          } catch (error: any) {
+            console.warn("[admin/vehicles] assignment removal skipped:", error?.message || error);
           }
-        } catch (assignmentError) {
-          console.warn("[admin/vehicles] vehicle status updated but assignment cleanup failed", assignmentError);
         }
       }
       await notifyUserEvent({
         userId: ownerProfile.userId,
         type: `vehicle_${status}`,
-        title: status === "approved" ? "Vehicle approved" : status === "waitlisted" ? "Vehicle waitlisted" : status === "rejected" ? "Vehicle not approved" : "Vehicle status updated",
+        title: status === "approved" ? "Vehicle approved" : status === "rejected" ? "Vehicle not approved" : "Vehicle status updated",
         body: status === "approved"
           ? `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) has been approved.`
-          : status === "waitlisted"
-            ? `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) has been waitlisted.${reason ? ` Reason: ${reason}.` : ""}`
           : status === "rejected"
             ? `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) was not approved.${reason ? ` Reason: ${reason}.` : ""}`
             : `${vehicle.carMake} ${vehicle.vehicleModel} (${vehicle.plateNumber}) status is now ${status}.`,
         data: { vehicleId: vehicle.id },
-      }).catch((notifyError) => {
-        console.warn("[admin/vehicles] owner notification failed", notifyError);
+      }).catch((error: any) => {
+        console.warn("[admin/vehicles] notification skipped:", error?.message || error);
       });
       return res.json(await serializeVehicle(updated));
     } catch (error: any) {
@@ -5688,12 +5439,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await storage.updateChauffeur(updated.chauffeurId, { isApproved: false, isOnline: false });
         }
       }
-      const profile = await syncDriverOperatorReview({
-        userId: updated.userId,
-        status,
-        adminId: req.auth!.sub,
-        reason: notes,
-      });
+      const profile = await storage.getOperatorProfileByUserId(updated.userId).catch(() => undefined);
+      if (profile?.type === "driver") {
+        await storage.updateOperatorProfile(profile.id, {
+          status,
+          rejectionReason: status === "rejected" || status === "waitlisted" ? String(notes || "").trim() : null,
+          reviewedAt: new Date(),
+          reviewerAdminId: req.auth!.sub,
+        });
+      }
       if (status === "approved" || status === "rejected" || status === "waitlisted") {
         await notifyUserEvent({
           userId: updated.userId,
@@ -5878,17 +5632,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireAuth,
     requireRole(["admin"]),
     async (req: AuthedRequest, res: Response) => {
-      const status = String(req.body?.status || "");
-      const reviewReason = String(req.body?.reviewReason || "").trim();
-      if (!["approved", "rejected", "pending"].includes(status)) {
-        return res.status(400).json({ message: "Invalid document status" });
-      }
-      if (status === "rejected" && !reviewReason) {
-        return res.status(400).json({ message: "A rejection reason is required" });
-      }
+      const { status } = req.body;
       const doc = await storage.updateDocument(req.params.id, {
         status,
-        reviewReason: status === "rejected" ? reviewReason : null,
         reviewedAt: new Date(),
         reviewerAdminId: req.auth!.sub,
       });
@@ -5897,35 +5643,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     },
   );
 
-  app.post("/api/admin/notifications/test", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
-    try {
-      const userId = requireStringField(req.body, "userId");
-      const user = await storage.getUser(userId);
-      if (!user) return res.status(404).json({ message: "User not found" });
-      const chauffeur = await storage.getChauffeurByUserId(userId).catch(() => undefined);
-      const notification = await storage.createNotification({ userId, title: "A2B notification test", body: "Your notifications are working.", type: "system" });
-      const tokens = Array.from(new Set([user.pushToken, chauffeur?.pushToken].filter(Boolean) as string[]));
-      const tickets = await sendExpoPushNotification(tokens, notification.title, notification.body, { type: "admin:test" });
-      for (const ticket of tickets) {
-        await pool.query(
-          "INSERT INTO push_delivery_logs (user_id, notification_id, expo_ticket_id, status, error_message, delivered_at) VALUES ($1,$2,$3,$4,$5,$6)",
-          [userId, notification.id, ticket.id || null, ticket.status || "unknown", ticket.message || null, ticket.status === "ok" ? new Date() : null],
-        );
-      }
-      return res.json({ notification, tickets, sent: tickets.length });
-    } catch (error: any) {
-      return res.status(400).json({ message: error.message || "Unable to send test notification" });
-    }
-  });
-
   // -----------------------------
   // Pricing
   // -----------------------------
   app.post("/api/pricing/estimate", async (req: Request, res: Response) => {
     try {
-      const { distanceKm, categoryId, isLateNight, pickupLat, pickupLng } = req.body;
-      const demandMultiplier = await getDemandPricingMultiplier(Number.isFinite(Number(pickupLat)) && Number.isFinite(Number(pickupLng)) ? { lat: Number(pickupLat), lng: Number(pickupLng) } : undefined);
-      const estimate = calculatePrice(distanceKm, categoryId || "budget", { isLateNight, demandMultiplier });
+      const { distanceKm, categoryId, isLateNight, pickupLat, pickupLng, durationMin } = req.body;
+      const rideForDemand = {
+        id: `estimate_${Date.now()}`,
+        vehicleType: categoryId || "budget",
+        pickupLat,
+        pickupLng,
+      };
+      const [activeRequests, eligibleDrivers] = await Promise.all([
+        countActiveDemandForRide(rideForDemand),
+        getEligibleChauffeursForRide(rideForDemand),
+      ]);
+      const surge = calculateSurgeMultiplier({
+        activeRequests,
+        eligibleDrivers: eligibleDrivers.length,
+      });
+      const estimate = calculatePrice(distanceKm, categoryId || "budget", {
+        isLateNight,
+        surgeMultiplier: surge.multiplier,
+        surgeReason: surge.reason,
+        estimatedDurationMin: durationMin,
+      });
       return res.json(estimate);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -6153,13 +5896,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      if (Number(clientUser.walletBalance || 0) < 0) {
-        return res.status(409).json({
-          success: false,
-          message: "Please settle your outstanding cancellation balance before requesting another ride.",
-        });
-      }
-
       const categoryId = rideData.vehicleType || "budget";
       const normalizedDistanceKm = Number(rideData.selectedRouteDistanceKm ?? distanceKm ?? 10);
       const safeDistanceKm = Number.isFinite(normalizedDistanceKm) && normalizedDistanceKm > 0 ? normalizedDistanceKm : 10;
@@ -6168,8 +5904,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const selectedRouteId = typeof rideData.selectedRouteId === "string" && rideData.selectedRouteId.trim()
         ? rideData.selectedRouteId.trim()
         : null;
-      const demandMultiplier = await getDemandPricingMultiplier({ lat: Number(rideData.pickupLat), lng: Number(rideData.pickupLng) });
-      const priceEstimate = calculatePrice(safeDistanceKm, categoryId, { isLateNight, demandMultiplier });
+      const rideForDemand = {
+        id: `new_${Date.now()}`,
+        vehicleType: categoryId,
+        pickupLat: rideData.pickupLat,
+        pickupLng: rideData.pickupLng,
+      };
+      const [activeRequests, eligibleDrivers] = await Promise.all([
+        countActiveDemandForRide(rideForDemand),
+        getEligibleChauffeursForRide(rideForDemand),
+      ]);
+      const surge = calculateSurgeMultiplier({
+        activeRequests,
+        eligibleDrivers: eligibleDrivers.length,
+      });
+      const priceEstimate = calculatePrice(safeDistanceKm, categoryId, {
+        isLateNight,
+        surgeMultiplier: surge.multiplier,
+        surgeReason: surge.reason,
+        estimatedDurationMin: safeDurationMin,
+      });
       const safeFare = priceEstimate.totalPrice;
       const routeCurrency = typeof rideData.routeCurrency === "string" && rideData.routeCurrency.trim()
         ? rideData.routeCurrency.trim().toUpperCase()
@@ -6192,12 +5946,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         vehicleType: rideData.vehicleType || "budget",
         paymentMethod: rideData.paymentMethod || "cash",
         price: safeFare,
-        quotedFare: safeFare,
-        finalFare: null,
         distanceKm: safeDistanceKm,
         durationMin: safeDurationMin,
+        estimatedDurationMin: safeDurationMin,
         pricePerKm: priceEstimate.pricePerKm,
         baseFare: priceEstimate.baseFare,
+        surgeMultiplier: priceEstimate.surgeMultiplier,
+        surgeReason: priceEstimate.surgeReason,
         status: "searching",
         paymentStatus: paymentMethod === "cash" ? "unpaid" : (rideData.paymentStatus || "pending"),
         cashSelfieUrl: rideData.cashSelfieUrl || null,
@@ -6208,7 +5963,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         selectedRouteId,
         selectedRouteDistanceKm: selectedRouteId ? safeDistanceKm : null,
         actualFare: selectedRouteId ? safeFare : null,
-        demandMultiplier,
         routeCurrency,
         routeSelectedAt: selectedRouteId ? new Date() : null,
         ...(livenessVerifiedAt ? { livenessVerifiedAt } : {}),
@@ -6222,85 +5976,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch {}
       const enrichedRide = { ...ride, clientFirstName };
 
-      // Send trip only to nearby approved online drivers (sorted by distance)
-      const allChauffeurs = await storage.getAllChauffeurs();
-      const pickupLat = parseFloat(rideData.pickupLat);
-      const pickupLng = parseFloat(rideData.pickupLng);
-
-      const nearbyChauffeurs = allChauffeurs
-        .filter(c => c.isOnline && c.isApproved && hasFreshChauffeurLocation(c))
-        .map(c => ({
-          ...c,
-          distKm: calculateHaversineDistanceKm(pickupLat, pickupLng, Number(c.lat), Number(c.lng)),
-        }))
-        .filter(c => c.distKm <= RIDE_MATCH_RADIUS_KM)
-        .sort((a, b) => a.distKm - b.distKm)
-        .slice(0, 10); // notify up to 10 nearest drivers
-
-      async function getDriverPushTokens(drivers: any[]) {
-        const tokens = new Set<string>();
-        await Promise.all(drivers.map(async (driver) => {
-          if (driver?.pushToken) tokens.add(driver.pushToken);
-          if (!driver?.userId) return;
-          try {
-            const driverUser = await storage.getUser(driver.userId);
-            if ((driverUser as any)?.pushToken) tokens.add((driverUser as any).pushToken);
-          } catch {}
-        }));
-        return Array.from(tokens);
-      }
-
-      if (nearbyChauffeurs.length > 0) {
-        // Emit only to connected sockets belonging to nearby drivers
-        const sockets = await io.fetchSockets();
-        let notified = 0;
-        for (const socket of sockets) {
-          const socketData = socket.data as any;
-          if (socketData?.chauffeurId && nearbyChauffeurs.some(c => c.id === socketData.chauffeurId)) {
-            socket.emit("ride:new", { ...enrichedRide, distanceToPickup: nearbyChauffeurs.find(c => c.id === socketData.chauffeurId)?.distKm });
-            notified++;
-          }
-        }
-        // Fallback: if no sockets matched (drivers not connected via socket), broadcast to all
-        if (notified === 0) {
-          io.emit("ride:new", enrichedRide);
-        }
-        // Push notification to all nearby drivers (wakes up drivers not in the app)
-        const pushTokens = await getDriverPushTokens(nearbyChauffeurs);
-        if (pushTokens.length > 0) {
-          sendExpoPushNotification(
-            pushTokens,
-            "🚗 New Ride Request",
-            `Pickup: ${ride.pickupAddress || "Nearby"} — tap to accept`,
-              { rideId: ride.id, type: "ride:new" },
-              { urgent: true }
-          );
-        }
-      } else {
-        // No nearby drivers — broadcast to all online approved drivers as fallback
-        io.emit("ride:new", enrichedRide);
-        // Push to ALL online approved drivers with tokens
-          const allDrivers = (await storage.getAllChauffeurs()).filter(c => c.isOnline && c.isApproved && hasFreshChauffeurLocation(c));
-        const pushTokens = await getDriverPushTokens(allDrivers);
-        if (pushTokens.length > 0) {
-          sendExpoPushNotification(
-            pushTokens,
-            "🚗 New Ride Request",
-            `Pickup: ${ride.pickupAddress || "Nearby"} — tap to accept`,
-              { rideId: ride.id, type: "ride:new" },
-              { urgent: true }
-          );
-        }
-      }
+      const dispatch = await dispatchNextRideOffer(enrichedRide);
 
       // Always return success immediately — client shows "searching" UI
       return res.json({
         success: true,
-        status: ride.status,
-        message: nearbyChauffeurs.length > 0
-          ? `Notifying ${nearbyChauffeurs.length} driver${nearbyChauffeurs.length > 1 ? "s" : ""} nearby...`
+        status: dispatch.ride?.status || ride.status,
+        message: dispatch.offered
+          ? "Offering your trip to the nearest matching driver..."
           : "Searching for drivers...",
-        ride: ride,
+        firstMatchedDriverId: dispatch.offered?.id || null,
+        currentOfferExpiresAt: (dispatch.ride as any)?.currentOfferExpiresAt || null,
+        ride: dispatch.ride || ride,
       });
     } catch (error: any) {
       console.error("Ride creation error:", error);
@@ -6552,12 +6239,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!chauffeur || chauffeur.userId !== req.auth!.sub) {
         return res.status(403).json({ message: "Forbidden: chauffeur mismatch" });
       }
+      const rideToAccept = await storage.getRide(req.params.id);
+      if (!rideToAccept) return res.status(404).json({ message: "Ride not found" });
+      if (!isRideOfferActive(rideToAccept as any, chauffeurId)) {
+        return res.status(409).json({ message: "Ride offer expired or is no longer assigned to this driver" });
+      }
+      const activeVehicle = await getApprovedActiveVehicle(chauffeur);
+      if (!activeVehicle || !isVehicleEligibleForRide(rideToAccept.vehicleType || "budget", activeVehicle.vehicleType)) {
+        return res.status(403).json({ message: "Your active approved vehicle does not match this ride category." });
+      }
 
       // Atomic accept — returns undefined if another driver already claimed the ride
-      const updated = await storage.acceptRideAtomic(req.params.id, chauffeurId, chauffeur.activeVehicleId || null);
+      const updated = await storage.acceptRideAtomic(req.params.id, chauffeurId, activeVehicle.id || null);
       if (!updated) {
         return res.status(409).json({ message: "Ride already assigned to another driver" });
       }
+      const timer = dispatchTimers.get(updated.id);
+      if (timer) clearTimeout(timer);
+      dispatchTimers.delete(updated.id);
+      skippedChauffeursByRide.delete(updated.id);
 
       // Enrich with client first name before emitting — nav modal uses it immediately
       let clientFirstName = "Rider";
@@ -6630,80 +6330,117 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Forbidden: not a party to this ride" });
       }
 
+      const now = new Date();
+      const cancelledBy = status === "cancelled"
+        ? (isRider ? "client" : isChauffeur ? "driver" : "admin")
+        : undefined;
+
       // For cancellations, capture the pre-update ride first so we can refund
       const rideBeforeUpdate = status === "cancelled" ? existingRide : null;
-      const now = new Date();
-      const isRiderCancellation = status === "cancelled" && isRider && !isAdmin;
-      const minutesDrivingToPickup = existingRide.pickupTravelStartedAt
-        ? Math.max(0, (now.getTime() - new Date(existingRide.pickupTravelStartedAt).getTime()) / 60000)
-        : 0;
-      const waitingFee = existingRide.arrivedAt
-        ? calculateWaitingFee(Math.max(0, (now.getTime() - new Date(existingRide.arrivedAt).getTime()) / 60000)) / 100
-        : 0;
-      const cancellation = status === "cancelled"
-        ? resolveCancellation({
-            actor: isRiderCancellation ? "rider" : "driver",
-            baseFareCents: Math.round(Number(existingRide.baseFare || 0) * 100),
-            minutesDrivingToPickup,
-            waitingFeeCents: Math.round(waitingFee * 100),
-            arrived: !!existingRide.arrivedAt,
-          })
-        : null;
-      const finalEstimate = status === "trip_completed"
-        ? calculatePrice(Number(existingRide.actualDistanceKm || existingRide.distanceKm || 0), existingRide.vehicleType || "budget", {
-            demandMultiplier: Number(existingRide.demandMultiplier || 1),
-          })
-        : null;
-
-      const ride = await storage.updateRide(req.params.id, {
+      const updateData: Record<string, any> = {
         status,
-        ...(status === "trip_completed" ? { completedAt: new Date() } : {}),
-        ...(finalEstimate ? { price: finalEstimate.totalPrice, finalFare: finalEstimate.totalPrice, settlementStatus: "finalised" } : {}),
-        ...(status === "chauffeur_arriving" && isChauffeur && !existingRide.pickupTravelStartedAt ? { pickupTravelStartedAt: now } : {}),
-        ...(status === "chauffeur_arrived" && isChauffeur ? { arrivedAt: now } : {}),
-        ...(cancellation ? { waitingFee, cancellationFee: cancellation.feeCents / 100, finalFare: cancellation.feeCents / 100, settlementStatus: cancellation.feeCents > 0 ? "cancellation_due" : "cancelled" } : {}),
-      });
-      if (!ride) return res.status(404).json({ message: "Ride not found" });
+      };
+      if (status === "trip_started") {
+        updateData.tripStartedAt = (existingRide as any).tripStartedAt || now;
+      }
+      if (status === "trip_completed") {
+        const actualDurationFromBody = Number(req.body?.actualDurationMin);
+        const actualDurationMin = Number.isFinite(actualDurationFromBody) && actualDurationFromBody > 0
+          ? actualDurationFromBody
+          : (existingRide as any).tripStartedAt
+            ? Math.max(0, (now.getTime() - new Date((existingRide as any).tripStartedAt).getTime()) / 60000)
+            : (existingRide as any).acceptedAt
+              ? Math.max(0, (now.getTime() - new Date((existingRide as any).acceptedAt).getTime()) / 60000)
+              : Number(existingRide.durationMin || 0);
+        const minuteAdjustment = calculatePerMinuteAdjustment(
+          (existingRide as any).estimatedDurationMin ?? existingRide.durationMin,
+          actualDurationMin,
+        );
+        const previousAdjustment = Number((existingRide as any).perMinuteAdjustment || 0);
+        const additionalAdjustment = Math.max(0, minuteAdjustment.adjustmentAmount - previousAdjustment);
+        updateData.completedAt = now;
+        updateData.actualDurationMin = Math.round(actualDurationMin * 10) / 10;
+        updateData.perMinuteAdjustment = minuteAdjustment.adjustmentAmount;
+        updateData.price = Math.round((Number(existingRide.price || 0) + additionalAdjustment) * 100) / 100;
+      }
+      if (status === "cancelled") {
+        const cancellation = calculateCancellationFee(
+          existingRide.vehicleType || "budget",
+          (existingRide as any).acceptedAt,
+          now,
+          cancelledBy,
+        );
+        updateData.cancelledBy = cancelledBy;
+        updateData.cancellationFee = cancellation.fee;
+        updateData.currentOfferedChauffeurId = null;
+        updateData.currentOfferExpiresAt = null;
+      }
 
-      if (status === "trip_completed" && ride.paymentMethod === "card") {
-        const adjustment = Number(ride.price || 0) - Number(rideBeforeUpdate?.price || existingRide.price || 0);
-        if (adjustment > 0) await chargeFinalFareAdjustment(ride, adjustment);
-        if (adjustment < 0) await refundFinalFareAdjustment(ride, Math.abs(adjustment));
+      const ride = await storage.updateRide(req.params.id, updateData as any);
+      if (!ride) return res.status(404).json({ message: "Ride not found" });
+      if (status === "cancelled" || status === "trip_completed") {
+        const timer = dispatchTimers.get(ride.id);
+        if (timer) clearTimeout(timer);
+        dispatchTimers.delete(ride.id);
+        skippedChauffeursByRide.delete(ride.id);
       }
 
       // ── Cancellation: refunds + notifications for all parties ──
       if (status === "cancelled" && rideBeforeUpdate) {
         try {
           const payments = await storage.getPaymentsByRide(req.params.id);
+          const cancellationFee = Math.max(0, Number((ride as any).cancellationFee || 0));
+          const grossRidePrice = Math.max(0, Number(rideBeforeUpdate.price || 0));
+          const refundableAmount = Math.max(0, grossRidePrice - cancellationFee);
+          const feeMessage = cancellationFee > 0
+            ? `A cancellation fee of R${cancellationFee.toFixed(2)} was applied.`
+            : "No charges were applied.";
 
-          const cancellationFee = Number(ride.cancellationFee || 0);
-          const refundAmount = Math.max(0, Number(rideBeforeUpdate.price || 0) - cancellationFee);
-
-          // ── Card payment → a single direct Paystack refund, less any earned cancellation fee ──
+          // ── Card payment → Paystack refund + credit wallet ──
           const cardPayment = payments.find((p: any) =>
             p.method === "card" && p.status === "paid" && p.paystackReference
           );
-          if (cardPayment?.paystackReference && refundAmount > 0) {
+          if (cardPayment?.paystackReference) {
             const secret = process.env.PAYSTACK_SECRET_KEY || "";
-            await axios.post(
-              "https://api.paystack.co/refund",
-              { transaction: cardPayment.paystackReference, amount: Math.round(refundAmount * 100) },
-              { headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" } }
-            );
-            await storage.updatePayment(cardPayment.id, { status: cancellationFee > 0 ? "paid" : "refunded" });
+            if (refundableAmount > 0) {
+              await axios.post(
+                "https://api.paystack.co/refund",
+                {
+                  transaction: cardPayment.paystackReference,
+                  amount: Math.round(refundableAmount * 100),
+                },
+                { headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" } }
+              );
+            }
+            await storage.updatePayment(cardPayment.id, { status: cancellationFee > 0 ? "partially_refunded" : "refunded" });
             const rider = await storage.getUser(rideBeforeUpdate.clientId);
+            if (rider && refundableAmount > 0) {
+              const amt = refundableAmount;
+              const balanceBefore = rider.walletBalance || 0;
+              const newBalance = balanceBefore + amt;
+              await storage.updateUser(rider.id, { walletBalance: newBalance });
+              await storage.createWalletTransaction({
+                userId: rider.id, type: "refund", amount: amt,
+                balanceBefore, balanceAfter: newBalance,
+                reference: cardPayment.paystackReference,
+                description: cancellationFee > 0
+                  ? "Ride cancelled — remaining card payment refunded after cancellation fee"
+                  : "Ride cancelled — card payment refunded to wallet",
+                rideId: ride.id, status: "completed",
+              });
+            }
             if (rider) {
               await storage.createNotification({
                 userId: rider.id,
                 title: "Refund Issued",
-                body: `Your ride was cancelled. R${refundAmount.toFixed(2)} has been refunded to your card.`,
+                body: `Your ride was cancelled. ${feeMessage}${refundableAmount > 0 ? ` R${refundableAmount.toFixed(2)} has been refunded to your A2B wallet.` : ""}`,
                 type: "payment",
               });
               if ((rider as any)?.pushToken) {
                 sendExpoPushNotification(
                   [(rider as any).pushToken],
                   "Refund Issued",
-                  `R${refundAmount.toFixed(2)} has been refunded to your card.`,
+                  `Your ride was cancelled. ${feeMessage}`,
                   { rideId: ride.id, type: "ride:cancelled" },
                   { urgent: true, channelId: "client-alerts" },
                 );
@@ -6715,32 +6452,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const walletPayment = !cardPayment
             ? payments.find((p: any) => p.method === "wallet" && p.status === "paid")
             : null;
-          if (walletPayment && refundAmount > 0) {
+          if (walletPayment) {
             const rider = await storage.getUser(rideBeforeUpdate.clientId);
             if (rider) {
-              const amt = refundAmount;
+              const amt = refundableAmount;
               const balanceBefore = rider.walletBalance || 0;
               const newBalance = balanceBefore + amt;
-              await storage.updateUser(rider.id, { walletBalance: newBalance });
-              await storage.updatePayment(walletPayment.id, { status: cancellationFee > 0 ? "paid" : "refunded" });
-              await storage.createWalletTransaction({
-                userId: rider.id, type: "refund", amount: amt,
-                balanceBefore, balanceAfter: newBalance,
-                reference: `wallet_refund_${ride.id}_${Date.now()}`,
-                description: "Ride cancelled — wallet balance restored",
-                rideId: ride.id, status: "completed",
-              });
+              if (amt > 0) {
+                await storage.updateUser(rider.id, { walletBalance: newBalance });
+                await storage.createWalletTransaction({
+                  userId: rider.id, type: "refund", amount: amt,
+                  balanceBefore, balanceAfter: newBalance,
+                  reference: `wallet_refund_${ride.id}_${Date.now()}`,
+                  description: cancellationFee > 0
+                    ? "Ride cancelled — remaining wallet balance restored after cancellation fee"
+                    : "Ride cancelled — wallet balance restored",
+                  rideId: ride.id, status: "completed",
+                });
+              }
+              await storage.updatePayment(walletPayment.id, { status: cancellationFee > 0 ? "partially_refunded" : "refunded" });
               await storage.createNotification({
                 userId: rider.id,
                 title: "Refund Issued",
-                body: `Your ride was cancelled. R${amt.toFixed(2)} has been returned to your A2B wallet.`,
+                body: `Your ride was cancelled. ${feeMessage}${amt > 0 ? ` R${amt.toFixed(2)} has been returned to your A2B wallet.` : ""}`,
                 type: "payment",
               });
               if ((rider as any)?.pushToken) {
                 sendExpoPushNotification(
                   [(rider as any).pushToken],
                   "Refund Issued",
-                  `R${amt.toFixed(2)} has been returned to your A2B wallet.`,
+                  `Your ride was cancelled. ${feeMessage}`,
                   { rideId: ride.id, type: "ride:cancelled" },
                   { urgent: true, channelId: "client-alerts" },
                 );
@@ -6753,28 +6494,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (!cardPayment && !walletPayment && paymentMethod === "cash") {
             const rider = await storage.getUser(rideBeforeUpdate.clientId);
             if (rider && cancellationFee > 0) {
-              const balanceBefore = Number(rider.walletBalance || 0);
+              const balanceBefore = rider.walletBalance || 0;
               const balanceAfter = balanceBefore - cancellationFee;
               await storage.updateUser(rider.id, { walletBalance: balanceAfter });
               await storage.createWalletTransaction({
-                userId: rider.id, type: "cancellation_fee", amount: -cancellationFee,
-                balanceBefore, balanceAfter,
-                reference: `cash_cancellation_${ride.id}`,
+                userId: rider.id,
+                type: "cancellation_fee",
+                amount: cancellationFee,
+                balanceBefore,
+                balanceAfter,
+                reference: `cash_cancel_fee_${ride.id}_${Date.now()}`,
                 description: "Cash ride cancellation fee",
-                rideId: ride.id, status: "completed",
+                rideId: ride.id,
+                status: "completed",
               });
             }
             await storage.createNotification({
               userId: rideBeforeUpdate.clientId,
               title: "Ride Cancelled",
-              body: cancellationFee > 0 ? `Your cancellation fee is R${cancellationFee.toFixed(2)}.` : "No cancellation fee was charged.",
+              body: `Your ride has been cancelled. ${feeMessage}`,
               type: "ride",
             });
             if ((rider as any)?.pushToken) {
               sendExpoPushNotification(
                 [(rider as any).pushToken],
                 "Ride Cancelled",
-                cancellationFee > 0 ? `A cancellation fee of R${cancellationFee.toFixed(2)} was applied.` : "No cancellation fee was charged.",
+                `Your ride was cancelled. ${feeMessage}`,
                 { rideId: ride.id, type: "ride:cancelled" },
                 { urgent: true, channelId: "client-alerts" },
               );
@@ -7125,8 +6870,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!chauffeur || !chauffeur.isOnline || !chauffeur.isApproved) {
         return res.json([]);
       }
+      const activeVehicle = await getApprovedActiveVehicle(chauffeur);
+      if (!activeVehicle) return res.json([]);
       const allRides = await storage.getAllRides();
-      const searching = allRides.filter((r) => r.status === "searching");
+      const searching = allRides.filter((r) =>
+        r.status === "searching" &&
+        isRideOfferActive(r as any, chauffeur.id) &&
+        isVehicleEligibleForRide(r.vehicleType || "budget", activeVehicle.vehicleType)
+      );
       if (!searching.length) return res.json([]);
 
       let candidates = searching;
@@ -7168,8 +6919,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!chauffeur || !chauffeur.isOnline || !chauffeur.isApproved) {
         return res.status(204).end();
       }
+      const activeVehicle = await getApprovedActiveVehicle(chauffeur);
+      if (!activeVehicle) return res.status(204).end();
       const allRides = await storage.getAllRides();
-      const searching = allRides.filter((r) => r.status === "searching");
+      const searching = allRides.filter((r) =>
+        r.status === "searching" &&
+        isRideOfferActive(r as any, chauffeur.id) &&
+        isVehicleEligibleForRide(r.vehicleType || "budget", activeVehicle.vehicleType)
+      );
       if (!searching.length) return res.status(204).end();
 
       // Helper to enrich a ride with clientFirstName
@@ -7701,40 +7458,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       "Content-Type": "application/json",
     },
   });
-
-  async function chargeFinalFareAdjustment(ride: any, amount: number) {
-    const adjustmentKey = `final-fare-charge:${ride.id}:${Math.round(amount * 100)}`;
-    const inserted = await pool.query(
-      "INSERT INTO payment_adjustments (ride_id, adjustment_key, direction, amount, status) VALUES ($1,$2,'charge',$3,'pending') ON CONFLICT (adjustment_key) DO NOTHING RETURNING id",
-      [ride.id, adjustmentKey, amount],
-    );
-    if (!inserted.rowCount) return;
-    const rider = await storage.getUser(ride.clientId);
-    const cards = rider ? await storage.getSavedCardsByUser(rider.id) : [];
-    const card = cards.find((item: any) => item.isDefault) || cards[0];
-    if (!rider || !card) {
-      await pool.query("UPDATE payment_adjustments SET status = 'requires_payment' WHERE adjustment_key = $1", [adjustmentKey]);
-      return;
-    }
-    const reference = `A2B-FINAL-${ride.id}-${Date.now()}`;
-    const response = await paystackAPI.post("/transaction/charge_authorization", {
-      authorization_code: card.paystackAuthCode, email: rider.username, amount: Math.round(amount * 100), currency: "ZAR", reference,
-      metadata: { userId: rider.id, rideId: ride.id, adjustmentKey },
-    });
-    if (response.data?.data?.status !== "success") throw new Error("Final fare card adjustment failed");
-    await storage.createPayment({ rideId: ride.id, payerUserId: rider.id, amount, method: "card", status: "paid", currency: "ZAR", paidAt: new Date(), paystackReference: reference, paystackAuthCode: card.paystackAuthCode });
-    await pool.query("UPDATE payment_adjustments SET status = 'completed', provider_reference = $2, completed_at = now() WHERE adjustment_key = $1", [adjustmentKey, reference]);
-  }
-
-  async function refundFinalFareAdjustment(ride: any, amount: number) {
-    const adjustmentKey = `final-fare-refund:${ride.id}:${Math.round(amount * 100)}`;
-    const inserted = await pool.query("INSERT INTO payment_adjustments (ride_id, adjustment_key, direction, amount, status) VALUES ($1,$2,'refund',$3,'pending') ON CONFLICT (adjustment_key) DO NOTHING RETURNING id", [ride.id, adjustmentKey, amount]);
-    if (!inserted.rowCount) return;
-    const payment = (await storage.getPaymentsByRide(ride.id)).find((item: any) => item.method === "card" && item.status === "paid" && item.paystackReference);
-    if (!payment?.paystackReference) { await pool.query("UPDATE payment_adjustments SET status = 'requires_payment' WHERE adjustment_key = $1", [adjustmentKey]); return; }
-    await paystackAPI.post("/refund", { transaction: payment.paystackReference, amount: Math.round(amount * 100) });
-    await pool.query("UPDATE payment_adjustments SET status = 'completed', provider_reference = $2, completed_at = now() WHERE adjustment_key = $1", [adjustmentKey, payment.paystackReference]);
-  }
 
   async function recordWalletTx(
     userId: string, type: string, amount: number,
@@ -8433,22 +8156,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({ message: "User deleted" });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.put("/api/admin/users/:id/password", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
-    try {
-      const validation = validateAdminPassword(req.body?.password);
-      if (!validation.ok) return res.status(400).json({ message: validation.message });
-
-      const user = await storage.getUser(req.params.id);
-      if (!user) return res.status(404).json({ message: "User not found" });
-
-      const password = await bcrypt.hash(String(req.body.password), 10);
-      await storage.updateUser(user.id, { password } as any);
-      return res.json({ ok: true, message: "Password updated." });
-    } catch (error: any) {
-      return res.status(500).json({ message: error.message || "Unable to update password." });
     }
   });
 
