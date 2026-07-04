@@ -28,6 +28,17 @@ if [[ "$PLATFORM" == "ios" ]]; then
   node scripts/ensure-local-ios-credentials.mjs "$VARIANT"
   export MAPS_BUILD_PLATFORM=ios
 else
+  if [[ ! -f "credentials/android/keystore.jks" && -f "$HOME/A2B-LIFT/credentials/android/keystore.jks" ]]; then
+    mkdir -p credentials/android
+    cp "$HOME/A2B-LIFT/credentials/android/keystore.jks" credentials/android/keystore.jks
+  fi
+
+  if [[ ! -f "credentials/android/keystore.jks" ]]; then
+    echo "Android keystore missing: credentials/android/keystore.jks" >&2
+    echo "Expected source: $HOME/A2B-LIFT/credentials/android/keystore.jks" >&2
+    exit 1
+  fi
+
   export JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 17)}"
   export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
   export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
