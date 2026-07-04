@@ -39,7 +39,23 @@ else
     exit 1
   fi
 
-  export JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 17)}"
+  if [[ -z "${JAVA_HOME:-}" ]]; then
+    if JAVA_HOME_DETECTED="$(/usr/libexec/java_home -v 17 2>/dev/null)"; then
+      export JAVA_HOME="$JAVA_HOME_DETECTED"
+    elif [[ -x "/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/java" ]]; then
+      export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+    else
+      echo "Java 17 runtime not found." >&2
+      echo "Install a JDK or Android Studio, then rerun this command." >&2
+      exit 1
+    fi
+  fi
+
+  if [[ ! -x "$JAVA_HOME/bin/java" ]]; then
+    echo "JAVA_HOME is invalid: $JAVA_HOME" >&2
+    exit 1
+  fi
+
   export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
   export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
   export MAPS_BUILD_PLATFORM=android
