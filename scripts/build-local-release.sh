@@ -28,6 +28,11 @@ if [[ "$PLATFORM" == "ios" ]]; then
   node scripts/ensure-local-ios-credentials.mjs "$VARIANT"
   export MAPS_BUILD_PLATFORM=ios
 else
+  EAS_TMP_ROOT="${TMPDIR:-/tmp}/eas-build-local-nodejs"
+  if [[ -d "$EAS_TMP_ROOT" ]]; then
+    find "$EAS_TMP_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +1 -exec rm -rf {} +
+  fi
+
   if [[ ! -f "credentials/android/keystore.jks" && -f "$HOME/A2B-LIFT/credentials/android/keystore.jks" ]]; then
     mkdir -p credentials/android
     cp "$HOME/A2B-LIFT/credentials/android/keystore.jks" credentials/android/keystore.jks
@@ -59,6 +64,8 @@ else
   export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
   export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
   export MAPS_BUILD_PLATFORM=android
+  export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
+  export GRADLE_OPTS="${GRADLE_OPTS:-} -Dorg.gradle.workers.max=${ORG_GRADLE_WORKERS_MAX:-2} -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process"
 fi
 
 export APP_VARIANT="$VARIANT"
