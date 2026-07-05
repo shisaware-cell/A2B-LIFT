@@ -168,6 +168,7 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
           },
         },
       ],
+      "./plugins/with-android-release-lint-disabled",
       [
         "expo-notifications",
         {
