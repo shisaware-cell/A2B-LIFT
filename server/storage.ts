@@ -137,6 +137,10 @@ export interface IStorage {
   createLiftClubBooking(data: any): Promise<LiftClubBooking>;
   confirmLiftClubBookingWithSeat(data: any): Promise<LiftClubBooking>;
   getLiftClubBookingsByUser(userId: string): Promise<any[]>;
+  getLiftClubMembershipByUser(userId: string): Promise<any | undefined>;
+  getLiftClubMemberships(filters?: { status?: string }): Promise<any[]>;
+  upsertLiftClubMembership(data: any): Promise<any>;
+  updateLiftClubMembership(id: string, data: any): Promise<any | undefined>;
 
   createDocument(data: any): Promise<Document>;
   getDocumentsByApplication(applicationId: string): Promise<Document[]>;
@@ -231,6 +235,7 @@ export interface IStorage {
     type: string,
     sourceUserId?: string,
   ): Promise<RewardTransaction | undefined>;
+  getRewardTransactionByReference(reference: string): Promise<RewardTransaction | undefined>;
 
   createRewardCashout(data: any): Promise<RewardCashout>;
   getRewardCashout(id: string): Promise<RewardCashout | undefined>;
@@ -749,6 +754,160 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
+  private mapLiftClubMembership(row: any): any | undefined {
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      userId: row.user_id,
+      status: row.status,
+      feeAmount: Number(row.fee_amount ?? 100),
+      proofDocumentId: row.proof_document_id,
+      rejectionReason: row.rejection_reason,
+      submittedAt: row.submitted_at,
+      paidAt: row.paid_at,
+      reviewedAt: row.reviewed_at,
+      reviewerAdminId: row.reviewer_admin_id,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      user: row.user_name || row.user_username || row.user_phone || row.user_role
+        ? {
+            id: row.user_id,
+            name: row.user_name,
+            username: row.user_username,
+            phone: row.user_phone,
+            role: row.user_role,
+          }
+        : undefined,
+      proofDocument: row.document_id
+        ? {
+            id: row.document_id,
+            type: row.document_type,
+            url: row.document_url,
+            status: row.document_status,
+            reviewReason: row.document_review_reason,
+            uploadedAt: row.document_uploaded_at,
+          }
+        : null,
+    };
+  }
+
+  private liftClubMembershipSelect(whereSql = "", values: any[] = []): Promise<any[]> {
+    return pool.query(
+      `
+        SELECT
+          m.*,
+          u.name AS user_name,
+          u.username AS user_username,
+          u.phone AS user_phone,
+          u.role AS user_role,
+          d.id AS document_id,
+          d.type AS document_type,
+          d.url AS document_url,
+          d.status AS document_status,
+          d.review_reason AS document_review_reason,
+          d.uploaded_at AS document_uploaded_at
+        FROM lift_club_memberships m
+        LEFT JOIN users u ON u.id = m.user_id
+        LEFT JOIN documents d ON d.id = m.proof_document_id
+        ${whereSql}
+        ORDER BY m.updated_at DESC, m.created_at DESC
+      `,
+      values,
+    ).then((result) => result.rows);
+  }
+
+  async getLiftClubMembershipByUser(userId: string): Promise<any | undefined> {
+    const rows = await this.liftClubMembershipSelect("WHERE m.user_id = $1", [userId]);
+    return this.mapLiftClubMembership(rows[0]);
+  }
+
+  async getLiftClubMemberships(filters: { status?: string } = {}): Promise<any[]> {
+    const rows = filters.status
+      ? await this.liftClubMembershipSelect("WHERE m.status = $1", [filters.status])
+      : await this.liftClubMembershipSelect();
+    return rows.map((row) => this.mapLiftClubMembership(row));
+  }
+
+  async upsertLiftClubMembership(data: any): Promise<any> {
+    const result = await pool.query(
+      `
+        INSERT INTO lift_club_memberships (
+          user_id,
+          status,
+          fee_amount,
+          proof_document_id,
+          rejection_reason,
+          submitted_at,
+          paid_at,
+          reviewed_at,
+          reviewer_admin_id,
+          updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()), $7, $8, $9, now())
+        ON CONFLICT (user_id) DO UPDATE SET
+          status = EXCLUDED.status,
+          fee_amount = EXCLUDED.fee_amount,
+          proof_document_id = COALESCE(EXCLUDED.proof_document_id, lift_club_memberships.proof_document_id),
+          rejection_reason = EXCLUDED.rejection_reason,
+          submitted_at = COALESCE(EXCLUDED.submitted_at, lift_club_memberships.submitted_at, now()),
+          paid_at = COALESCE(EXCLUDED.paid_at, lift_club_memberships.paid_at),
+          reviewed_at = COALESCE(EXCLUDED.reviewed_at, lift_club_memberships.reviewed_at),
+          reviewer_admin_id = COALESCE(EXCLUDED.reviewer_admin_id, lift_club_memberships.reviewer_admin_id),
+          updated_at = now()
+        RETURNING *
+      `,
+      [
+        data.userId,
+        data.status || "pending_payment",
+        data.feeAmount ?? 100,
+        data.proofDocumentId ?? null,
+        data.rejectionReason ?? null,
+        data.submittedAt ?? null,
+        data.paidAt ?? null,
+        data.reviewedAt ?? null,
+        data.reviewerAdminId ?? null,
+      ],
+    );
+    const rows = await this.liftClubMembershipSelect("WHERE m.id = $1", [result.rows[0].id]);
+    return this.mapLiftClubMembership(rows[0]);
+  }
+
+  async updateLiftClubMembership(id: string, data: any): Promise<any | undefined> {
+    const fieldMap: Record<string, string> = {
+      status: "status",
+      feeAmount: "fee_amount",
+      proofDocumentId: "proof_document_id",
+      rejectionReason: "rejection_reason",
+      submittedAt: "submitted_at",
+      paidAt: "paid_at",
+      reviewedAt: "reviewed_at",
+      reviewerAdminId: "reviewer_admin_id",
+    };
+    const entries = Object.entries(fieldMap).filter(([key]) => Object.prototype.hasOwnProperty.call(data, key));
+    if (entries.length === 0) {
+      const rows = await this.liftClubMembershipSelect("WHERE m.id = $1", [id]);
+      return this.mapLiftClubMembership(rows[0]);
+    }
+
+    const values = [id];
+    const assignments = entries.map(([key, column], index) => {
+      values.push(data[key]);
+      return `${column} = $${index + 2}`;
+    });
+
+    await pool.query(
+      `
+        UPDATE lift_club_memberships
+        SET ${assignments.join(", ")}, updated_at = now()
+        WHERE id = $1
+      `,
+      values,
+    );
+
+    const rows = await this.liftClubMembershipSelect("WHERE m.id = $1", [id]);
+    return this.mapLiftClubMembership(rows[0]);
+  }
+
   async createDocument(data: any): Promise<Document> {
     const [doc] = await db.insert(documents).values(data).returning();
     return doc;
@@ -1175,6 +1334,14 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(rewardTransactions)
       .where(and(...conditions));
+    return tx;
+  }
+
+  async getRewardTransactionByReference(reference: string): Promise<RewardTransaction | undefined> {
+    const [tx] = await db
+      .select()
+      .from(rewardTransactions)
+      .where(eq(rewardTransactions.reference, reference));
     return tx;
   }
 
