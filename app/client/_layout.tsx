@@ -90,6 +90,7 @@ function ClassicTabLayout() {
       <Tabs.Screen name="safety" options={{ href: null }} />
       <Tabs.Screen name="help" options={{ href: null }} />
       <Tabs.Screen name="settings" options={{ href: null }} />
+      <Tabs.Screen name="lift-club" options={{ href: null }} />
       <Tabs.Screen name="chat" options={{ href: null, tabBarStyle: { display: "none" } }} />
     </Tabs>
   );

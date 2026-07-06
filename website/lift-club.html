@@ -26,6 +26,9 @@
     .lift-trust-card { background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius); padding: 20px; }
     .lift-trust-card strong { display: block; font-size: 15px; margin-bottom: 6px; }
     .lift-trust-card p { color: var(--grey-600); font-size: 13px; line-height: 1.65; }
+    .lift-member-cta { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 22px; align-items: center; background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius-lg); padding: 28px; margin-top: 20px; box-shadow: var(--shadow-sm); }
+    .lift-member-cta h3 { font-size: 22px; font-weight: 800; letter-spacing: -.02em; margin-bottom: 8px; }
+    .lift-member-cta p { color: var(--grey-600); font-size: 14px; line-height: 1.7; margin: 0; }
     .lift-info-band { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 56px; align-items: center; }
     .lift-info-image { border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-lg); background: var(--grey-100); }
     .lift-info-image img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
@@ -52,7 +55,7 @@
     .lift-driver-cta { display:grid; grid-template-columns:1fr auto; gap:20px; align-items:center; background:var(--black); color:var(--white); border-radius:var(--radius-lg); padding:30px; margin-top:36px; }
     .lift-driver-cta p { color:rgba(255,255,255,.62); margin-top:6px; max-width:660px; }
     @media(max-width:920px){ .lift-hero { min-height: 680px; } .lift-info-band, .lift-trust-row, .lift-process, .lift-pass-grid { grid-template-columns: 1fr; } }
-    @media(max-width:720px){ .lift-driver-cta { grid-template-columns:1fr; } .lift-hero { min-height: 640px; padding-bottom: 64px; } .lift-hero-bg::after { background: linear-gradient(180deg, rgba(0,0,0,.72), rgba(0,0,0,.92)); } .lift-search-panel { margin-top: -36px; } }
+    @media(max-width:720px){ .lift-driver-cta, .lift-member-cta { grid-template-columns:1fr; } .lift-hero { min-height: 640px; padding-bottom: 64px; } .lift-hero-bg::after { background: linear-gradient(180deg, rgba(0,0,0,.72), rgba(0,0,0,.92)); } .lift-search-panel { margin-top: -36px; } }
   </style>
 </head>
 <body>
@@ -141,6 +144,13 @@
         <div class="lift-trust-card"><strong>Cars must qualify</strong><p>Only approved vehicles from 2015 onwards can be listed for public daily lift club routes.</p></div>
         <div class="lift-trust-card"><strong>Seats cannot overbook</strong><p>Each vehicle shows booked seats and remaining seats. Full cars are disabled automatically.</p></div>
         <div class="lift-trust-card"><strong>Pay before confirmation</strong><p>Weekly and monthly passes are confirmed after Paystack payment verification.</p></div>
+      </div>
+      <div class="lift-member-cta">
+        <div>
+          <h3>Membership is required before booking a seat</h3>
+          <p>Search stays open to everyone. To book, register as a Lift Club member, pay the once-off R100 manual fee, upload proof, and wait for admin approval. Your normal 2.5% reward programme remains active, plus you can earn R50 once when someone you invited pays the R100 Lift Club registration fee and is approved by admin.</p>
+        </div>
+        <a href="dashboard.html#liftclub" class="btn btn-primary">Register as Lift Club member</a>
       </div>
 
       <div class="lift-results-layout">

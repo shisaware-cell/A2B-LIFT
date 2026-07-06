@@ -18,6 +18,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 WebBrowser.maybeCompleteAuthSession();
 
 const GOOGLE_OAUTH_START = "https://a2blift.com/api/auth/google/start";
+const APP_VARIANT = getAppVariant();
+type ClientLoginMode = "client" | "lift_club";
 
 function isAuthCallback(url: string) {
   return Linking.parse(url).path === "auth";
@@ -33,7 +35,8 @@ export default function LoginScreen() {
   const [error, setError] = useState("");
   const [resetMessage, setResetMessage] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const isDriverApp = getAppVariant() === "driver";
+  const [clientLoginMode, setClientLoginMode] = useState<ClientLoginMode>("client");
+  const showClientModeChoice = APP_VARIANT === "client";
 
   // Clear error whenever screen comes into focus (e.g. after logout)
   useFocusEffect(useCallback(() => { setError(""); setResetMessage(""); }, []));
@@ -55,6 +58,7 @@ export default function LoginScreen() {
       const payloadStr = parsed.searchParams.get("payload");
       if (!payloadStr) { setGoogleLoading(false); return; }
       const payload = JSON.parse(decodeURIComponent(payloadStr));
+      await AsyncStorage.setItem("a2b_last_mode", showClientModeChoice ? clientLoginMode : APP_VARIANT === "driver" ? "chauffeur" : "client");
       await AsyncStorage.setItem("a2b_user", JSON.stringify(payload.user));
       if (payload.accessToken) await AsyncStorage.setItem("a2b_token", payload.accessToken);
       // Fetch the latest user profile from the server so the role is always current
@@ -80,6 +84,7 @@ export default function LoginScreen() {
     if (!username.trim() || !password.trim()) { setError("Please fill in all fields"); return; }
     setLoading(true); setError(""); setResetMessage("");
     try {
+      await AsyncStorage.setItem("a2b_last_mode", showClientModeChoice ? clientLoginMode : APP_VARIANT === "driver" ? "chauffeur" : "client");
       await login(username.trim(), password);
       // AuthGate handles navigation when user state changes
     } catch (e: any) {
@@ -142,9 +147,38 @@ export default function LoginScreen() {
         <View style={styles.header}>
           <Text style={styles.title}>Welcome Back</Text>
           <Text style={styles.subtitle}>
-            Sign in to your {isDriverApp ? "A2B LIFT DRIVER" : "A2B LIFT"} account
+            {showClientModeChoice
+              ? "Choose how you want to continue, then sign in."
+              : APP_VARIANT === "driver"
+                ? "Sign in to your A2B LIFT DRIVER account"
+                : "Sign in to your A2B LIFT account"}
           </Text>
         </View>
+
+        {showClientModeChoice && (
+          <View style={styles.modeCard}>
+            <Pressable
+              style={[styles.modeOption, clientLoginMode === "client" && styles.modeOptionActive]}
+              onPress={() => setClientLoginMode("client")}
+            >
+              <Ionicons name="car-sport-outline" size={20} color={clientLoginMode === "client" ? Colors.primary : Colors.white} />
+              <View style={styles.modeCopy}>
+                <Text style={[styles.modeTitle, clientLoginMode === "client" && styles.modeTitleActive]}>Continue as Client</Text>
+                <Text style={styles.modeText}>Book normal A2B rides from your current dashboard.</Text>
+              </View>
+            </Pressable>
+            <Pressable
+              style={[styles.modeOption, clientLoginMode === "lift_club" && styles.modeOptionActive]}
+              onPress={() => setClientLoginMode("lift_club")}
+            >
+              <Ionicons name="ribbon-outline" size={20} color={clientLoginMode === "lift_club" ? "#2A1D00" : "#F7C948"} />
+              <View style={styles.modeCopy}>
+                <Text style={[styles.modeTitle, clientLoginMode === "lift_club" && styles.modeTitleActive]}>Join Lift Club</Text>
+                <Text style={styles.modeText}>Apply for weekday Lift Club membership and upload R100 proof.</Text>
+              </View>
+            </Pressable>
+          </View>
+        )}
 
         {!!pendingReferralCode && (
           <View style={styles.referralNotice}>
@@ -239,6 +273,29 @@ const styles = StyleSheet.create({
   referralNoticeTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.white },
   referralNoticeText: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textSecondary, lineHeight: 19 },
   form: { gap: 16 },
+  modeCard: {
+    gap: 10,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    borderRadius: 18,
+    padding: 10,
+    marginBottom: 18,
+  },
+  modeOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  modeOptionActive: { backgroundColor: Colors.white, borderColor: Colors.white },
+  modeCopy: { flex: 1, gap: 3 },
+  modeTitle: { fontSize: 14, fontFamily: "Inter_700Bold", color: Colors.white },
+  modeTitleActive: { color: Colors.primary },
+  modeText: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textMuted, lineHeight: 17 },
   errorBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(255,77,77,0.1)", padding: 12, borderRadius: 10, borderWidth: 1, borderColor: "rgba(255,77,77,0.2)" },
   errorText: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.error },
   successBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(76,175,80,0.1)", padding: 12, borderRadius: 10, borderWidth: 1, borderColor: "rgba(76,175,80,0.22)" },

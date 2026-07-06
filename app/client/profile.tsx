@@ -69,6 +69,7 @@ export default function ProfileScreen() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [showSelfieUpdate, setShowSelfieUpdate] = useState(false);
   const [selfieUploading, setSelfieUploading] = useState(false);
+  const [isLiftClubMember, setIsLiftClubMember] = useState(false);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -95,6 +96,32 @@ export default function ProfileScreen() {
     }
 
     loadProfileDetails();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setIsLiftClubMember(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadLiftClubMembership() {
+      try {
+        const res = await apiRequest("GET", "/api/lift-club/membership/me");
+        const data = await res.json();
+        if (!cancelled) {
+          setIsLiftClubMember(data?.status === "approved" || data?.isApproved === true);
+        }
+      } catch {
+        if (!cancelled) setIsLiftClubMember(false);
+      }
+    }
+
+    loadLiftClubMembership();
     return () => {
       cancelled = true;
     };
@@ -261,6 +288,17 @@ export default function ProfileScreen() {
           <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
         </Pressable>
 
+        <Pressable style={({ pressed }) => [styles.menuItem, pressed && { opacity: 0.7 }]} onPress={() => router.push("/client/lift-club")}>
+          <View style={[styles.menuIconCircle, styles.liftClubIconCircle]}>
+            <Ionicons name="ribbon-outline" size={20} color="#2A1D00" />
+          </View>
+          <View style={styles.menuTextBlock}>
+            <Text style={styles.menuText}>Lift Club cars</Text>
+            <Text style={styles.menuSubText}>{isLiftClubMember ? "Find available weekday cars" : "Apply, pay R100, and upload proof"}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+        </Pressable>
+
         <Pressable style={({ pressed }) => [styles.menuItem, pressed && { opacity: 0.7 }]} onPress={() => router.push("/client/safety")}>
           <View style={styles.menuIconCircle}>
             <Ionicons name="shield-checkmark-outline" size={20} color={Colors.white} />
@@ -401,7 +439,10 @@ const styles = StyleSheet.create({
   menuGroup: { backgroundColor: Colors.card, borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: Colors.border, marginBottom: 16 },
   menuItem: { flexDirection: "row", alignItems: "center", padding: 16, gap: 14, borderBottomWidth: 1, borderBottomColor: Colors.border },
   menuIconCircle: { width: 36, height: 36, borderRadius: 10, backgroundColor: Colors.accent, alignItems: "center", justifyContent: "center" },
+  liftClubIconCircle: { backgroundColor: "#F7C948" },
+  menuTextBlock: { flex: 1, gap: 2 },
   menuText: { flex: 1, fontSize: 15, fontFamily: "Inter_500Medium", color: Colors.white },
+  menuSubText: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textMuted, lineHeight: 16 },
   logoutBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16, marginTop: 8 },
   logoutText: { fontSize: 15, fontFamily: "Inter_500Medium", color: Colors.error },
   brandFooter: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 16 },

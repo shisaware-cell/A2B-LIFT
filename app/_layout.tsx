@@ -4,6 +4,7 @@ import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useState } from "react";
 import { Platform } from "react-native";
 import * as Linking from "expo-linking";
+import Constants from "expo-constants";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { StatusBar } from "expo-status-bar";
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from "@expo-google-fonts/inter";
@@ -18,11 +19,12 @@ const RIDE_ALERT_CHANNEL_ID = "ride-alerts-v3";
 const RIDE_ALERT_SOUND = "trip_alert.wav";
 const NEEDS_ROLE_SELECT_KEY = "a2b_needs_role_select";
 const NEEDS_OPERATOR_CHOICE_KEY = "a2b_needs_operator_choice";
+const IS_EXPO_GO_ANDROID = Platform.OS === "android" && Constants.appOwnership === "expo";
 
 // ─── Global notification handler (runs before any screen mounts) ─────────────
 // Set ONCE at module level. The chauffeur dashboard no longer re-sets this,
 // preventing race conditions between the two calls.
-if (Platform.OS !== "web") {
+if (Platform.OS !== "web" && !IS_EXPO_GO_ANDROID) {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const Notifications = require("expo-notifications");
@@ -154,6 +156,13 @@ function useAuthGate() {
             router.replace("/client");
           } else {
             router.replace("/chauffeur");
+          }
+        } else if (lastMode === "lift_club") {
+          const membership = (user as any).liftClubMembership;
+          if (membership?.status === "approved" || membership?.isApproved) {
+            router.replace("/client");
+          } else {
+            router.replace("/client/lift-club");
           }
         } else if (lastMode === "chauffeur") {
           router.replace("/chauffeur");

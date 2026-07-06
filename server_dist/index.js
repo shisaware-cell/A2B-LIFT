@@ -835,6 +835,11 @@ var DatabaseStorage = class {
     const [route] = await db.select().from(liftClubRoutes).where((0, import_drizzle_orm2.eq)(liftClubRoutes.chauffeurId, chauffeurId)).orderBy((0, import_drizzle_orm2.desc)(liftClubRoutes.updatedAt));
     return route ? this.enrichLiftClubRoute(route) : void 0;
   }
+  async getLiftClubRoutes(filters = {}) {
+    const rows = await db.select().from(liftClubRoutes).where(filters.status && filters.status !== "all" ? (0, import_drizzle_orm2.eq)(liftClubRoutes.status, filters.status) : import_drizzle_orm2.sql`true`).orderBy((0, import_drizzle_orm2.desc)(liftClubRoutes.updatedAt), (0, import_drizzle_orm2.desc)(liftClubRoutes.createdAt));
+    const enriched = await Promise.all(rows.map((route) => this.enrichLiftClubRoute(route)));
+    return enriched.filter(Boolean);
+  }
   async upsertLiftClubRoute(data) {
     const [existing] = await db.select().from(liftClubRoutes).where((0, import_drizzle_orm2.eq)(liftClubRoutes.chauffeurId, data.chauffeurId)).orderBy((0, import_drizzle_orm2.desc)(liftClubRoutes.updatedAt));
     if (existing) {
@@ -861,6 +866,10 @@ var DatabaseStorage = class {
   }
   async updateLiftClubRouteStatus(chauffeurId, status) {
     const [route] = await db.update(liftClubRoutes).set({ status, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm2.eq)(liftClubRoutes.chauffeurId, chauffeurId)).returning();
+    return route ? this.enrichLiftClubRoute(route) : void 0;
+  }
+  async updateLiftClubRouteStatusById(id, status) {
+    const [route] = await db.update(liftClubRoutes).set({ status, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm2.eq)(liftClubRoutes.id, id)).returning();
     return route ? this.enrichLiftClubRoute(route) : void 0;
   }
   async createLiftClubBooking(data) {
@@ -956,6 +965,14 @@ var DatabaseStorage = class {
   async getLiftClubMembershipByUser(userId) {
     const rows = await this.liftClubMembershipSelect("WHERE m.user_id = $1", [userId]);
     return this.mapLiftClubMembership(rows[0]);
+  }
+  async getLiftClubMembership(id) {
+    const rows = await this.liftClubMembershipSelect("WHERE m.id = $1", [id]);
+    return this.mapLiftClubMembership(rows[0]);
+  }
+  async deleteLiftClubMembership(id) {
+    const deleted = await db.delete(liftClubMemberships).where((0, import_drizzle_orm2.eq)(liftClubMemberships.id, id)).returning({ id: liftClubMemberships.id });
+    return deleted.length > 0;
   }
   async getLiftClubMemberships(filters = {}) {
     const rows = filters.status ? await this.liftClubMembershipSelect("WHERE m.status = $1", [filters.status]) : await this.liftClubMembershipSelect();
@@ -1480,7 +1497,7 @@ function calculatePrice(distanceKm, categoryId, options) {
     lateNightPremium = subtotal * (PRICING_CONFIG.lateNightPremiumMultiplier - 1);
     subtotal += lateNightPremium;
   }
-  const requestedSurge = Number(options?.surgeMultiplier ?? 1);
+  const requestedSurge = Number(options?.surgeMultiplier ?? options?.demandMultiplier ?? 1);
   const surgeMultiplier = Math.min(
     PRICING_CONFIG.maxSurgeMultiplier,
     Math.max(1, Number.isFinite(requestedSurge) ? requestedSurge : 1)
@@ -1497,6 +1514,7 @@ function calculatePrice(distanceKm, categoryId, options) {
     currency: "ZAR",
     lateNightPremium: Math.round(lateNightPremium),
     surgeMultiplier,
+    demandMultiplier: surgeMultiplier,
     surgeAmount: Math.round(surgeAmount),
     surgeReason: surgeMultiplier > 1 ? options?.surgeReason || "High demand" : null,
     highDemand: surgeMultiplier > 1,
@@ -2445,11 +2463,21 @@ async function registerRoutes(app2) {
       bankingDetailsUrl: LIFT_CLUB_BANKING_DETAILS_URL
     };
   }
-  async function creditLiftClubMonthlyReferralBonus(referredUserId) {
+  async function notifyAdmins(title, body, type = "admin") {
+    const admins = (await storage.getAllUsers()).filter((admin) => admin.role === "admin");
+    await Promise.all(admins.map((admin) => storage.createNotification({
+      userId: admin.id,
+      title,
+      body,
+      type,
+      isRead: false
+    }).catch(() => void 0)));
+  }
+  async function creditLiftClubMembershipReferralBonus(referredUserId, membershipId) {
     const referredUser = await storage.getUser(referredUserId);
     const referrerUserId = referredUser?.referredByUserId;
     if (!referredUser || !referrerUserId) return;
-    const reference = `lift_club_monthly_member_${referredUser.id}`;
+    const reference = `lift_club_membership_bonus_${membershipId}`;
     const existing = await storage.getRewardTransactionByReference(reference);
     if (existing) return;
     const referrer = await storage.getUser(referrerUserId);
@@ -2468,8 +2496,8 @@ async function registerRoutes(app2) {
       amount: reward,
       balanceBefore,
       balanceAfter,
-      type: "lift_club_monthly_member_bonus",
-      description: `${referredUser.name || "A referred member"} completed their first monthly Lift Club booking.`,
+      type: "lift_club_membership_bonus",
+      description: `${referredUser.name || "A referred member"} was approved as a Lift Club member after payment review.`,
       status: "completed"
     });
     if (referralEvent) {
@@ -2482,7 +2510,7 @@ async function registerRoutes(app2) {
     await storage.createNotification({
       userId: referrer.id,
       title: "Lift Club Reward",
-      body: `You earned R${reward.toFixed(2)} because your referred Lift Club member completed their first monthly booking.`,
+      body: `You earned R${reward.toFixed(2)} because your invited member was approved for Lift Club.`,
       type: "reward"
     });
   }
@@ -5687,6 +5715,17 @@ async function registerRoutes(app2) {
         rejectionReason: existing?.status === "rejected" ? existing.rejectionReason : null,
         submittedAt: existing?.submittedAt || /* @__PURE__ */ new Date()
       });
+      await storage.createNotification({
+        userId: user.id,
+        title: "Lift Club application started",
+        body: "Your Lift Club application is open. Pay the once-off R100 fee and upload proof for admin review.",
+        type: "lift_club_membership"
+      }).catch(() => void 0);
+      await notifyAdmins(
+        "New Lift Club application",
+        `${user.name || user.username || "A rider"} started a Lift Club membership application.`,
+        "lift_club_membership"
+      ).catch(() => void 0);
       return res.json(serializeLiftClubMembership(membership));
     } catch (error) {
       return res.status(500).json({ message: error.message || "Unable to apply for Lift Club membership" });
@@ -5755,6 +5794,7 @@ async function registerRoutes(app2) {
       if (status === "rejected" && !rejectionReason) {
         return res.status(400).json({ message: "Rejection reason is required" });
       }
+      const existing = await storage.getLiftClubMembership(req.params.id);
       const membership = await storage.updateLiftClubMembership(req.params.id, {
         status,
         rejectionReason: status === "rejected" ? rejectionReason : null,
@@ -5762,6 +5802,11 @@ async function registerRoutes(app2) {
         reviewerAdminId: ["approved", "rejected"].includes(status) ? req.auth.sub : null
       });
       if (!membership) return res.status(404).json({ message: "Lift Club membership not found" });
+      if (status === "approved" && existing?.status !== "approved") {
+        await creditLiftClubMembershipReferralBonus(membership.userId, membership.id).catch((error) => {
+          console.warn("[lift-club] membership referral bonus skipped:", error instanceof Error ? error.message : error);
+        });
+      }
       await storage.createNotification({
         userId: membership.userId,
         title: status === "approved" ? "Lift Club approved" : status === "rejected" ? "Lift Club proof needs attention" : "Lift Club updated",
@@ -5771,6 +5816,82 @@ async function registerRoutes(app2) {
       return res.json(serializeLiftClubMembership(membership));
     } catch (error) {
       return res.status(500).json({ message: error.message || "Unable to update Lift Club membership" });
+    }
+  });
+  app2.put("/api/admin/lift-club-memberships/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const updates = {};
+      if (req.body?.feeAmount !== void 0) {
+        const feeAmount = Number(req.body.feeAmount);
+        if (!Number.isFinite(feeAmount) || feeAmount < 0) {
+          return res.status(400).json({ message: "Fee amount must be a valid number" });
+        }
+        updates.feeAmount = feeAmount;
+      }
+      if (req.body?.rejectionReason !== void 0) {
+        updates.rejectionReason = String(req.body.rejectionReason || "").trim() || null;
+      }
+      if (req.body?.status !== void 0) {
+        const status = String(req.body.status || "").trim();
+        if (!["pending_payment", "pending_review", "approved", "rejected"].includes(status)) {
+          return res.status(400).json({ message: "Invalid Lift Club membership status" });
+        }
+        updates.status = status;
+        if (["approved", "rejected"].includes(status)) {
+          updates.reviewedAt = /* @__PURE__ */ new Date();
+          updates.reviewerAdminId = req.auth.sub;
+        }
+      }
+      const existing = await storage.getLiftClubMembership(req.params.id);
+      const membership = await storage.updateLiftClubMembership(req.params.id, updates);
+      if (!membership) return res.status(404).json({ message: "Lift Club membership not found" });
+      if (updates.status === "approved" && existing?.status !== "approved") {
+        await creditLiftClubMembershipReferralBonus(membership.userId, membership.id).catch((error) => {
+          console.warn("[lift-club] membership referral bonus skipped:", error instanceof Error ? error.message : error);
+        });
+      }
+      return res.json(serializeLiftClubMembership(membership));
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Unable to edit Lift Club membership" });
+    }
+  });
+  app2.delete("/api/admin/lift-club-memberships/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const deleted = await storage.deleteLiftClubMembership(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "Lift Club membership not found" });
+      return res.json({ success: true });
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Unable to delete Lift Club membership" });
+    }
+  });
+  app2.get("/api/admin/lift-club-routes", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const status = typeof req.query.status === "string" && req.query.status !== "all" ? req.query.status : void 0;
+      const routes = await storage.getLiftClubRoutes({ status });
+      return res.json(routes);
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Unable to load Lift Club routes" });
+    }
+  });
+  app2.put("/api/admin/lift-club-routes/:id/status", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const status = String(req.body?.status || "").trim();
+      if (!["pending", "active", "inactive", "rejected"].includes(status)) {
+        return res.status(400).json({ message: "Invalid Lift Club route status" });
+      }
+      const route = await storage.updateLiftClubRouteStatusById(req.params.id, status);
+      if (!route) return res.status(404).json({ message: "Lift Club route not found" });
+      if (route.chauffeurUserId) {
+        await storage.createNotification({
+          userId: route.chauffeurUserId,
+          title: status === "active" ? "Lift Club route approved" : status === "rejected" ? "Lift Club route rejected" : "Lift Club route updated",
+          body: status === "active" ? "Your Daily Lift Club route is live and searchable." : status === "rejected" ? "Your Daily Lift Club route needs attention. Please update it or contact support." : "Your Daily Lift Club route status has been updated.",
+          type: "lift_club_route"
+        }).catch(() => void 0);
+      }
+      return res.json(route);
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Unable to update Lift Club route" });
     }
   });
   app2.get("/api/lift-club/my-route", requireAuth, async (req, res) => {
@@ -5797,6 +5918,14 @@ async function registerRoutes(app2) {
       const available = req.body?.available !== false;
       if (!available) {
         const route2 = await storage.updateLiftClubRouteStatus(chauffeur.id, "inactive");
+        if (route2) {
+          await storage.createNotification({
+            userId: req.auth.sub,
+            title: "Lift Club route disabled",
+            body: "Your Daily Lift Club car is no longer visible to members.",
+            type: "lift_club_route"
+          }).catch(() => void 0);
+        }
         return res.json({ success: true, route: route2 || null, available: false });
       }
       const vehicle = await getApprovedLiftClubVehicleForChauffeur(req.auth.sub, chauffeur);
@@ -5841,6 +5970,17 @@ async function registerRoutes(app2) {
         totalSeats,
         status: "active"
       });
+      await storage.createNotification({
+        userId: req.auth.sub,
+        title: "Lift Club route published",
+        body: `${pickupArea} to ${destinationArea} is now available for Daily Lift Club members.`,
+        type: "lift_club_route"
+      }).catch(() => void 0);
+      await notifyAdmins(
+        "Lift Club route published",
+        `${chauffeur.driverName || "A driver"} published ${pickupArea} to ${destinationArea} for Lift Club.`,
+        "lift_club_route"
+      ).catch(() => void 0);
       return res.json({ success: true, route, available: true });
     } catch (error) {
       return res.status(500).json({ message: error.message || "Unable to save lift club route" });
@@ -5913,11 +6053,6 @@ async function registerRoutes(app2) {
           title: "New lift club rider",
           body: `${rider.name || "A rider"} booked a ${normalizedPassType} seat for ${route.pickupArea} to ${route.destinationArea}.`,
           type: "lift_club"
-        });
-      }
-      if (normalizedPassType === "monthly") {
-        await creditLiftClubMonthlyReferralBonus(rider.id).catch((error) => {
-          console.warn("[lift-club] monthly referral bonus skipped:", error instanceof Error ? error.message : error);
         });
       }
       return res.json({ booking, seatsRemaining: seatsLeft - 1 });

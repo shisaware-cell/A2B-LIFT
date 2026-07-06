@@ -851,6 +851,7 @@ export default function ClientHomeScreen() {
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
   const { user, refreshUser, clearSession } = useAuth();
+  const isLiftClubMember = user?.liftClubMembership?.status === "approved" || user?.liftClubMembership?.isApproved;
   const { on, off } = useSocket();
   const bottomPanelOffset = Math.max(12, tabBarHeight - insets.bottom + 12);
   const bottomPanelPadding = insets.bottom + 20;
@@ -938,7 +939,13 @@ export default function ClientHomeScreen() {
   useEffect(() => {
     requestLocation();
     // Persist mode so app reopens to the correct screen
-    AsyncStorage.setItem("a2b_last_mode", "client").catch(() => {});
+    AsyncStorage.getItem("a2b_last_mode")
+      .then((mode) => {
+        if (mode !== "lift_club") {
+          return AsyncStorage.setItem("a2b_last_mode", "client");
+        }
+      })
+      .catch(() => {});
     return () => {
       locationWatchRef.current?.remove();
       locationWatchRef.current = null;
@@ -2220,6 +2227,13 @@ export default function ClientHomeScreen() {
           }
         />
 
+        {isLiftClubMember && (
+          <View style={styles.liftClubMapBadge}>
+            <Ionicons name="ribbon" size={14} color="#2A1D00" />
+            <Text style={styles.liftClubMapBadgeText}>Lift Club Member</Text>
+          </View>
+        )}
+
         {/* Nearest driver ETA pill — shown when idle and drivers are nearby */}
         {(rideStatus === "idle" || rideStatus === "selecting") && nearestDriverEta && onlineDrivers.length > 0 && (
           <View style={styles.nearbyEtaPill}>
@@ -3398,6 +3412,29 @@ const styles = StyleSheet.create({
   mapArea: {
     flex: 1,
     overflow: "hidden",
+  },
+  liftClubMapBadge: {
+    position: "absolute",
+    top: 14,
+    left: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#F7C948",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 5,
+  },
+  liftClubMapBadgeText: {
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+    color: "#2A1D00",
+    textTransform: "uppercase",
   },
   bottomSheet: {
     backgroundColor: Colors.card,

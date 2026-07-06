@@ -1706,6 +1706,7 @@ export default function ChauffeurDashboard() {
     ...(canManageFleetDrivers ? [{ icon: "people-outline", label: "Drivers", onPress: () => { router.push("/chauffeur/fleet" as never); closeMenu(); }, color: Colors.white }] : []),
     { icon: "car-sport-outline", label: "My Rides", onPress: () => { router.push("/chauffeur/rides"); closeMenu(); }, color: Colors.white },
     { icon: "map-outline", label: "Long Distance", onPress: () => { router.push("/chauffeur/long-distance" as never); closeMenu(); }, color: Colors.white },
+    { icon: "calendar-outline", label: "Daily Lift Club", onPress: () => { router.push("/chauffeur/lift-club" as never); closeMenu(); }, color: "#F7C948" },
     { icon: "bar-chart-outline", label: "Earnings", onPress: () => { router.push("/chauffeur/earnings"); closeMenu(); }, color: Colors.white },
     { icon: "wallet-outline", label: "Wallet", onPress: () => { router.push("/chauffeur/wallet"); closeMenu(); }, color: Colors.white },
     { icon: "settings-outline", label: "Settings", onPress: () => { router.push("/chauffeur/settings"); closeMenu(); }, color: Colors.white },

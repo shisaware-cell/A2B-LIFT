@@ -26,6 +26,7 @@ export interface PriceEstimate {
   currency: string;
   lateNightPremium: number;
   surgeMultiplier: number;
+  demandMultiplier: number;
   surgeAmount: number;
   surgeReason: string | null;
   highDemand: boolean;
@@ -72,6 +73,7 @@ export function calculatePrice(
   options?: {
     isLateNight?: boolean;
     surgeMultiplier?: number;
+    demandMultiplier?: number;
     surgeReason?: string | null;
     estimatedDurationMin?: number | null;
   }
@@ -88,7 +90,7 @@ export function calculatePrice(
     subtotal += lateNightPremium;
   }
 
-  const requestedSurge = Number(options?.surgeMultiplier ?? 1);
+  const requestedSurge = Number(options?.surgeMultiplier ?? options?.demandMultiplier ?? 1);
   const surgeMultiplier = Math.min(
     PRICING_CONFIG.maxSurgeMultiplier,
     Math.max(1, Number.isFinite(requestedSurge) ? requestedSurge : 1),
@@ -106,6 +108,7 @@ export function calculatePrice(
     currency: "ZAR",
     lateNightPremium: Math.round(lateNightPremium),
     surgeMultiplier,
+    demandMultiplier: surgeMultiplier,
     surgeAmount: Math.round(surgeAmount),
     surgeReason: surgeMultiplier > 1 ? options?.surgeReason || "High demand" : null,
     highDemand: surgeMultiplier > 1,

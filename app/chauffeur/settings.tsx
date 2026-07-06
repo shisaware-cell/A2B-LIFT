@@ -316,6 +316,17 @@ export default function ChauffeurSettingsScreen() {
           <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
         </Pressable>
 
+        <Pressable style={({ pressed }) => [styles.menuItem, pressed && { opacity: 0.7 }]} onPress={() => router.push("/chauffeur/lift-club")}>
+          <View style={styles.menuIconCircle}>
+            <Ionicons name="calendar-outline" size={20} color="#F7C948" />
+          </View>
+          <View style={styles.menuTextBlock}>
+            <Text style={styles.menuText}>Daily Lift Club Availability</Text>
+            <Text style={styles.menuSubText}>Publish weekday commute seats</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+        </Pressable>
+
         <Pressable style={({ pressed }) => [styles.menuItem, pressed && { opacity: 0.7 }]} onPress={() => setShowNotifications(true)}>
           <View style={styles.menuIconCircle}>
             <Ionicons name="notifications-outline" size={20} color={Colors.white} />

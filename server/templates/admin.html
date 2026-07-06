@@ -114,6 +114,7 @@ tbody tr:hover { background:#fafaf8; }
 .b-admin { background:var(--blue-bg); color:var(--blue); } .b-admin::before { background:var(--blue); }
 .b-driver { background:var(--yellow-bg); color:var(--yellow); } .b-driver::before { background:var(--yellow); }
 .b-client { background:#f5f5f0; color:var(--muted); } .b-client::before { background:var(--muted-light); }
+.b-liftclub { background:#fff7cc; color:#7a5200; } .b-liftclub::before { background:#f7c948; }
 
 /* BUTTONS */
 .btn-sm { padding:5px 12px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.15s; border:1px solid; font-family:var(--font); }
@@ -281,6 +282,10 @@ tbody tr:hover { background:#fafaf8; }
     <div class="nav-item" onclick="go('payments',this);closeSidebar()">
       <span class="nav-icon">💳</span> Payments
     </div>
+    <div class="nav-item" onclick="go('liftClubApplications',this);closeSidebar()">
+      <span class="nav-icon">🎟️</span> Lift Club
+      <span class="nav-badge" id="nb-liftclub" style="display:none">0</span>
+    </div>
     <div class="nav-item" onclick="go('selfies',this);closeSidebar()">
       <span class="nav-icon">📸</span> Liveness Selfies
     </div>
@@ -418,6 +423,31 @@ tbody tr:hover { background:#fafaf8; }
       <div id="pay-summary" class="stats-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px"></div>
       <div class="sec-head"><div class="sec-title">Rider Payments</div></div>
       <div class="table-card" id="pay-table"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- LIFT CLUB APPLICATIONS -->
+    <div class="view" id="view-liftClubApplications">
+      <div class="notice">🎟️ <span>Lift Club members pay a once-off R100 manual fee, upload proof, then wait for admin approval before they can book weekly or monthly Lift Club seats.</span></div>
+      <div class="sec-head">
+        <div class="sec-title">Lift Club Members</div>
+        <div class="filter-group liftclub-member-filters">
+          <button class="ftab active" onclick="fLiftClub('all',this)">All</button>
+          <button class="ftab" onclick="fLiftClub('pending_review',this)">Pending Review</button>
+          <button class="ftab" onclick="fLiftClub('pending_payment',this)">Pending Payment</button>
+          <button class="ftab" onclick="fLiftClub('approved',this)">Approved</button>
+          <button class="ftab" onclick="fLiftClub('rejected',this)">Rejected</button>
+        </div>
+      </div>
+      <div class="table-card" id="liftclub-table"><div class="loading">Loading…</div></div>
+      <div class="sec-head" style="margin-top:24px">
+        <div class="sec-title">Lift Club Cars & Routes</div>
+        <div class="filter-group liftclub-route-filters">
+          <button class="ftab active" onclick="fLiftClubRoutes('all',this)">All</button>
+          <button class="ftab" onclick="fLiftClubRoutes('active',this)">Active</button>
+          <button class="ftab" onclick="fLiftClubRoutes('inactive',this)">Inactive</button>
+        </div>
+      </div>
+      <div class="table-card" id="liftclub-routes-table"><div class="loading">Loading…</div></div>
     </div>
 
     <!-- LIVENESS SELFIES -->
@@ -596,8 +626,8 @@ async function doLogout() {
 
 // ── NAV ──
 let curView = 'overview';
-let allChauf = [], allWd = [], allSafe = [], allApps = [], allPartners = [], allVehicles = [], allDocuments = [], allSelfies = [], allUsers = [], chaufFilter = 'all', wdFilter = 'all', safeFilter = 'all', appsFilter = 'all', partnersFilter = 'all', vehiclesFilter = 'all', documentsFilter = 'all';
-const VIEW_TITLES = { overview:'Dashboard', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', documents:'Document Review', rides:'Rides', payments:'Payments', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users' };
+let allChauf = [], allWd = [], allSafe = [], allApps = [], allPartners = [], allVehicles = [], allDocuments = [], allSelfies = [], allUsers = [], allLiftClubMemberships = [], allLiftClubRoutes = [], chaufFilter = 'all', wdFilter = 'all', safeFilter = 'all', appsFilter = 'all', partnersFilter = 'all', vehiclesFilter = 'all', documentsFilter = 'all', liftClubFilter = 'all', liftClubRouteFilter = 'all';
+const VIEW_TITLES = { overview:'Dashboard', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', documents:'Document Review', rides:'Rides', payments:'Payments', liftClubApplications:'Lift Club', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users' };
 
 function go(view, el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -611,7 +641,7 @@ function go(view, el) {
 }
 
 function loadView() {
-  ({ overview:loadOverview, chauffeurs:loadChauf, applications:loadApps, partners:loadPartners, vehicles:loadVehicles, documents:loadDocuments, rides:loadRides, payments:loadPay, selfies:loadSelfies, withdrawals:loadWd, safety:loadSafe, users:loadUsers })[curView]?.();
+  ({ overview:loadOverview, chauffeurs:loadChauf, applications:loadApps, partners:loadPartners, vehicles:loadVehicles, documents:loadDocuments, rides:loadRides, payments:loadPay, liftClubApplications:loadLiftClubApplications, selfies:loadSelfies, withdrawals:loadWd, safety:loadSafe, users:loadUsers })[curView]?.();
 }
 
 function loadAll() {
@@ -623,6 +653,7 @@ function loadAll() {
   loadDocuments();
   loadRides();
   loadPay();
+  loadLiftClubApplications();
   loadSelfies();
   loadWd();
   loadSafe();
@@ -1882,6 +1913,211 @@ async function loadPay() {
       </tbody></table>`;
   } catch(e) {
     document.getElementById('pay-table').innerHTML = emptyState('❌', 'Failed to load payments', e.message);
+  }
+}
+
+// ── LIFT CLUB APPLICATIONS ──
+async function loadLiftClubApplications() {
+  spin('liftclub-table');
+  spin('liftclub-routes-table');
+  try {
+    const query = liftClubFilter && liftClubFilter !== 'all' ? '?status=' + encodeURIComponent(liftClubFilter) : '';
+    const res = await apiFetch('/api/admin/lift-club-memberships' + query);
+    if (!res.ok) throw new Error(await res.text());
+    allLiftClubMemberships = await res.json();
+    if (!Array.isArray(allLiftClubMemberships)) allLiftClubMemberships = [];
+    const pendingCount = allLiftClubMemberships.filter(m => m.status === 'pending_review').length;
+    const badge = document.getElementById('nb-liftclub');
+    if (badge) {
+      badge.textContent = pendingCount;
+      badge.style.display = pendingCount ? 'inline-flex' : 'none';
+    }
+    renderLiftClubApplications();
+    loadLiftClubRoutes();
+  } catch(e) {
+    document.getElementById('liftclub-table').innerHTML = emptyState('❌', 'Failed to load Lift Club applications', e.message);
+    document.getElementById('liftclub-routes-table').innerHTML = emptyState('❌', 'Failed to load Lift Club cars', e.message);
+  }
+}
+
+function fLiftClub(f, el) {
+  document.querySelectorAll('#view-liftClubApplications .liftclub-member-filters .ftab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  liftClubFilter = f;
+  loadLiftClubApplications();
+}
+
+function fLiftClubRoutes(f, el) {
+  document.querySelectorAll('#view-liftClubApplications .liftclub-route-filters .ftab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  liftClubRouteFilter = f;
+  loadLiftClubRoutes();
+}
+
+function renderLiftClubApplications() {
+  const w = document.getElementById('liftclub-table');
+  const rows = allLiftClubMemberships;
+  if (!rows.length) {
+    w.innerHTML = emptyState('🎟️', 'No Lift Club applications', 'Applications and proof of payment will appear here.');
+    return;
+  }
+  w.innerHTML = `<table>
+    <thead><tr><th>Member</th><th>Status</th><th>Fee</th><th>Proof</th><th>Submitted</th><th>Reviewed</th><th>Actions</th></tr></thead>
+    <tbody>${rows.map(m => {
+      const user = m.user || {};
+      const proofUrl = m.proofDocument?.url || m.proofDocument?.fileUrl || m.proofDocument?.path || '';
+      const statusCls = m.status === 'approved' ? 'b-liftclub' : m.status === 'rejected' ? 'b-rejected' : `b-${m.status || 'pending'}`;
+      return `<tr>
+        <td>
+          <div style="font-weight:700">${escapeHtml(user.name || '—')} ${m.status === 'approved' ? '<span class="badge b-liftclub" style="margin-left:6px">Lift Club</span>' : ''}</div>
+          <div style="font-size:11px;color:var(--muted)">${escapeHtml(user.username || '')}</div>
+          <div style="font-size:11px;color:var(--muted)">${escapeHtml(user.phone || '')}</div>
+          ${m.rejectionReason ? `<div style="font-size:11px;color:var(--red);margin-top:4px">Reason: ${escapeHtml(m.rejectionReason)}</div>` : ''}
+        </td>
+        <td><span class="badge ${statusCls}">${escapeHtml((m.status || 'pending').replace(/_/g, ' '))}</span></td>
+        <td style="font-weight:800">R${Number(m.feeAmount || 100).toFixed(0)}</td>
+        <td>${proofUrl ? `<a class="btn-sm btn-detail" href="${escapeHtml(proofUrl)}" target="_blank" rel="noopener" style="text-decoration:none">Open proof</a>` : '<span style="color:var(--muted)">No proof yet</span>'}</td>
+        <td style="font-size:12px">${fmtFull(m.submittedAt || m.createdAt)}</td>
+        <td style="font-size:12px">${fmtFull(m.reviewedAt)}</td>
+        <td><div class="action-cell">
+          ${m.status !== 'approved' ? `<button class="btn-sm btn-approve" onclick="setLiftClubStatus('${m.id}','approved')">✓ Approve</button>` : ''}
+          ${m.status !== 'rejected' ? `<button class="btn-sm btn-reject" onclick="rejectLiftClubMembership('${m.id}')">✕ Reject</button>` : ''}
+          <button class="btn-sm btn-detail" onclick="editLiftClubMembership('${m.id}')">Edit</button>
+          <button class="btn-sm btn-delete" onclick="deleteLiftClubMembership('${m.id}','${escapeHtml(user.name || user.username || 'member').replace(/'/g,"\\'")}')">🗑</button>
+        </div></td>
+      </tr>`;
+    }).join('')}
+    </tbody></table>`;
+}
+
+async function setLiftClubStatus(id, status, rejectionReason = '') {
+  try {
+    const res = await apiFetch('/api/admin/lift-club-memberships/' + id + '/status', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, rejectionReason }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast(status === 'approved' ? '✅ Lift Club member approved' : '✅ Lift Club application updated', 'ok');
+    loadLiftClubApplications();
+    loadUsers();
+  } catch(e) {
+    toast('❌ ' + e.message, 'err');
+  }
+}
+
+function rejectLiftClubMembership(id) {
+  const reason = prompt('Reason for rejecting this Lift Club proof/application?');
+  if (!reason || !reason.trim()) return;
+  setLiftClubStatus(id, 'rejected', reason.trim());
+}
+
+async function editLiftClubMembership(id) {
+  const membership = allLiftClubMemberships.find(m => m.id === id);
+  if (!membership) return toast('❌ Membership not found', 'err');
+  const status = prompt('Status: pending_payment, pending_review, approved, rejected', membership.status || 'pending_payment');
+  if (!status) return;
+  const feeRaw = prompt('Membership fee amount', String(membership.feeAmount || 100));
+  if (feeRaw === null) return;
+  const rejectionReason = status === 'rejected'
+    ? prompt('Rejection reason', membership.rejectionReason || '') || ''
+    : '';
+  try {
+    const res = await apiFetch('/api/admin/lift-club-memberships/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: status.trim(),
+        feeAmount: Number(feeRaw) || 100,
+        rejectionReason,
+      }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast('✅ Lift Club membership updated', 'ok');
+    loadLiftClubApplications();
+    loadUsers();
+  } catch(e) {
+    toast('❌ ' + e.message, 'err');
+  }
+}
+
+async function deleteLiftClubMembership(id, label) {
+  if (!confirm(`Delete Lift Club membership for ${label}? This cannot be undone.`)) return;
+  try {
+    const res = await apiFetch('/api/admin/lift-club-memberships/' + id, { method: 'DELETE' });
+    if (!res.ok) throw new Error(await res.text());
+    toast('✅ Lift Club membership deleted', 'ok');
+    loadLiftClubApplications();
+    loadUsers();
+  } catch(e) {
+    toast('❌ ' + e.message, 'err');
+  }
+}
+
+async function loadLiftClubRoutes() {
+  spin('liftclub-routes-table');
+  try {
+    const query = liftClubRouteFilter && liftClubRouteFilter !== 'all' ? '?status=' + encodeURIComponent(liftClubRouteFilter) : '';
+    const res = await apiFetch('/api/admin/lift-club-routes' + query);
+    if (!res.ok) throw new Error(await res.text());
+    allLiftClubRoutes = await res.json();
+    if (!Array.isArray(allLiftClubRoutes)) allLiftClubRoutes = [];
+    renderLiftClubRoutes();
+  } catch(e) {
+    document.getElementById('liftclub-routes-table').innerHTML = emptyState('❌', 'Failed to load Lift Club cars', e.message);
+  }
+}
+
+function renderLiftClubRoutes() {
+  const w = document.getElementById('liftclub-routes-table');
+  const rows = allLiftClubRoutes;
+  if (!rows.length) {
+    w.innerHTML = emptyState('🚐', 'No Lift Club cars yet', 'Published driver commute routes will appear here.');
+    return;
+  }
+  w.innerHTML = `<table>
+    <thead><tr><th>Driver</th><th>Route</th><th>Vehicle</th><th>Seats</th><th>Pricing</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead>
+    <tbody>${rows.map(r => {
+      const driver = r.driver || r.chauffeur || {};
+      const vehicle = r.vehicle || {};
+      const active = r.status === 'active' || r.isActive === true;
+      return `<tr>
+        <td>
+          <div style="font-weight:700">${escapeHtml(driver.driverName || driver.name || '—')}</div>
+          <div style="font-size:11px;color:var(--muted)">${escapeHtml(driver.phone || driver.email || '')}</div>
+        </td>
+        <td>
+          <div style="font-weight:700">${escapeHtml(r.pickupArea || '—')} → ${escapeHtml(r.destinationArea || r.workplaceArea || '—')}</div>
+          <div style="font-size:11px;color:var(--muted)">${escapeHtml(r.departureWindow || 'Weekday commute')}</div>
+        </td>
+        <td>
+          <div style="font-weight:700">${escapeHtml(vehicle.make || r.vehicleMake || '')} ${escapeHtml(vehicle.model || r.vehicleModel || '')}</div>
+          <div style="font-size:11px;color:var(--muted)">${escapeHtml(String(vehicle.year || r.vehicleYear || ''))}</div>
+        </td>
+        <td>${Number(r.availableSeats ?? r.seatsAvailable ?? 0)} / ${Number(r.totalSeats ?? r.seatCount ?? 0)}</td>
+        <td><div>Weekly R${Number(r.weeklyPrice || 0).toFixed(0)}</div><div>Monthly R${Number(r.monthlyPrice || 0).toFixed(0)}</div></td>
+        <td><span class="badge ${active ? 'b-approved' : 'b-pending'}">${active ? 'active' : escapeHtml(r.status || 'inactive')}</span></td>
+        <td style="font-size:12px">${fmtFull(r.updatedAt || r.createdAt)}</td>
+        <td><div class="action-cell">
+          ${active ? `<button class="btn-sm btn-reject" onclick="setLiftClubRouteStatus('${r.id}','inactive')">Disable</button>` : `<button class="btn-sm btn-approve" onclick="setLiftClubRouteStatus('${r.id}','active')">Activate</button>`}
+        </div></td>
+      </tr>`;
+    }).join('')}
+    </tbody></table>`;
+}
+
+async function setLiftClubRouteStatus(id, status) {
+  try {
+    const res = await apiFetch('/api/admin/lift-club-routes/' + id + '/status', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast(status === 'active' ? '✅ Lift Club car activated' : '✅ Lift Club car disabled', 'ok');
+    loadLiftClubRoutes();
+  } catch(e) {
+    toast('❌ ' + e.message, 'err');
   }
 }
 

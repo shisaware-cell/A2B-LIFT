@@ -126,6 +126,13 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
+        name="lift-club"
+        options={{
+          href: null,
+          tabBarStyle: { display: "none" },
+        }}
+      />
+      <Tabs.Screen
         name="referrals"
         options={{
           href: null,

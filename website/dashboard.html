@@ -90,6 +90,12 @@
     .driver-apply-card { background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius); padding: 24px; margin-bottom: 24px; }
     .driver-apply-card h3 { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 8px; }
     .driver-apply-card p { color: var(--grey-500); font-size: 14px; line-height: 1.7; margin-bottom: 18px; }
+    .lift-member-card { background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius); padding: 24px; margin-bottom: 24px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 20px; align-items: start; }
+    .lift-member-card h3 { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 8px; }
+    .lift-member-card p { color: var(--grey-500); font-size: 14px; line-height: 1.7; margin-bottom: 10px; }
+    .lift-member-status { display: inline-flex; align-items: center; gap: 6px; width: fit-content; border-radius: 999px; padding: 5px 10px; background: #fff7cc; color: #7a5200; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .lift-member-actions { display: flex; flex-direction: column; gap: 10px; min-width: 210px; }
+    .lift-proof-input { max-width: 220px; font-size: 12px; }
     .doc-upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
     .doc-upload-tile { position: relative; border: 1.5px dashed var(--grey-200); border-radius: var(--radius-sm); padding: 16px; background: var(--grey-50); cursor: pointer; min-height: 96px; transition: border-color .15s, background .15s; }
     .doc-upload-tile:hover { border-color: var(--black); background: var(--white); }
@@ -120,7 +126,7 @@
     .toast.toast--success { background:#16a34a; }
     .toast.toast--error { background:#dc2626; }
     @media(max-width: 900px) { .dash-layout { grid-template-columns: 1fr; } .dash-sidebar { position: static; padding: 24px 0 0; } .dash-nav { flex-direction: row; flex-wrap: wrap; gap: 4px; } .dash-stats { grid-template-columns: 1fr 1fr; } }
-    @media(max-width: 640px) { .dash-stats { grid-template-columns: 1fr; } .ld-mini-form { grid-template-columns: 1fr; } .ld-form-grid, .doc-upload-grid { grid-template-columns: 1fr; } }
+    @media(max-width: 640px) { .dash-stats { grid-template-columns: 1fr; } .ld-mini-form { grid-template-columns: 1fr; } .ld-form-grid, .doc-upload-grid, .lift-member-card { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -280,6 +286,20 @@
       <!-- LIFT CLUB -->
       <div class="dash-page" id="page-liftclub">
         <h1 class="dash-page-title">Daily Lift Club</h1>
+        <div class="lift-member-card" id="liftClubMemberCard">
+          <div>
+            <span class="lift-member-status" id="liftClubMemberStatus">Not applied</span>
+            <h3 style="margin-top:14px;">Register as a Lift Club member</h3>
+            <p id="liftClubMemberCopy">Lift Club membership is required before booking a weekly or monthly seat. Apply, pay the once-off R100 membership fee manually, then upload proof for admin approval.</p>
+            <p style="font-size:13px;color:var(--grey-500);margin-bottom:0;">Reward note: the normal 2.5% reward programme stays active, and you can earn R50 once when someone you invited pays the R100 Lift Club registration fee and is approved by admin.</p>
+          </div>
+          <div class="lift-member-actions">
+            <button class="btn btn-primary" id="liftClubApplyBtn" onclick="applyLiftClubMembership()">Apply</button>
+            <button class="btn btn-ghost" onclick="openLiftClubBanking()">Pay R100</button>
+            <input class="lift-proof-input" type="file" id="liftClubProofInput" accept="image/*,application/pdf" />
+            <button class="btn btn-primary" id="liftClubProofBtn" onclick="uploadLiftClubProof()">Upload proof</button>
+          </div>
+        </div>
         <div class="ld-mini-search">
           <h3>Find a weekday seat to work</h3>
           <div class="ld-mini-form">
@@ -629,6 +649,100 @@
       window.location.href = `lift-club.html${params.toString() ? '?' + params.toString() : ''}`;
     }
 
+    function openLiftClubBanking() {
+      window.open('lift-club-payment.html', '_blank', 'noopener');
+    }
+
+    async function loadLiftClubMembershipStatus() {
+      const token = localStorage.getItem('a2b_token');
+      const statusEl = document.getElementById('liftClubMemberStatus');
+      const copyEl = document.getElementById('liftClubMemberCopy');
+      const applyBtn = document.getElementById('liftClubApplyBtn');
+      const proofBtn = document.getElementById('liftClubProofBtn');
+      if (!token || !statusEl || !copyEl) return;
+      try {
+        const res = await fetch(`${API}/api/lift-club/membership/me`, { headers: { Authorization: `Bearer ${token}` } });
+        const membership = res.ok ? await res.json() : null;
+        const status = membership?.status || 'not_applied';
+        statusEl.textContent = status.replace(/_/g, ' ');
+        if (status === 'approved') {
+          copyEl.textContent = 'Your Lift Club membership is approved. You can now book weekly and monthly Lift Club seats.';
+          if (applyBtn) applyBtn.style.display = 'none';
+          if (proofBtn) proofBtn.style.display = 'none';
+        } else if (status === 'pending_review') {
+          copyEl.textContent = 'Your proof of payment is waiting for admin review. We will notify you when your membership is approved.';
+          if (applyBtn) applyBtn.style.display = 'none';
+          if (proofBtn) proofBtn.style.display = 'inline-flex';
+        } else if (status === 'rejected') {
+          copyEl.textContent = membership?.rejectionReason ? `Your application needs attention: ${membership.rejectionReason}. Upload a new proof once corrected.` : 'Your application was not approved. Upload a new proof once corrected.';
+          if (applyBtn) applyBtn.style.display = 'inline-flex';
+          if (proofBtn) proofBtn.style.display = 'inline-flex';
+        } else if (status === 'pending_payment') {
+          copyEl.textContent = 'Pay the once-off R100 Lift Club registration fee manually, then upload proof for admin approval.';
+          if (applyBtn) applyBtn.style.display = 'none';
+          if (proofBtn) proofBtn.style.display = 'inline-flex';
+        } else {
+          copyEl.textContent = 'Lift Club membership is required before booking a weekly or monthly seat. Apply, pay the once-off R100 membership fee manually, then upload proof for admin approval.';
+          if (applyBtn) applyBtn.style.display = 'inline-flex';
+          if (proofBtn) proofBtn.style.display = 'inline-flex';
+        }
+      } catch(e) {
+        statusEl.textContent = 'Unavailable';
+      }
+    }
+
+    async function applyLiftClubMembership() {
+      const token = localStorage.getItem('a2b_token');
+      if (!token) { window.location.replace('login.html'); return; }
+      try {
+        const res = await fetch(`${API}/api/lift-club/membership/apply`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        if (!res.ok) throw new Error(await res.text());
+        showNotification('Lift Club application started. Please pay R100 and upload proof.', 'success');
+        await loadLiftClubMembershipStatus();
+      } catch(e) {
+        showNotification('Unable to start Lift Club application. Please try again.', 'error');
+      }
+    }
+
+    function readProofAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(reader.error || new Error('Unable to read file'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function uploadLiftClubProof() {
+      const token = localStorage.getItem('a2b_token');
+      const input = document.getElementById('liftClubProofInput');
+      const file = input?.files?.[0];
+      if (!token) { window.location.replace('login.html'); return; }
+      if (!file) { showNotification('Choose a proof of payment file first.', 'error'); return; }
+      try {
+        if (file.size > 4 * 1024 * 1024) {
+          showNotification('Please upload a proof file smaller than 4 MB.', 'error');
+          return;
+        }
+        const url = await readProofAsDataUrl(file);
+        const res = await fetch(`${API}/api/lift-club/membership/proof`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        showNotification('Proof uploaded. Your membership is now pending admin review.', 'success');
+        input.value = '';
+        await loadLiftClubMembershipStatus();
+      } catch(e) {
+        showNotification('Unable to upload proof. Please try again.', 'error');
+      }
+    }
+
     function showNotification(message, type = 'success') {
       const container = document.getElementById('toastContainer');
       const toast = document.createElement('div');
@@ -966,6 +1080,7 @@
       await loadTrips(user);
       await loadWallet();
       await loadLiftClubBookings();
+      await loadLiftClubMembershipStatus();
     }
 
     async function loadTrips(user) {

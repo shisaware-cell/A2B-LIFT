@@ -13,6 +13,13 @@ const androidGoogleMapsApiKey =
   process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY ||
   process.env.GOOGLE_MAPS_ANDROID_API_KEY ||
   googleMapsApiKey;
+const mapsBuildPlatform = process.env.MAPS_BUILD_PLATFORM;
+
+function getBuildGoogleMapsApiKey() {
+  if (mapsBuildPlatform === "ios") return iosGoogleMapsApiKey;
+  if (mapsBuildPlatform === "android") return androidGoogleMapsApiKey;
+  return googleMapsApiKey;
+}
 
 const defaultPamolProjectId = "f282a582-7512-48d6-b563-13aa571d9115";
 const defaultPascalProjectId = "eb3b8747-40b2-4aad-b118-e64339bfeea0";
@@ -203,7 +210,7 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
     extra: {
       ...easProjectConfig,
       appVariant: config.variant,
-      googleMapsApiKey,
+      googleMapsApiKey: getBuildGoogleMapsApiKey(),
       iosGoogleMapsApiKey,
       androidGoogleMapsApiKey,
     },

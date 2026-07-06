@@ -132,12 +132,16 @@ export interface IStorage {
   searchLiftClubRoutes(filters?: { from?: string; to?: string }): Promise<any[]>;
   getLiftClubRoute(id: string): Promise<any | undefined>;
   getLiftClubRouteByChauffeurId(chauffeurId: string): Promise<any | undefined>;
+  getLiftClubRoutes(filters?: { status?: string }): Promise<any[]>;
   upsertLiftClubRoute(data: any): Promise<any>;
   updateLiftClubRouteStatus(chauffeurId: string, status: string): Promise<any | undefined>;
+  updateLiftClubRouteStatusById(id: string, status: string): Promise<any | undefined>;
   createLiftClubBooking(data: any): Promise<LiftClubBooking>;
   confirmLiftClubBookingWithSeat(data: any): Promise<LiftClubBooking>;
   getLiftClubBookingsByUser(userId: string): Promise<any[]>;
   getLiftClubMembershipByUser(userId: string): Promise<any | undefined>;
+  getLiftClubMembership(id: string): Promise<any | undefined>;
+  deleteLiftClubMembership(id: string): Promise<boolean>;
   getLiftClubMemberships(filters?: { status?: string }): Promise<any[]>;
   upsertLiftClubMembership(data: any): Promise<any>;
   updateLiftClubMembership(id: string, data: any): Promise<any | undefined>;
@@ -662,6 +666,16 @@ export class DatabaseStorage implements IStorage {
     return route ? this.enrichLiftClubRoute(route) : undefined;
   }
 
+  async getLiftClubRoutes(filters: { status?: string } = {}): Promise<any[]> {
+    const rows = await db
+      .select()
+      .from(liftClubRoutes)
+      .where(filters.status && filters.status !== "all" ? eq(liftClubRoutes.status, filters.status) : sql`true`)
+      .orderBy(desc(liftClubRoutes.updatedAt), desc(liftClubRoutes.createdAt));
+    const enriched = await Promise.all(rows.map((route) => this.enrichLiftClubRoute(route)));
+    return enriched.filter(Boolean);
+  }
+
   async upsertLiftClubRoute(data: any): Promise<any> {
     const [existing] = await db
       .select()
@@ -702,6 +716,15 @@ export class DatabaseStorage implements IStorage {
       .update(liftClubRoutes)
       .set({ status, updatedAt: new Date() })
       .where(eq(liftClubRoutes.chauffeurId, chauffeurId))
+      .returning();
+    return route ? this.enrichLiftClubRoute(route) : undefined;
+  }
+
+  async updateLiftClubRouteStatusById(id: string, status: string): Promise<any | undefined> {
+    const [route] = await db
+      .update(liftClubRoutes)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(liftClubRoutes.id, id))
       .returning();
     return route ? this.enrichLiftClubRoute(route) : undefined;
   }
@@ -819,6 +842,19 @@ export class DatabaseStorage implements IStorage {
   async getLiftClubMembershipByUser(userId: string): Promise<any | undefined> {
     const rows = await this.liftClubMembershipSelect("WHERE m.user_id = $1", [userId]);
     return this.mapLiftClubMembership(rows[0]);
+  }
+
+  async getLiftClubMembership(id: string): Promise<any | undefined> {
+    const rows = await this.liftClubMembershipSelect("WHERE m.id = $1", [id]);
+    return this.mapLiftClubMembership(rows[0]);
+  }
+
+  async deleteLiftClubMembership(id: string): Promise<boolean> {
+    const deleted = await db
+      .delete(liftClubMemberships)
+      .where(eq(liftClubMemberships.id, id))
+      .returning({ id: liftClubMemberships.id });
+    return deleted.length > 0;
   }
 
   async getLiftClubMemberships(filters: { status?: string } = {}): Promise<any[]> {
