@@ -6525,7 +6525,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ? `A cancellation fee of R${cancellationFee.toFixed(2)} was applied.`
             : "No charges were applied.";
 
-          // ── Card payment → Paystack refund + credit wallet ──
+          // ── Card payment → Paystack refund back to the original card ──
           const cardPayment = payments.find((p: any) =>
             p.method === "card" && p.status === "paid" && p.paystackReference
           );
@@ -6543,26 +6543,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
             await storage.updatePayment(cardPayment.id, { status: cancellationFee > 0 ? "partially_refunded" : "refunded" });
             const rider = await storage.getUser(rideBeforeUpdate.clientId);
-            if (rider && refundableAmount > 0) {
-              const amt = refundableAmount;
-              const balanceBefore = rider.walletBalance || 0;
-              const newBalance = balanceBefore + amt;
-              await storage.updateUser(rider.id, { walletBalance: newBalance });
-              await storage.createWalletTransaction({
-                userId: rider.id, type: "refund", amount: amt,
-                balanceBefore, balanceAfter: newBalance,
-                reference: cardPayment.paystackReference,
-                description: cancellationFee > 0
-                  ? "Ride cancelled — remaining card payment refunded after cancellation fee"
-                  : "Ride cancelled — card payment refunded to wallet",
-                rideId: ride.id, status: "completed",
-              });
-            }
             if (rider) {
               await storage.createNotification({
                 userId: rider.id,
                 title: "Refund Issued",
-                body: `Your ride was cancelled. ${feeMessage}${refundableAmount > 0 ? ` R${refundableAmount.toFixed(2)} has been refunded to your A2B wallet.` : ""}`,
+                body: `Your ride was cancelled. ${feeMessage}${refundableAmount > 0 ? ` R${refundableAmount.toFixed(2)} has been refunded to your card.` : ""}`,
                 type: "payment",
               });
               if ((rider as any)?.pushToken) {
@@ -7652,6 +7637,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Payment Complete</title>
+  <script>
+    (function(){
+      var appUrl = ${JSON.stringify(nativeAppUrl)};
+      if (appUrl && !appUrl.startsWith('https://')) {
+        try { window.location.replace(appUrl); } catch(e) { window.location.href = appUrl; }
+      }
+    })();
+  </script>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{background:#0a0a0a;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
@@ -7694,7 +7687,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     // 2. Native app flow: jump back to the app scheme so AuthSession can resolve.
     if (appUrl && !appUrl.startsWith('https://')) {
-      setTimeout(function(){ window.location.href = appUrl; }, 250);
+      setTimeout(function(){ window.location.replace(appUrl); }, 50);
+      setTimeout(function(){ window.location.href = appUrl; }, 450);
     }
 
     // 3. Attempt to close popup/tab
