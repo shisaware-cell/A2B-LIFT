@@ -25,7 +25,13 @@ const defaultPamolProjectId = "f282a582-7512-48d6-b563-13aa571d9115";
 const defaultPascalProjectId = "eb3b8747-40b2-4aad-b118-e64339bfeea0";
 const defaultClientProjectId = "9932543b-f023-4dec-8213-5d0fe99ad749";
 const defaultClientSlug = "a2b-lift-client-eas-mFdHJz";
-const currentAndroidVersionCode = 110;
+const appVersion = process.env.EXPO_APP_VERSION || "1.0.8";
+const currentAndroidVersionCode = Number(process.env.EXPO_ANDROID_VERSION_CODE || 110);
+
+function getIosBuildNumber(variant, fallback) {
+  const variantKey = variant === "client" ? "EXPO_CLIENT_IOS_BUILD_NUMBER" : "EXPO_DRIVER_IOS_BUILD_NUMBER";
+  return process.env[variantKey] || process.env.EXPO_IOS_BUILD_NUMBER || fallback;
+}
 
 function normalizeAssetPrefix(assetPrefix = ".") {
   return String(assetPrefix || ".").replace(/\/$/, "");
@@ -50,13 +56,13 @@ function getVariantConfig(variant) {
       owner,
       projectId,
       name: "A2B LIFT",
-      version: "1.0.8",
+      version: appVersion,
       slug: process.env.EXPO_PUBLIC_EAS_SLUG_CLIENT || defaultClientSlug,
       scheme: "a2bliftclient",
       iosBundleIdentifier: "com.a2blift.client",
       androidPackage: "com.a2blift.client",
       androidVersionCode: currentAndroidVersionCode,
-      iosBuildNumber: "19",
+      iosBuildNumber: getIosBuildNumber("client", "19"),
       runtimeVersion: "1.0.0-client",
       notificationChannel: "client-alerts",
     };
@@ -68,13 +74,13 @@ function getVariantConfig(variant) {
     owner,
     projectId: getDriverProjectId(owner),
     name: "A2B DRIVER",
-    version: "1.0.8",
+    version: appVersion,
     slug: "a2b-lift",
     scheme: "a2blift",
     iosBundleIdentifier: "com.a2blift",
     androidPackage: "com.a2blift",
     androidVersionCode: currentAndroidVersionCode,
-    iosBuildNumber: "18",
+    iosBuildNumber: getIosBuildNumber("driver", "18"),
     runtimeVersion: "1.0.44",
     notificationChannel: "ride-alerts-v3",
     icon: "assets/images/driver-icon.png",
@@ -96,7 +102,7 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
     name: config.name,
     slug: config.slug,
     owner: config.owner,
-    version: "1.0.8",
+    version: config.version,
     orientation: "portrait",
     icon: assetPath(assetPrefix, config.icon || "assets/images/icon.png"),
     scheme: config.scheme,
