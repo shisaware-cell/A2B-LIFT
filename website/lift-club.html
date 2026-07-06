@@ -148,7 +148,7 @@
       <div class="lift-member-cta">
         <div>
           <h3>Membership is required before booking a seat</h3>
-          <p>Search stays open to everyone. To book, register as a Lift Club member, pay the once-off R100 manual fee, upload proof, and wait for admin approval. Your normal 2.5% reward programme remains active, plus you can earn R50 once when someone you invited pays the R100 Lift Club registration fee and is approved by admin.</p>
+          <p>Search stays open to everyone. To book, register as a Lift Club member, pay the once-off R200 manual fee, upload proof, and wait for admin approval. Your normal 2.5% reward programme remains active, plus you can earn R100 once when someone you invited pays the R200 Lift Club registration fee and is approved by admin.</p>
         </div>
         <a href="dashboard.html#liftclub" class="btn btn-primary">Register as Lift Club member</a>
       </div>
@@ -625,6 +625,12 @@
         window.location.href = `login.html?next=${encodeURIComponent('lift-club.html')}`;
         return;
       }
+      const membership = await getLiftClubMembershipForBooking(token);
+      if (!membership?.isApproved && membership?.status !== 'approved') {
+        alert('Approved Lift Club membership is required before booking a seat. Please apply, pay R200, and upload proof in your dashboard.');
+        window.location.href = 'dashboard.html#liftclub';
+        return;
+      }
       if (typeof PaystackPop === 'undefined' || !window.PAYSTACK_PUBLIC_KEY) {
         alert('Paystack is unavailable. Please try again shortly.');
         return;
@@ -646,6 +652,18 @@
           }
         },
       }).openIframe();
+    }
+
+    async function getLiftClubMembershipForBooking(token) {
+      try {
+        const res = await fetch(`${API}/api/lift-club/membership/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return null;
+        return await res.json();
+      } catch(e) {
+        return null;
+      }
     }
 
     async function confirmLiftClubBooking(reference) {

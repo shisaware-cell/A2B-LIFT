@@ -174,7 +174,7 @@ export default function LoginScreen() {
               <Ionicons name="ribbon-outline" size={20} color={clientLoginMode === "lift_club" ? "#2A1D00" : "#F7C948"} />
               <View style={styles.modeCopy}>
                 <Text style={[styles.modeTitle, clientLoginMode === "lift_club" && styles.modeTitleActive]}>Join Lift Club</Text>
-                <Text style={styles.modeText}>Apply for weekday Lift Club membership and upload R100 proof.</Text>
+                <Text style={styles.modeText}>Apply for weekday Lift Club membership and upload R200 proof.</Text>
               </View>
             </Pressable>
           </View>
@@ -312,8 +312,6 @@ const styles = StyleSheet.create({
   dividerLine: { flex: 1, height: 1, backgroundColor: Colors.border },
   dividerText: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textMuted },
   googleBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, backgroundColor: "#ffffff", paddingVertical: 14, borderRadius: 14, borderWidth: 1, borderColor: "#e0e0e0" },
-  googleIconWrap: { width: 22, height: 22, borderRadius: 11, backgroundColor: "#4285F4", alignItems: "center", justifyContent: "center" },
-  googleG: { fontSize: 13, fontFamily: "Inter_700Bold", color: "#fff" },
   googleBtnText: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: "#1a1a1a" },
   googleIconWrap: { width: 22, height: 22, borderRadius: 11, backgroundColor: "#fff", borderWidth: 1, borderColor: "#e0e0e0", alignItems: "center", justifyContent: "center" },
   googleG: { fontSize: 13, fontWeight: "700", color: "#4285F4" },

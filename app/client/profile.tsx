@@ -293,8 +293,8 @@ export default function ProfileScreen() {
             <Ionicons name="ribbon-outline" size={20} color="#2A1D00" />
           </View>
           <View style={styles.menuTextBlock}>
-            <Text style={styles.menuText}>Lift Club cars</Text>
-            <Text style={styles.menuSubText}>{isLiftClubMember ? "Find available weekday cars" : "Apply, pay R100, and upload proof"}</Text>
+            <Text style={styles.menuText}>Lift Club dashboard</Text>
+            <Text style={styles.menuSubText}>{isLiftClubMember ? "Find available weekday cars" : "Apply, pay R200, and upload proof"}</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
         </Pressable>

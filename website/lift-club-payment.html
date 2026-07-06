@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lift Club Payment Details — A2B Lift</title>
+  <link rel="icon" href="assets/images/favicon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    body { background:var(--grey-50); }
+    .payment-wrap { min-height:calc(100vh - var(--nav-h)); display:flex; align-items:center; padding:calc(var(--nav-h) + 40px) 0 64px; }
+    .payment-card { background:var(--white); border:1px solid var(--grey-200); border-radius:var(--radius-lg); padding:36px; max-width:760px; box-shadow:var(--shadow); }
+    .payment-card h1 { font-size:clamp(32px,5vw,54px); line-height:1; letter-spacing:-.04em; margin:12px 0 18px; }
+    .payment-card p { color:var(--grey-600); line-height:1.8; font-size:16px; }
+    .payment-box { margin:24px 0; border:1px dashed #d9b84f; background:#fff8dc; border-radius:var(--radius); padding:22px; }
+    .payment-row { display:flex; justify-content:space-between; gap:16px; padding:10px 0; border-bottom:1px solid rgba(42,29,0,.12); }
+    .payment-row:last-child { border-bottom:none; }
+    .payment-row span { color:#6f5600; font-size:13px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; }
+    .payment-row strong { color:#2A1D00; text-align:right; }
+    .payment-actions { display:flex; gap:12px; flex-wrap:wrap; margin-top:24px; }
+  </style>
+</head>
+<body>
+  <header class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="index.html" class="logo"><img src="assets/images/icon.png" alt="A2B Lift" class="logo-img" /><span class="logo-text">A2B<strong>Lift</strong></span></a>
+      <nav class="nav-links"><a href="lift-club.html">Daily Lift Club</a><a href="dashboard.html">Dashboard</a></nav>
+      <div class="nav-actions"><a href="dashboard.html#liftclub" class="btn btn-primary btn-sm">Upload proof</a></div>
+    </div>
+  </header>
+
+  <main class="payment-wrap">
+    <div class="container">
+      <div class="payment-card">
+        <p class="label">Lift Club Membership</p>
+        <h1>Lift Club banking details</h1>
+        <p>Use this page for the once-off Lift Club membership fee. These banking details can be updated here later without requiring another app build.</p>
+        <div class="payment-box">
+          <div class="payment-row"><span>Amount</span><strong>R200 once-off</strong></div>
+          <div class="payment-row"><span>Account name</span><strong>The Lift Club (Pty) Ltd</strong></div>
+          <div class="payment-row"><span>Bank</span><strong>A2B Lift Placeholder Bank</strong></div>
+          <div class="payment-row"><span>Account number</span><strong>0000000000</strong></div>
+          <div class="payment-row"><span>Branch code</span><strong>000000</strong></div>
+          <div class="payment-row"><span>Reference</span><strong>Lift Club + your A2B name or phone number</strong></div>
+        </div>
+        <p>These are temporary placeholder banking details. After payment, return to your dashboard and upload proof of payment. A2B admin will approve or reject the application from the admin dashboard.</p>
+        <div class="payment-actions">
+          <a class="btn btn-primary" href="dashboard.html#liftclub">Upload proof in dashboard</a>
+          <a class="btn btn-ghost" href="lift-club.html">Back to Lift Club</a>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script src="main.js"></script>
+</body>
+</html>

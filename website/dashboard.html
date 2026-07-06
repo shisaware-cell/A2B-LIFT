@@ -290,12 +290,12 @@
           <div>
             <span class="lift-member-status" id="liftClubMemberStatus">Not applied</span>
             <h3 style="margin-top:14px;">Register as a Lift Club member</h3>
-            <p id="liftClubMemberCopy">Lift Club membership is required before booking a weekly or monthly seat. Apply, pay the once-off R100 membership fee manually, then upload proof for admin approval.</p>
-            <p style="font-size:13px;color:var(--grey-500);margin-bottom:0;">Reward note: the normal 2.5% reward programme stays active, and you can earn R50 once when someone you invited pays the R100 Lift Club registration fee and is approved by admin.</p>
+            <p id="liftClubMemberCopy">Lift Club membership is required before booking a weekly or monthly seat. Apply, pay the once-off R200 membership fee manually, then upload proof for admin approval.</p>
+            <p style="font-size:13px;color:var(--grey-500);margin-bottom:0;">Reward note: the normal 2.5% reward programme stays active, and you can earn R100 once when someone you invited pays the R200 Lift Club registration fee and is approved by admin.</p>
           </div>
           <div class="lift-member-actions">
             <button class="btn btn-primary" id="liftClubApplyBtn" onclick="applyLiftClubMembership()">Apply</button>
-            <button class="btn btn-ghost" onclick="openLiftClubBanking()">Pay R100</button>
+            <button class="btn btn-ghost" onclick="openLiftClubBanking()">Pay R200</button>
             <input class="lift-proof-input" type="file" id="liftClubProofInput" accept="image/*,application/pdf" />
             <button class="btn btn-primary" id="liftClubProofBtn" onclick="uploadLiftClubProof()">Upload proof</button>
           </div>
@@ -664,13 +664,15 @@
         const res = await fetch(`${API}/api/lift-club/membership/me`, { headers: { Authorization: `Bearer ${token}` } });
         const membership = res.ok ? await res.json() : null;
         const status = membership?.status || 'not_applied';
-        statusEl.textContent = status.replace(/_/g, ' ');
-        if (status === 'approved') {
+        const isApproved = status === 'approved' || membership?.isApproved;
+        statusEl.textContent = isApproved ? 'Approved Lift Club Member' : status.replace(/_/g, ' ');
+        statusEl.className = `lift-member-status ${isApproved ? 'approved' : status}`;
+        if (isApproved) {
           copyEl.textContent = 'Your Lift Club membership is approved. You can now book weekly and monthly Lift Club seats.';
           if (applyBtn) applyBtn.style.display = 'none';
           if (proofBtn) proofBtn.style.display = 'none';
         } else if (status === 'pending_review') {
-          copyEl.textContent = 'Your proof of payment is waiting for admin review. We will notify you when your membership is approved.';
+          copyEl.textContent = 'Your R200 proof of payment is waiting for admin review. We will notify you when your membership is approved.';
           if (applyBtn) applyBtn.style.display = 'none';
           if (proofBtn) proofBtn.style.display = 'inline-flex';
         } else if (status === 'rejected') {
@@ -678,22 +680,23 @@
           if (applyBtn) applyBtn.style.display = 'inline-flex';
           if (proofBtn) proofBtn.style.display = 'inline-flex';
         } else if (status === 'pending_payment') {
-          copyEl.textContent = 'Pay the once-off R100 Lift Club registration fee manually, then upload proof for admin approval.';
+          copyEl.textContent = 'Pay the once-off R200 Lift Club registration fee manually, then upload proof for admin approval.';
           if (applyBtn) applyBtn.style.display = 'none';
           if (proofBtn) proofBtn.style.display = 'inline-flex';
         } else {
-          copyEl.textContent = 'Lift Club membership is required before booking a weekly or monthly seat. Apply, pay the once-off R100 membership fee manually, then upload proof for admin approval.';
+          copyEl.textContent = 'Lift Club membership is required before booking a weekly or monthly seat. Apply, pay the once-off R200 membership fee manually, then upload proof for admin approval.';
           if (applyBtn) applyBtn.style.display = 'inline-flex';
           if (proofBtn) proofBtn.style.display = 'inline-flex';
         }
       } catch(e) {
         statusEl.textContent = 'Unavailable';
+        copyEl.textContent = 'Unable to load your Lift Club membership status right now.';
       }
     }
 
     async function applyLiftClubMembership() {
       const token = localStorage.getItem('a2b_token');
-      if (!token) { window.location.replace('login.html'); return; }
+      if (!token) { window.location.replace('login.html'); return null; }
       try {
         const res = await fetch(`${API}/api/lift-club/membership/apply`, {
           method: 'POST',
@@ -701,10 +704,13 @@
           body: '{}',
         });
         if (!res.ok) throw new Error(await res.text());
-        showNotification('Lift Club application started. Please pay R100 and upload proof.', 'success');
+        const payload = await res.json().catch(() => ({}));
+        showNotification('Lift Club application started. Please pay R200 and upload proof.', 'success');
         await loadLiftClubMembershipStatus();
+        return payload;
       } catch(e) {
         showNotification('Unable to start Lift Club application. Please try again.', 'error');
+        return null;
       }
     }
 

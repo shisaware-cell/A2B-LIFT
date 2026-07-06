@@ -59,6 +59,7 @@ __export(schema_exports, {
   insertVehicleAssignmentSchema: () => insertVehicleAssignmentSchema,
   insertVehicleSchema: () => insertVehicleSchema,
   liftClubBookings: () => liftClubBookings,
+  liftClubMemberships: () => liftClubMemberships2,
   liftClubRoutes: () => liftClubRoutes,
   livenessSessions: () => livenessSessions,
   messages: () => messages,
@@ -360,6 +361,20 @@ var documents = (0, import_pg_core.pgTable)("documents", {
   uploadedAt: (0, import_pg_core.timestamp)("uploaded_at").defaultNow(),
   reviewedAt: (0, import_pg_core.timestamp)("reviewed_at"),
   reviewerAdminId: (0, import_pg_core.varchar)("reviewer_admin_id").references(() => users.id)
+});
+var liftClubMemberships2 = (0, import_pg_core.pgTable)("lift_club_memberships", {
+  id: (0, import_pg_core.varchar)("id").primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
+  userId: (0, import_pg_core.varchar)("user_id").notNull().unique().references(() => users.id),
+  status: (0, import_pg_core.text)("status").notNull().default("pending_payment"),
+  feeAmount: (0, import_pg_core.real)("fee_amount").notNull().default(200),
+  proofDocumentId: (0, import_pg_core.varchar)("proof_document_id").references(() => documents.id),
+  rejectionReason: (0, import_pg_core.text)("rejection_reason"),
+  submittedAt: (0, import_pg_core.timestamp)("submitted_at").defaultNow(),
+  paidAt: (0, import_pg_core.timestamp)("paid_at"),
+  reviewedAt: (0, import_pg_core.timestamp)("reviewed_at"),
+  reviewerAdminId: (0, import_pg_core.varchar)("reviewer_admin_id").references(() => users.id),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
 });
 var rideRatings = (0, import_pg_core.pgTable)("ride_ratings", {
   id: (0, import_pg_core.varchar)("id").primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
@@ -2085,7 +2100,7 @@ async function registerRoutes(app2) {
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         user_id varchar NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
         status text NOT NULL DEFAULT 'pending_payment',
-        fee_amount real NOT NULL DEFAULT 100,
+        fee_amount real NOT NULL DEFAULT 200,
         proof_document_id varchar REFERENCES documents(id) ON DELETE SET NULL,
         rejection_reason text,
         submitted_at timestamp DEFAULT now(),
@@ -2096,7 +2111,7 @@ async function registerRoutes(app2) {
         updated_at timestamp DEFAULT now()
       )
     `);
-    await pool2.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS fee_amount real NOT NULL DEFAULT 100");
+    await pool2.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS fee_amount real NOT NULL DEFAULT 200");
     await pool2.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS proof_document_id varchar REFERENCES documents(id) ON DELETE SET NULL");
     await pool2.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS rejection_reason text");
     await pool2.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS submitted_at timestamp DEFAULT now()");
@@ -2107,6 +2122,8 @@ async function registerRoutes(app2) {
     await pool2.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS updated_at timestamp DEFAULT now()");
     await pool2.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_lift_club_memberships_user_id ON lift_club_memberships(user_id)");
     await pool2.query("CREATE INDEX IF NOT EXISTS idx_lift_club_memberships_status ON lift_club_memberships(status)");
+    await pool2.query("ALTER TABLE lift_club_memberships ALTER COLUMN fee_amount SET DEFAULT 200");
+    await pool2.query("UPDATE lift_club_memberships SET fee_amount = 200, updated_at = now() WHERE status <> 'approved' AND fee_amount = 100");
   } catch (error) {
     console.warn("[routes] startup schema checks skipped:", error instanceof Error ? error.message : error);
   }
@@ -2443,7 +2460,8 @@ async function registerRoutes(app2) {
       } : null
     };
   }
-  const LIFT_CLUB_APPLICATION_FEE = 100;
+  const LIFT_CLUB_APPLICATION_FEE = 200;
+  const LIFT_CLUB_MEMBERSHIP_REFERRAL_BONUS = 100;
   const LIFT_CLUB_BANKING_DETAILS_URL = "https://a2blift.com/lift-club-payment.html";
   function serializeLiftClubMembership(membership) {
     if (!membership) {
@@ -2482,7 +2500,7 @@ async function registerRoutes(app2) {
     if (existing) return;
     const referrer = await storage.getUser(referrerUserId);
     if (!referrer) return;
-    const reward = 50;
+    const reward = LIFT_CLUB_MEMBERSHIP_REFERRAL_BONUS;
     const balanceBefore = Number(referrer.rewardsBalance || 0);
     const balanceAfter = Math.round((balanceBefore + reward) * 100) / 100;
     const referralEvent = await storage.getReferralEventByReferredUserId(referredUser.id);
@@ -5718,7 +5736,7 @@ async function registerRoutes(app2) {
       await storage.createNotification({
         userId: user.id,
         title: "Lift Club application started",
-        body: "Your Lift Club application is open. Pay the once-off R100 fee and upload proof for admin review.",
+        body: "Your Lift Club application is open. Pay the once-off R200 fee and upload proof for admin review.",
         type: "lift_club_membership"
       }).catch(() => void 0);
       await notifyAdmins(

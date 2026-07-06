@@ -473,7 +473,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         user_id varchar NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
         status text NOT NULL DEFAULT 'pending_payment',
-        fee_amount real NOT NULL DEFAULT 100,
+        fee_amount real NOT NULL DEFAULT 200,
         proof_document_id varchar REFERENCES documents(id) ON DELETE SET NULL,
         rejection_reason text,
         submitted_at timestamp DEFAULT now(),
@@ -484,7 +484,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         updated_at timestamp DEFAULT now()
       )
     `);
-    await pool.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS fee_amount real NOT NULL DEFAULT 100");
+    await pool.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS fee_amount real NOT NULL DEFAULT 200");
     await pool.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS proof_document_id varchar REFERENCES documents(id) ON DELETE SET NULL");
     await pool.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS rejection_reason text");
     await pool.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS submitted_at timestamp DEFAULT now()");
@@ -495,6 +495,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await pool.query("ALTER TABLE lift_club_memberships ADD COLUMN IF NOT EXISTS updated_at timestamp DEFAULT now()");
     await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_lift_club_memberships_user_id ON lift_club_memberships(user_id)");
     await pool.query("CREATE INDEX IF NOT EXISTS idx_lift_club_memberships_status ON lift_club_memberships(status)");
+    await pool.query("ALTER TABLE lift_club_memberships ALTER COLUMN fee_amount SET DEFAULT 200");
+    await pool.query("UPDATE lift_club_memberships SET fee_amount = 200, updated_at = now() WHERE status <> 'approved' AND fee_amount = 100");
   } catch (error) {
     console.warn("[routes] startup schema checks skipped:", error instanceof Error ? error.message : error);
   }
@@ -923,7 +925,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     };
   }
 
-  const LIFT_CLUB_APPLICATION_FEE = 100;
+  const LIFT_CLUB_APPLICATION_FEE = 200;
+  const LIFT_CLUB_MEMBERSHIP_REFERRAL_BONUS = 100;
   const LIFT_CLUB_BANKING_DETAILS_URL = "https://a2blift.com/lift-club-payment.html";
 
   function serializeLiftClubMembership(membership: any | undefined | null) {
@@ -968,7 +971,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const referrer = await storage.getUser(referrerUserId);
     if (!referrer) return;
 
-    const reward = 50;
+    const reward = LIFT_CLUB_MEMBERSHIP_REFERRAL_BONUS;
     const balanceBefore = Number(referrer.rewardsBalance || 0);
     const balanceAfter = Math.round((balanceBefore + reward) * 100) / 100;
     const referralEvent = await storage.getReferralEventByReferredUserId(referredUser.id);
@@ -4869,7 +4872,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.createNotification({
         userId: user.id,
         title: "Lift Club application started",
-        body: "Your Lift Club application is open. Pay the once-off R100 fee and upload proof for admin review.",
+        body: "Your Lift Club application is open. Pay the once-off R200 fee and upload proof for admin review.",
         type: "lift_club_membership",
       }).catch(() => undefined);
 

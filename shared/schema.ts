@@ -373,6 +373,26 @@ export const documents = pgTable("documents", {
   reviewerAdminId: varchar("reviewer_admin_id").references(() => users.id),
 });
 
+export const liftClubMemberships = pgTable("lift_club_memberships", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  userId: varchar("user_id")
+    .notNull()
+    .unique()
+    .references(() => users.id),
+  status: text("status").notNull().default("pending_payment"),
+  feeAmount: real("fee_amount").notNull().default(200),
+  proofDocumentId: varchar("proof_document_id").references(() => documents.id),
+  rejectionReason: text("rejection_reason"),
+  submittedAt: timestamp("submitted_at").defaultNow(),
+  paidAt: timestamp("paid_at"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewerAdminId: varchar("reviewer_admin_id").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const rideRatings = pgTable("ride_ratings", {
   id: varchar("id")
     .primaryKey()

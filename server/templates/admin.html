@@ -427,7 +427,7 @@ tbody tr:hover { background:#fafaf8; }
 
     <!-- LIFT CLUB APPLICATIONS -->
     <div class="view" id="view-liftClubApplications">
-      <div class="notice">🎟️ <span>Lift Club members pay a once-off R100 manual fee, upload proof, then wait for admin approval before they can book weekly or monthly Lift Club seats.</span></div>
+      <div class="notice">🎟️ <span>Lift Club members pay a once-off R200 manual fee, upload proof, then wait for admin approval before they can book weekly or monthly Lift Club seats.</span></div>
       <div class="sec-head">
         <div class="sec-title">Lift Club Members</div>
         <div class="filter-group liftclub-member-filters">
@@ -1975,14 +1975,14 @@ function renderLiftClubApplications() {
           ${m.rejectionReason ? `<div style="font-size:11px;color:var(--red);margin-top:4px">Reason: ${escapeHtml(m.rejectionReason)}</div>` : ''}
         </td>
         <td><span class="badge ${statusCls}">${escapeHtml((m.status || 'pending').replace(/_/g, ' '))}</span></td>
-        <td style="font-weight:800">R${Number(m.feeAmount || 100).toFixed(0)}</td>
+        <td style="font-weight:800">R${Number(m.feeAmount || 200).toFixed(0)}</td>
         <td>${proofUrl ? `<a class="btn-sm btn-detail" href="${escapeHtml(proofUrl)}" target="_blank" rel="noopener" style="text-decoration:none">Open proof</a>` : '<span style="color:var(--muted)">No proof yet</span>'}</td>
         <td style="font-size:12px">${fmtFull(m.submittedAt || m.createdAt)}</td>
         <td style="font-size:12px">${fmtFull(m.reviewedAt)}</td>
         <td><div class="action-cell">
           ${m.status !== 'approved' ? `<button class="btn-sm btn-approve" onclick="setLiftClubStatus('${m.id}','approved')">✓ Approve</button>` : ''}
-          ${m.status !== 'rejected' ? `<button class="btn-sm btn-reject" onclick="rejectLiftClubMembership('${m.id}')">✕ Reject</button>` : ''}
-          <button class="btn-sm btn-detail" onclick="editLiftClubMembership('${m.id}')">Edit</button>
+          ${m.status !== 'rejected' ? `<button class="btn-sm btn-reject" onclick="openLiftClubMembershipModal('${m.id}', 'reject')">✕ Reject</button>` : ''}
+          <button class="btn-sm btn-detail" onclick="openLiftClubMembershipModal('${m.id}', 'edit')">Edit</button>
           <button class="btn-sm btn-delete" onclick="deleteLiftClubMembership('${m.id}','${escapeHtml(user.name || user.username || 'member').replace(/'/g,"\\'")}')">🗑</button>
         </div></td>
       </tr>`;
@@ -2006,34 +2006,60 @@ async function setLiftClubStatus(id, status, rejectionReason = '') {
   }
 }
 
-function rejectLiftClubMembership(id) {
-  const reason = prompt('Reason for rejecting this Lift Club proof/application?');
-  if (!reason || !reason.trim()) return;
-  setLiftClubStatus(id, 'rejected', reason.trim());
-}
-
-async function editLiftClubMembership(id) {
+function openLiftClubMembershipModal(id, mode = 'edit') {
   const membership = allLiftClubMemberships.find(m => m.id === id);
   if (!membership) return toast('❌ Membership not found', 'err');
-  const status = prompt('Status: pending_payment, pending_review, approved, rejected', membership.status || 'pending_payment');
-  if (!status) return;
-  const feeRaw = prompt('Membership fee amount', String(membership.feeAmount || 100));
-  if (feeRaw === null) return;
-  const rejectionReason = status === 'rejected'
-    ? prompt('Rejection reason', membership.rejectionReason || '') || ''
-    : '';
+  const user = membership.user || {};
+  const proofUrl = membership.proofDocument?.url || membership.proofDocument?.fileUrl || membership.proofDocument?.path || '';
+  const selectedStatus = mode === 'reject' ? 'rejected' : (membership.status || 'pending_payment');
+  document.getElementById('m-title').textContent = mode === 'reject' ? 'Reject Lift Club application' : 'Lift Club member';
+  document.getElementById('m-sub').textContent = [user.name, user.username].filter(Boolean).join(' · ') || 'Membership details';
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid" style="margin-bottom:16px">
+      <div class="kv"><small>Member</small><b>${escapeHtml(user.name || '—')}</b></div>
+      <div class="kv"><small>Email</small><b>${escapeHtml(user.username || '—')}</b></div>
+      <div class="kv"><small>Phone</small><b>${escapeHtml(user.phone || '—')}</b></div>
+      <div class="kv"><small>Proof</small><b>${proofUrl ? `<a href="${escapeHtml(proofUrl)}" target="_blank" rel="noopener">Open proof</a>` : 'No proof yet'}</b></div>
+    </div>
+    <label class="field"><span>Status</span>
+      <select class="f-input" id="lcStatus">
+        ${['pending_payment','pending_review','approved','rejected'].map(status => `<option value="${status}" ${status === selectedStatus ? 'selected' : ''}>${status.replace(/_/g, ' ')}</option>`).join('')}
+      </select>
+    </label>
+    <label class="field"><span>Fee amount</span><input class="f-input" id="lcFeeAmount" type="number" min="0" step="1" value="${Number(membership.feeAmount || 200)}" /></label>
+    <label class="field"><span>Rejection reason</span><textarea class="f-input" id="lcRejectionReason" rows="4" placeholder="Required when rejecting">${escapeHtml(membership.rejectionReason || '')}</textarea></label>
+  `;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-delete" onclick="deleteLiftClubMembership('${id}','${escapeHtml(user.name || user.username || 'member').replace(/'/g,"\\'")}')">Delete</button>
+    <button class="btn-lg btn-outline" onclick="saveLiftClubMembershipFromModal('${id}')">Save</button>
+    <button class="btn-lg btn-red" onclick="saveLiftClubMembershipFromModal('${id}','rejected')">Reject</button>
+    <button class="btn-lg btn-green" onclick="saveLiftClubMembershipFromModal('${id}','approved')">Approve</button>
+  `;
+  openModal();
+}
+
+async function saveLiftClubMembershipFromModal(id, statusOverride = '') {
+  const status = statusOverride || document.getElementById('lcStatus')?.value || 'pending_payment';
+  const feeAmount = Number(document.getElementById('lcFeeAmount')?.value || 200);
+  const rejectionReason = String(document.getElementById('lcRejectionReason')?.value || '').trim();
+  if (status === 'rejected' && !rejectionReason) {
+    toast('❌ Rejection reason is required', 'err');
+    return;
+  }
   try {
     const res = await apiFetch('/api/admin/lift-club-memberships/' + id, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        status: status.trim(),
-        feeAmount: Number(feeRaw) || 100,
-        rejectionReason,
+        status,
+        feeAmount: Number.isFinite(feeAmount) ? feeAmount : 200,
+        rejectionReason: status === 'rejected' ? rejectionReason : '',
       }),
     });
     if (!res.ok) throw new Error(await res.text());
     toast('✅ Lift Club membership updated', 'ok');
+    closeModal();
     loadLiftClubApplications();
     loadUsers();
   } catch(e) {
@@ -2042,16 +2068,23 @@ async function editLiftClubMembership(id) {
 }
 
 async function deleteLiftClubMembership(id, label) {
-  if (!confirm(`Delete Lift Club membership for ${label}? This cannot be undone.`)) return;
-  try {
-    const res = await apiFetch('/api/admin/lift-club-memberships/' + id, { method: 'DELETE' });
-    if (!res.ok) throw new Error(await res.text());
-    toast('✅ Lift Club membership deleted', 'ok');
-    loadLiftClubApplications();
-    loadUsers();
-  } catch(e) {
-    toast('❌ ' + e.message, 'err');
-  }
+  showDeleteConfirm({
+    title: 'Delete Lift Club membership',
+    subtitle: label || 'Membership record',
+    message: `Delete Lift Club membership for ${label || 'this member'}? This cannot be undone.`,
+    confirmLabel: 'Delete membership',
+    onConfirm: async () => {
+      try {
+        const res = await apiFetch('/api/admin/lift-club-memberships/' + id, { method: 'DELETE' });
+        if (!res.ok) throw new Error(await res.text());
+        toast('✅ Lift Club membership deleted', 'ok');
+        loadLiftClubApplications();
+        loadUsers();
+      } catch(e) {
+        toast('❌ ' + e.message, 'err');
+      }
+    }
+  });
 }
 
 async function loadLiftClubRoutes() {

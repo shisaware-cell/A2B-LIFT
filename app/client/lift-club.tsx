@@ -19,19 +19,20 @@ type Membership = {
 };
 
 const DEFAULT_BANKING_URL = "https://a2blift.com/lift-club-payment.html";
+const DEFAULT_APPLICATION_FEE = 200;
 
 function statusCopy(status?: string) {
   switch (status) {
     case "approved":
-      return { title: "Approved", body: "Your Lift Club membership is active. You can book weekday Lift Club seats.", icon: "ribbon" as const };
+      return { title: "Lift Club dashboard", body: "Your Lift Club membership is active. Search approved weekday commute cars and book available seats.", icon: "ribbon" as const };
     case "pending_review":
-      return { title: "Proof under review", body: "Admin is checking your payment proof. You will see your badge after approval.", icon: "time" as const };
+      return { title: "Pending admin approval", body: "Your R200 proof is with the A2B admin team. You will see your Lift Club badge after approval.", icon: "time" as const };
     case "pending_payment":
-      return { title: "Payment proof needed", body: "Pay the once-off R100 application fee, then upload your proof here.", icon: "wallet" as const };
+      return { title: "Payment proof needed", body: "Pay the once-off R200 application fee, then upload your proof here.", icon: "wallet" as const };
     case "rejected":
       return { title: "Proof needs attention", body: "Please check the reason below, then upload a new proof of payment.", icon: "alert-circle" as const };
     default:
-      return { title: "Register as Lift Club member", body: "Apply, pay the once-off R100 fee manually, and wait for admin approval.", icon: "add-circle" as const };
+      return { title: "Register as Lift Club member", body: "Apply, pay the once-off R200 fee manually, upload proof, and wait for admin approval.", icon: "add-circle" as const };
   }
 }
 
@@ -80,10 +81,8 @@ export default function LiftClubMembershipScreen() {
   }
 
   useEffect(() => {
-    if (membership?.status === "approved") {
-      searchRoutes();
-    }
-  }, [membership?.status]);
+    if (!loading) searchRoutes();
+  }, [loading]);
 
   async function apply() {
     try {
@@ -151,7 +150,7 @@ export default function LiftClubMembershipScreen() {
         <Ionicons name="chevron-back" size={26} color={Colors.white} />
       </Pressable>
 
-      <Text style={styles.title}>Lift Club Membership</Text>
+      <Text style={styles.title}>Lift Club dashboard</Text>
 
       {loading ? (
         <View style={styles.loadingCard}>
@@ -179,7 +178,7 @@ export default function LiftClubMembershipScreen() {
 
           <View style={styles.infoCard}>
             <Text style={styles.infoTitle}>Once-off application fee</Text>
-            <Text style={styles.fee}>R {Number(membership?.feeAmount || 100).toFixed(0)}</Text>
+            <Text style={styles.fee}>R {Number(membership?.feeAmount || DEFAULT_APPLICATION_FEE).toFixed(0)}</Text>
             <Text style={styles.muted}>Manual payment is reviewed by admin. Upload proof after paying to move your application to review.</Text>
             <Pressable style={styles.secondaryButton} onPress={openPaymentPage}>
               <Ionicons name="open-outline" size={18} color={Colors.white} />
@@ -189,57 +188,68 @@ export default function LiftClubMembershipScreen() {
 
           <View style={styles.infoCard}>
             <Text style={styles.infoTitle}>Reward note</Text>
-            <Text style={styles.muted}>Your existing 2.5% reward programme stays active. You also earn R50 once when someone you invited pays the R100 Lift Club registration fee and is approved by admin.</Text>
+            <Text style={styles.muted}>Your existing 2.5% reward programme stays active. You also earn R100 once when someone you invited pays the R200 Lift Club registration fee and is approved by admin.</Text>
           </View>
 
-          {isApproved && (
-            <View style={styles.infoCard}>
-              <Text style={styles.infoTitle}>Find Lift Club cars</Text>
-              <Text style={styles.muted}>Search approved weekday commute cars by pickup area and workplace.</Text>
-              <View style={styles.searchRow}>
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder="Pickup area"
-                  placeholderTextColor={Colors.textMuted}
-                  value={from}
-                  onChangeText={setFrom}
-                />
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder="Workplace"
-                  placeholderTextColor={Colors.textMuted}
-                  value={to}
-                  onChangeText={setTo}
-                />
-              </View>
-              <Pressable style={styles.secondaryButton} onPress={searchRoutes} disabled={routesLoading}>
-                {routesLoading ? <ActivityIndicator color={Colors.white} /> : <Ionicons name="search-outline" size={18} color={Colors.white} />}
-                <Text style={styles.secondaryButtonText}>Search cars</Text>
-              </Pressable>
-              <View style={styles.routesList}>
-                {routesLoading ? null : routes.length ? routes.map((route) => {
-                  const seatsLeft = Math.max(0, Number(route.totalSeats || 0) - Number(route.bookedSeats || 0));
-                  return (
-                    <View key={route.id} style={styles.routeCard}>
-                      <View style={styles.routeHeader}>
-                        <Text style={styles.routeTitle}>{route.pickupArea} to {route.destinationArea}</Text>
-                        <View style={[styles.seatPill, seatsLeft <= 0 && styles.fullSeatPill]}>
-                          <Text style={styles.seatPillText}>{seatsLeft > 0 ? `${seatsLeft} seats` : "Full"}</Text>
-                        </View>
-                      </View>
-                      <Text style={styles.routeMeta}>{route.departureWindow || "Weekday mornings"}</Text>
-                      <Text style={styles.routeMeta}>
-                        Weekly R{Number(route.weeklyPrice || 0).toFixed(0)} · Monthly R{Number(route.monthlyPrice || 0).toFixed(0)}
-                      </Text>
-                      <Text style={styles.routeMeta}>
-                        {route.carMake || "Vehicle"} {route.vehicleModel || ""} · {route.vehicleYear || "2015+"}
-                      </Text>
-                    </View>
-                  );
-                }) : <Text style={styles.muted}>No Lift Club cars found yet. Try a nearby pickup area or workplace.</Text>}
-              </View>
+          <View style={styles.infoCard}>
+            <Text style={styles.infoTitle}>{isApproved ? "Available Lift Club cars" : "Preview available Lift Club cars"}</Text>
+            <Text style={styles.muted}>
+              Search approved weekday commute cars by pickup area and workplace. Booking opens after your Lift Club membership is approved.
+            </Text>
+            <View style={styles.searchRow}>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Pickup area"
+                placeholderTextColor={Colors.textMuted}
+                value={from}
+                onChangeText={setFrom}
+              />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Workplace"
+                placeholderTextColor={Colors.textMuted}
+                value={to}
+                onChangeText={setTo}
+              />
             </View>
-          )}
+            <Pressable style={styles.secondaryButton} onPress={searchRoutes} disabled={routesLoading}>
+              {routesLoading ? <ActivityIndicator color={Colors.white} /> : <Ionicons name="search-outline" size={18} color={Colors.white} />}
+              <Text style={styles.secondaryButtonText}>Search cars</Text>
+            </Pressable>
+            <View style={styles.routesList}>
+              {routesLoading ? null : routes.length ? routes.map((route) => {
+                const seatsLeft = Math.max(0, Number(route.totalSeats || 0) - Number(route.bookedSeats || 0));
+                const actionLabel = isApproved ? "Book from website" : needsApply ? "Apply to book" : "Complete approval to book";
+                const action = isApproved
+                  ? () => Linking.openURL("https://a2blift.com/lift-club.html")
+                  : needsApply
+                    ? apply
+                    : membership?.status === "pending_payment" || membership?.status === "rejected"
+                      ? openPaymentPage
+                      : undefined;
+                return (
+                  <View key={route.id} style={styles.routeCard}>
+                    <View style={styles.routeHeader}>
+                      <Text style={styles.routeTitle}>{route.pickupArea} to {route.destinationArea}</Text>
+                      <View style={[styles.seatPill, seatsLeft <= 0 && styles.fullSeatPill]}>
+                        <Text style={[styles.seatPillText, seatsLeft <= 0 && styles.fullSeatPillText]}>{seatsLeft > 0 ? `${seatsLeft} seats` : "Full"}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.routeMeta}>{route.departureWindow || "Weekday mornings"}</Text>
+                    <Text style={styles.routeMeta}>
+                      Weekly R{Number(route.weeklyPrice || 0).toFixed(0)} · Monthly R{Number(route.monthlyPrice || 0).toFixed(0)}
+                    </Text>
+                    <Text style={styles.routeMeta}>
+                      {route.carMake || "Vehicle"} {route.vehicleModel || ""} · {route.vehicleYear || "2015+"}
+                    </Text>
+                    <Pressable style={[styles.routeAction, (!action || seatsLeft <= 0) && styles.disabledButton]} disabled={!action || seatsLeft <= 0 || busy} onPress={action}>
+                      <Text style={styles.routeActionText}>{seatsLeft <= 0 ? "Full" : actionLabel}</Text>
+                    </Pressable>
+                  </View>
+                );
+              }) : <Text style={styles.muted}>No Lift Club cars found yet. Try a nearby pickup area or workplace.</Text>}
+            </View>
+          </View>
 
           {needsApply ? (
             <Pressable style={[styles.primaryButton, busy && styles.disabledButton]} disabled={busy} onPress={apply}>
@@ -306,5 +316,8 @@ const styles = StyleSheet.create({
   seatPill: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, backgroundColor: "#F7C948" },
   fullSeatPill: { backgroundColor: "rgba(255,255,255,0.14)" },
   seatPillText: { fontSize: 11, fontFamily: "Inter_700Bold", color: "#2A1D00" },
+  fullSeatPillText: { color: Colors.textSecondary },
+  routeAction: { minHeight: 42, borderRadius: 12, backgroundColor: "#F7C948", alignItems: "center", justifyContent: "center", marginTop: 4 },
+  routeActionText: { fontSize: 13, fontFamily: "Inter_700Bold", color: "#2A1D00" },
   disabledButton: { opacity: 0.65 },
 });
