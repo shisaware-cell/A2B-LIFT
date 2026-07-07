@@ -430,12 +430,15 @@ tbody tr:hover { background:#fafaf8; }
       <div class="notice">🎟️ <span>Lift Club members pay a once-off R200 manual fee, upload proof, then wait for admin approval before they can book weekly or monthly Lift Club seats.</span></div>
       <div class="sec-head">
         <div class="sec-title">Lift Club Members</div>
-        <div class="filter-group liftclub-member-filters">
-          <button class="ftab active" onclick="fLiftClub('all',this)">All</button>
-          <button class="ftab" onclick="fLiftClub('pending_review',this)">Pending Review</button>
-          <button class="ftab" onclick="fLiftClub('pending_payment',this)">Pending Payment</button>
-          <button class="ftab" onclick="fLiftClub('approved',this)">Approved</button>
-          <button class="ftab" onclick="fLiftClub('rejected',this)">Rejected</button>
+        <div class="filter-group">
+          <div class="filter-group liftclub-member-filters">
+            <button class="ftab active" onclick="fLiftClub('all',this)">All</button>
+            <button class="ftab" onclick="fLiftClub('pending_review',this)">Pending Review</button>
+            <button class="ftab" onclick="fLiftClub('pending_payment',this)">Pending Payment</button>
+            <button class="ftab" onclick="fLiftClub('approved',this)">Approved</button>
+            <button class="ftab" onclick="fLiftClub('rejected',this)">Rejected</button>
+          </div>
+          <button class="btn-sm btn-detail" onclick="openLiftClubUserPickerModal()">+ Convert existing user</button>
         </div>
       </div>
       <div class="table-card" id="liftclub-table"><div class="loading">Loading…</div></div>
@@ -2342,8 +2345,15 @@ async function loadUsers() {
     }
     document.getElementById('users-table').innerHTML = `<table>
       <thead><tr><th>Name</th><th>Username</th><th>Phone</th><th>Role</th><th>Rating</th><th>Wallet Balance</th><th>Joined</th><th>Actions</th></tr></thead>
-      <tbody>${users.map(u => `<tr onclick="userDetail('${u.id}')" style="cursor:pointer">
-        <td style="font-weight:600">${escapeHtml(u.name || '—')}</td>
+      <tbody>${users.map(u => {
+        const liftClub = u.liftClubMembership || null;
+        const liftClubBadge = liftClub?.status === 'approved'
+          ? '<span class="badge b-liftclub" style="margin-left:6px">Lift Club</span>'
+          : liftClub?.status
+            ? `<span class="badge b-${escapeHtml(liftClub.status)}" style="margin-left:6px">${escapeHtml(String(liftClub.status).replace(/_/g, ' '))}</span>`
+            : '';
+        return `<tr onclick="userDetail('${u.id}')" style="cursor:pointer">
+        <td style="font-weight:600">${escapeHtml(u.name || '—')} ${liftClubBadge}</td>
         <td style="color:var(--muted);font-size:13px">@${escapeHtml(u.username || '—')}</td>
         <td>${escapeHtml(u.phone || '—')}</td>
         <td><span class="badge b-${u.role || 'client'}">${escapeHtml(u.role || 'client')}</span></td>
@@ -2351,7 +2361,8 @@ async function loadUsers() {
         <td style="font-weight:600;color:var(--green)">R ${Number(u.walletBalance || 0).toFixed(2)}</td>
         <td style="font-size:12px">${fmt(u.createdAt)}</td>
         <td><div class="action-cell"><button class="btn-sm btn-detail" onclick="event.stopPropagation();userDetail('${u.id}')">View</button>${u.role !== 'admin' ? `<button class="btn-sm btn-delete" onclick="event.stopPropagation();adminDelete('user','${u.id}','${(u.name||u.username||'this user').replace(/'/g,"\\'")}')">🗑</button>` : ''}</div></td>
-      </tr>`).join('')}
+      </tr>`;
+      }).join('')}
       </tbody></table>`;
   } catch(e) {
     document.getElementById('users-table').innerHTML = emptyState('❌', 'Failed to load users', e.message);
@@ -2362,6 +2373,13 @@ function userDetail(id) {
   const u = allUsers.find(item => item.id === id);
   if (!u) { toast('❌ User not found in current list.', 'err'); return; }
   const label = u.name || u.username || 'User';
+  const membership = u.liftClubMembership || null;
+  const membershipLabel = membership?.status ? String(membership.status).replace(/_/g, ' ') : 'Not applied';
+  const membershipBadge = membership?.status === 'approved'
+    ? '<span class="badge b-liftclub">Lift Club Member</span>'
+    : membership?.status
+      ? `<span class="badge b-${escapeHtml(membership.status)}">${escapeHtml(membershipLabel)}</span>`
+      : '<span class="badge b-client">Not applied</span>';
   document.getElementById('m-title').textContent = label;
   document.getElementById('m-sub').textContent = `User account · ${u.role || 'client'}`;
   document.getElementById('m-body').innerHTML = `
@@ -2372,9 +2390,11 @@ function userDetail(id) {
       <div class="info-row"><div class="info-label">Role</div><div class="info-val"><span class="badge b-${u.role || 'client'}">${escapeHtml(u.role || 'client')}</span></div></div>
       <div class="info-row"><div class="info-label">Rating</div><div class="info-val">⭐ ${Number(u.rating || 5).toFixed(1)}</div></div>
       <div class="info-row"><div class="info-label">Wallet Balance</div><div class="info-val" style="font-weight:700;color:var(--green)">R ${Number(u.walletBalance || 0).toFixed(2)}</div></div>
+      <div class="info-row"><div class="info-label">Lift Club</div><div class="info-val">${membershipBadge}</div></div>
       <div class="info-row"><div class="info-label">Joined</div><div class="info-val">${fmtFull(u.createdAt)}</div></div>
       <div class="info-row"><div class="info-label">User ID</div><div class="info-val" style="font-family:var(--mono);font-size:12px">${escapeHtml(u.id || '—')}</div></div>
     </div>
+    <div class="notice" style="margin-top:18px">🎟️ <span>Convert or approve this current user as a Lift Club member. Their normal client login stays unchanged.</span></div>
     <div class="notice" style="margin-top:18px">🔐 <span>Set a new password for this user. Current passwords are never displayed.</span></div>
     <div class="field" style="margin-top:14px">
       <div class="f-label">New password</div>
@@ -2383,6 +2403,7 @@ function userDetail(id) {
   document.getElementById('m-foot').innerHTML = `
     <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
     ${u.role !== 'admin' ? `<button class="btn-lg btn-delete" onclick="closeModal();adminDelete('user','${u.id}','${(u.name||u.username||'this user').replace(/'/g,"\\'")}')">Delete user</button>` : ''}
+    ${u.role !== 'admin' ? `<button class="btn-lg btn-outline" onclick="openLiftClubUserConvertModal('${id}')">${membership?.status === 'approved' ? 'Edit Lift Club' : 'Approve Lift Club'}</button>` : ''}
     <button class="btn-lg btn-green" onclick="saveAdminPassword('${id}')">Update password</button>`;
   openModal();
   setTimeout(() => document.getElementById('admin-user-password')?.focus(), 50);
@@ -2408,6 +2429,115 @@ async function saveAdminPassword(id) {
     toast('✅ Password updated.', 'ok');
   } catch (e) {
     toast('❌ ' + (e.message || 'Unable to update password.'), 'err');
+  }
+}
+
+async function ensureAdminUsersLoaded() {
+  if (Array.isArray(allUsers) && allUsers.length) return;
+  const res = await apiFetch('/api/users');
+  if (!res.ok) throw new Error(await res.text());
+  const users = await res.json();
+  allUsers = Array.isArray(users) ? users : [];
+}
+
+async function openLiftClubUserPickerModal() {
+  try {
+    await ensureAdminUsersLoaded();
+  } catch (e) {
+    toast('❌ Unable to load users for conversion: ' + e.message, 'err');
+    return;
+  }
+  const options = allUsers
+    .filter(u => u.role !== 'admin')
+    .sort((a, b) => String(a.name || a.username || '').localeCompare(String(b.name || b.username || '')))
+    .map(u => {
+      const label = [u.name || 'Unnamed user', u.username || '', u.phone || '', u.liftClubMembership?.status ? `Lift Club: ${String(u.liftClubMembership.status).replace(/_/g, ' ')}` : 'No Lift Club application'].filter(Boolean).join(' · ');
+      return `<option value="${escapeHtml(u.id)}">${escapeHtml(label)}</option>`;
+    })
+    .join('');
+  document.getElementById('m-title').textContent = 'Convert existing user';
+  document.getElementById('m-sub').textContent = 'Approve or open a Lift Club membership for a current account';
+  document.getElementById('m-body').innerHTML = `
+    <div class="notice">🎟️ <span>This keeps the user as a normal client account and adds Lift Club membership status on top.</span></div>
+    <label class="field"><span>User</span>
+      <select class="f-input" id="lcConvertUserId">${options || '<option value="">No eligible users found</option>'}</select>
+    </label>
+    <label class="field"><span>Status</span>
+      <select class="f-input" id="lcConvertStatus">
+        <option value="approved" selected>Approved Lift Club member</option>
+        <option value="pending_payment">Pending payment</option>
+        <option value="pending_review">Pending review</option>
+        <option value="rejected">Rejected</option>
+      </select>
+    </label>
+    <label class="field"><span>Fee amount</span><input class="f-input" id="lcConvertFeeAmount" type="number" min="0" step="1" value="200" /></label>
+    <label class="field"><span>Rejection reason</span><textarea class="f-input" id="lcConvertRejectionReason" rows="3" placeholder="Required only when rejected"></textarea></label>
+  `;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-green" onclick="saveLiftClubUserConversionFromModal()">Save Lift Club status</button>`;
+  openModal();
+}
+
+function openLiftClubUserConvertModal(userId) {
+  const user = allUsers.find(u => u.id === userId);
+  if (!user) {
+    toast('❌ User not found in current list.', 'err');
+    return;
+  }
+  const membership = user.liftClubMembership || {};
+  const selectedStatus = membership.status || 'approved';
+  document.getElementById('m-title').textContent = 'Lift Club membership';
+  document.getElementById('m-sub').textContent = [user.name, user.username].filter(Boolean).join(' · ') || 'Current user';
+  document.getElementById('m-body').innerHTML = `
+    <div class="notice">🎟️ <span>Convert this current user to Lift Club or update their membership status. Their client login and account role remain unchanged.</span></div>
+    <label class="field"><span>Status</span>
+      <select class="f-input" id="lcConvertStatus">
+        ${['approved','pending_payment','pending_review','rejected'].map(status => `<option value="${status}" ${status === selectedStatus ? 'selected' : ''}>${status.replace(/_/g, ' ')}</option>`).join('')}
+      </select>
+    </label>
+    <label class="field"><span>Fee amount</span><input class="f-input" id="lcConvertFeeAmount" type="number" min="0" step="1" value="${Number(membership.feeAmount || 200)}" /></label>
+    <label class="field"><span>Rejection reason</span><textarea class="f-input" id="lcConvertRejectionReason" rows="3" placeholder="Required only when rejected">${escapeHtml(membership.rejectionReason || '')}</textarea></label>
+    <input type="hidden" id="lcConvertUserId" value="${escapeHtml(userId)}" />
+  `;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-green" onclick="saveLiftClubUserConversionFromModal()">Save Lift Club status</button>`;
+  openModal();
+}
+
+async function saveLiftClubUserConversionFromModal() {
+  const userId = document.getElementById('lcConvertUserId')?.value || '';
+  const status = document.getElementById('lcConvertStatus')?.value || 'approved';
+  const feeAmount = Number(document.getElementById('lcConvertFeeAmount')?.value || 200);
+  const rejectionReason = String(document.getElementById('lcConvertRejectionReason')?.value || '').trim();
+  if (!userId) {
+    toast('❌ Select a user first.', 'err');
+    return;
+  }
+  if (status === 'rejected' && !rejectionReason) {
+    toast('❌ Rejection reason is required.', 'err');
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/admin/lift-club-memberships/convert-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
+        status,
+        feeAmount: Number.isFinite(feeAmount) ? feeAmount : 200,
+        rejectionReason: status === 'rejected' ? rejectionReason : '',
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Unable to update Lift Club membership.');
+    toast(status === 'approved' ? '✅ User approved as Lift Club member' : '✅ Lift Club membership updated', 'ok');
+    closeModal();
+    loadLiftClubApplications();
+    loadUsers();
+  } catch(e) {
+    toast('❌ ' + (e.message || 'Unable to update Lift Club membership.'), 'err');
   }
 }
 

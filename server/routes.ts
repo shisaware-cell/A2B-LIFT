@@ -2884,6 +2884,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ? {
                 id: membership.id,
                 status: membership.status,
+                feeAmount: membership.feeAmount,
+                rejectionReason: membership.rejectionReason,
                 isApproved: membership.status === "approved",
               }
             : null,
@@ -4946,6 +4948,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json(memberships);
     } catch (error: any) {
       return res.status(500).json({ message: error.message || "Unable to load Lift Club applications" });
+    }
+  });
+
+  app.post("/api/admin/lift-club-memberships/convert-user", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId = String(req.body?.userId || "").trim();
+      const status = String(req.body?.status || "approved").trim();
+      const feeAmount = req.body?.feeAmount === undefined ? LIFT_CLUB_APPLICATION_FEE : Number(req.body.feeAmount);
+      const rejectionReason = String(req.body?.rejectionReason || "").trim();
+
+      if (!userId) {
+        return res.status(400).json({ message: "User is required" });
+      }
+      if (!["pending_payment", "pending_review", "approved", "rejected"].includes(status)) {
+        return res.status(400).json({ message: "Invalid Lift Club membership status" });
+      }
+      if (!Number.isFinite(feeAmount) || feeAmount < 0) {
+        return res.status(400).json({ message: "Fee amount must be a valid number" });
+      }
+      if (status === "rejected" && !rejectionReason) {
+        return res.status(400).json({ message: "Rejection reason is required" });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const existing = await storage.getLiftClubMembershipByUser(userId).catch(() => undefined);
+      const now = new Date();
+      const membership = await storage.upsertLiftClubMembership({
+        userId,
+        status,
+        feeAmount,
+        rejectionReason: status === "rejected" ? rejectionReason : null,
+        submittedAt: existing?.submittedAt || now,
+        paidAt: ["approved", "pending_review"].includes(status) ? (existing?.paidAt || now) : existing?.paidAt || null,
+        reviewedAt: ["approved", "rejected"].includes(status) ? now : null,
+        reviewerAdminId: ["approved", "rejected"].includes(status) ? req.auth!.sub : null,
+      });
+
+      if (status === "approved" && existing?.status !== "approved") {
+        await creditLiftClubMembershipReferralBonus(userId, membership.id).catch((error) => {
+          console.warn("[lift-club] membership referral bonus skipped:", error instanceof Error ? error.message : error);
+        });
+      }
+
+      await storage.createNotification({
+        userId,
+        title: status === "approved" ? "Lift Club approved" : "Lift Club membership updated",
+        body: status === "approved"
+          ? "Your Lift Club membership is approved. Your yellow Lift Club badge is now active."
+          : status === "pending_payment"
+            ? "Your Lift Club application has been opened. Pay the R200 fee and upload proof for review."
+            : status === "pending_review"
+              ? "Your Lift Club application is waiting for admin review."
+              : `Your Lift Club application was rejected: ${rejectionReason}.`,
+        type: "lift_club_membership",
+      }).catch(() => undefined);
+
+      return res.json(serializeLiftClubMembership(membership));
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || "Unable to convert user to Lift Club member" });
     }
   });
 
