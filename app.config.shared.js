@@ -25,7 +25,7 @@ const defaultPamolProjectId = "f282a582-7512-48d6-b563-13aa571d9115";
 const defaultPascalProjectId = "eb3b8747-40b2-4aad-b118-e64339bfeea0";
 const defaultClientProjectId = "9932543b-f023-4dec-8213-5d0fe99ad749";
 const defaultClientSlug = "a2b-lift-client-eas-mFdHJz";
-const appVersion = process.env.EXPO_APP_VERSION || "1.0.8";
+const appVersion = process.env.EXPO_APP_VERSION || "1.0.11";
 const currentAndroidVersionCode = Number(process.env.EXPO_ANDROID_VERSION_CODE || 110);
 
 function getIosBuildNumber(variant, fallback) {
