@@ -574,8 +574,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   async function getApprovedActiveVehicle(chauffeur: any) {
-    if (!chauffeur?.activeVehicleId) return null;
-    const vehicle = await storage.getVehicle(chauffeur.activeVehicleId).catch(() => undefined);
+    if (!chauffeur?.userId) return null;
+
+    let activeVehicleId = chauffeur.activeVehicleId || null;
+
+    // Fallback: approved drivers may not have an active vehicle selected yet
+    // (admin approval creates the assignment but does not set activeVehicleId).
+    // Resolve their active approved assignment and persist it so dispatch works.
+    if (!activeVehicleId) {
+      const profile = await storage.getOperatorProfileByUserId(chauffeur.userId).catch(() => undefined);
+      if (profile?.id) {
+        const assignments = await storage
+          .getVehicleAssignments({ driverOperatorProfileId: profile.id, status: "active" })
+          .catch(() => []);
+        for (const assignment of assignments) {
+          const assignedVehicle = await storage.getVehicle(assignment.vehicleId).catch(() => undefined);
+          if (
+            assignedVehicle &&
+            assignedVehicle.status === "approved" &&
+            Number(assignedVehicle.vehicleYear || 0) >= 2015
+          ) {
+            await storage.updateChauffeur(chauffeur.id, { activeVehicleId: assignedVehicle.id }).catch(() => undefined);
+            return assignedVehicle;
+          }
+        }
+      }
+      return null;
+    }
+
+    const vehicle = await storage.getVehicle(activeVehicleId).catch(() => undefined);
     if (
       vehicle &&
       vehicle.status === "approved" &&

@@ -1009,11 +1009,12 @@ function editChauf(id) {
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
         <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Vehicle Type</label>
           <select id="edit-vehicleType" class="f-input">
-            <option ${c.vehicleType==='sedan'?'selected':''}>sedan</option>
-            <option ${c.vehicleType==='suv'?'selected':''}>suv</option>
-            <option ${c.vehicleType==='luxury'?'selected':''}>luxury</option>
-            <option ${c.vehicleType==='van'?'selected':''}>van</option>
-            <option ${c.vehicleType==='executive'?'selected':''}>executive</option>
+            <option value="budget" ${c.vehicleType==='budget'?'selected':''}>budget</option>
+            <option value="luxury" ${c.vehicleType==='luxury'?'selected':''}>luxury</option>
+            <option value="business" ${c.vehicleType==='business'?'selected':''}>business</option>
+            <option value="van" ${c.vehicleType==='van'?'selected':''}>van</option>
+            <option value="luxury_van" ${c.vehicleType==='luxury_van'?'selected':''}>luxury_van</option>
+            <option value="executive" ${c.vehicleType==='executive'?'selected':''}>executive (business + luxury)</option>
           </select></div>
         <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Passengers</label>
           <input id="edit-passengerCapacity" class="f-input" type="number" value="${c.passengerCapacity||4}" /></div>

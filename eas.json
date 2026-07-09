@@ -191,12 +191,14 @@
         "track": "internal"
       },
       "ios": {
-        "appleId": "ntokozodlamini12@gmail.com"
+        "appleId": "ntokozodlamini12@gmail.com",
+        "ascAppId": "6779553841"
       }
     },
     "ios-production": {
       "ios": {
-        "appleId": "ntokozodlamini12@gmail.com"
+        "appleId": "ntokozodlamini12@gmail.com",
+        "ascAppId": "6779553841"
       }
     },
     "client-production": {
@@ -205,12 +207,14 @@
         "track": "internal"
       },
       "ios": {
-        "appleId": "ntokozodlamini12@gmail.com"
+        "appleId": "ntokozodlamini12@gmail.com",
+        "ascAppId": "6779557968"
       }
     },
     "client-ios-production": {
       "ios": {
-        "appleId": "ntokozodlamini12@gmail.com"
+        "appleId": "ntokozodlamini12@gmail.com",
+        "ascAppId": "6779557968"
       }
     }
   }
