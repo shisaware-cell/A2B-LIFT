@@ -11,6 +11,25 @@ const GOOGLE_MAPS_API_KEY =
 
 const DARK_MAP_STYLES = `&style=element:geometry%7Ccolor:0x1d1d1d&style=element:labels.icon%7Cvisibility:off&style=element:labels.text.fill%7Ccolor:0x757575&style=element:labels.text.stroke%7Ccolor:0x212121&style=feature:road%7Celement:geometry.fill%7Ccolor:0x2c2c2c&style=feature:road.highway%7Celement:geometry%7Ccolor:0x3c3c3c&style=feature:water%7Celement:geometry%7Ccolor:0x0e0e0e`;
 
+// Day = 06:00–17:59 local, Night = 18:00–05:59 local. Keeps the web build's
+// map in sync with the native day/night behaviour.
+function isDaytimeNow(): boolean {
+  const hour = new Date().getHours();
+  return hour >= 6 && hour < 18;
+}
+
+const LIGHT_MAP_JS_STYLE = [
+  { elementType: "geometry", stylers: [{ color: "#f5f5f5" }] },
+  { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#616161" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#f5f5f5" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#ffffff" }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#dadada" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#c9dbe8" }] },
+  { featureType: "poi", stylers: [{ visibility: "off" }] },
+  { featureType: "transit", stylers: [{ visibility: "off" }] },
+];
+
 function decodePolyline(encoded: string): { lat: number; lng: number }[] {
   const points: { lat: number; lng: number }[] = [];
   let index = 0;
@@ -142,13 +161,14 @@ export default function A2BMap({
       { featureType: "transit", stylers: [{ visibility: "off" }] },
     ];
 
+    const day = isDaytimeNow();
     const map = new google.maps.Map(mapContainerRef.current, {
       center: { lat: pickupLocation.lat, lng: pickupLocation.lng },
       zoom: 17,
-      styles: darkStyle,
+      styles: day ? LIGHT_MAP_JS_STYLE : darkStyle,
       disableDefaultUI: true,
       gestureHandling: "greedy",
-      backgroundColor: "#1d1d1d",
+      backgroundColor: day ? "#E9ECEF" : "#1d1d1d",
     });
 
     mapInstanceRef.current = map;
@@ -263,7 +283,7 @@ export default function A2BMap({
     if (routeCoords.length > 0) {
       polylineRef.current = new google.maps.Polyline({
         path: routeCoords,
-        strokeColor: "#FFFFFF",
+        strokeColor: isDaytimeNow() ? "#111111" : "#FFFFFF",
         strokeOpacity: 0.95,
         strokeWeight: 4,
         map: mapInstanceRef.current,

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useMemo, useCallback } from "react";
+import React, { useRef, useEffect, useMemo, useCallback, useState } from "react";
 import { View, Text, StyleSheet, ActivityIndicator, Platform } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
@@ -30,6 +30,35 @@ const DARK_MAP_STYLE = [
   { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#3d3d3d" }] },
 ];
 
+// Clean, Uber-like light style used during the day. Muted greys on near-white,
+// POIs hidden to keep the map calm, subtle blue water.
+const LIGHT_MAP_STYLE = [
+  { elementType: "geometry", stylers: [{ color: "#f5f5f5" }] },
+  { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#616161" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#f5f5f5" }] },
+  { featureType: "administrative", elementType: "geometry", stylers: [{ visibility: "off" }] },
+  { featureType: "administrative.land_parcel", elementType: "labels.text.fill", stylers: [{ color: "#bdbdbd" }] },
+  { featureType: "poi", stylers: [{ visibility: "off" }] },
+  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#e5e5e5" }] },
+  { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#ffffff" }] },
+  { featureType: "road.arterial", elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#dadada" }] },
+  { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#616161" }] },
+  { featureType: "road.local", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
+  { featureType: "transit", stylers: [{ visibility: "off" }] },
+  { featureType: "transit.line", elementType: "geometry", stylers: [{ color: "#e5e5e5" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#c9dbe8" }] },
+  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
+];
+
+// Day = 06:00–17:59 local, Night = 18:00–05:59 local.
+function isDaytimeNow() {
+  const hour = new Date().getHours();
+  return hour >= 6 && hour < 18;
+}
+
 // Isolated memoized component so the driver marker never unmounts/remounts
 // when the parent map re-renders (e.g. from location polling). Only re-renders
 // when latitude or longitude actually changes, which is the correct behaviour.
@@ -48,7 +77,7 @@ const DriverMarker = React.memo(
   ),
   (prev, next) => prev.latitude === next.latitude && prev.longitude === next.longitude,
 );
-const driverMarkerStyle = { wrap: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#FFFFFF", alignItems: "center" as const, justifyContent: "center" as const, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 6 } };
+const driverMarkerStyle = { wrap: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#FFFFFF", borderWidth: 1.5, borderColor: "rgba(0,0,0,0.15)", alignItems: "center" as const, justifyContent: "center" as const, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 6 } };
 
 function decodePolyline(encoded: string): { latitude: number; longitude: number }[] {
   const points: { latitude: number; longitude: number }[] = [];
@@ -149,7 +178,20 @@ export default function A2BMap({
   const mapReadyRef = useRef(false);
   const lastCenteredPickupRef = useRef<{ lat: number; lng: number } | null>(null);
   const lastFollowedDriverRef = useRef<{ lat: number; lng: number } | null>(null);
-  const customMapStyle = DARK_MAP_STYLE;
+
+  // Auto day/night map. Re-checks every minute so it flips at the 6am / 6pm
+  // boundary without needing the screen to remount.
+  const [isDay, setIsDay] = useState(isDaytimeNow);
+  useEffect(() => {
+    const id = setInterval(() => setIsDay(isDaytimeNow()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const customMapStyle = isDay ? LIGHT_MAP_STYLE : DARK_MAP_STYLE;
+  const mapBackground = isDay ? "#E9ECEF" : "#0B0B0B";
+  const routeColor = isDay ? "#111111" : "#FFFFFF";
+  const dropoffIconColor = isDay ? "#111111" : Colors.white;
+  const edgeShade = isDay ? "255,255,255" : "0,0,0";
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -320,7 +362,7 @@ export default function A2BMap({
   }, [routeCoords, zoomToCoords]);
 
   return (
-    <View style={[styles.container, { backgroundColor: "#0B0B0B" }]}>
+    <View style={[styles.container, { backgroundColor: mapBackground }]}>
       {loading && (
         <View style={styles.locatingOverlay}>
           <ActivityIndicator size="small" color={Colors.white} />
@@ -336,9 +378,9 @@ export default function A2BMap({
         onMapReady={handleMapReady}
         mapType="standard"
         loadingEnabled={true}
-        loadingBackgroundColor="#0B0B0B"
-        loadingIndicatorColor="#FFFFFF"
-        userInterfaceStyle="dark"
+        loadingBackgroundColor={mapBackground}
+        loadingIndicatorColor={isDay ? "#111111" : "#FFFFFF"}
+        userInterfaceStyle={isDay ? "light" : "dark"}
         showsUserLocation={true}
         showsMyLocationButton={false}
         showsCompass={false}
@@ -365,7 +407,7 @@ export default function A2BMap({
             anchor={{ x: 0.5, y: 1 }}
           >
             <View style={styles.dropoffMarker}>
-              <Ionicons name="location" size={28} color={Colors.white} />
+              <Ionicons name="location" size={28} color={dropoffIconColor} />
             </View>
           </Marker>
         )}
@@ -394,7 +436,7 @@ export default function A2BMap({
         {routeCoords.length > 0 && (
           <Polyline
             coordinates={routeCoords}
-            strokeColor="#FFFFFF"
+            strokeColor={routeColor}
             strokeWidth={5}
             zIndex={10}
             geodesic={true}
@@ -411,8 +453,8 @@ export default function A2BMap({
         </View>
       )}
 
-      <View style={styles.gradientTop} />
-      <View style={styles.gradientBottom} />
+      <View style={[styles.gradientTop, { backgroundColor: `rgba(${edgeShade},0.3)` }]} />
+      <View style={[styles.gradientBottom, { backgroundColor: `rgba(${edgeShade},0.5)` }]} />
     </View>
   );
 }

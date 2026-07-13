@@ -141,8 +141,15 @@ function useAuthGate() {
       ]).then(async ([needsRoleSelect, needsOperatorChoice, lastMode]) => {
         if (needsOperatorChoice === "1") {
           await AsyncStorage.removeItem(NEEDS_OPERATOR_CHOICE_KEY);
-          router.replace("/chauffeur-onboarding");
-          return;
+          // Only show the driver/partner choice screen to users who have NOT yet
+          // completed operator onboarding. Once a driver or partner application is
+          // submitted the role becomes "chauffeur", so a lingering flag must never
+          // bounce an already-onboarded user back to the choice screen.
+          if (user.role !== "chauffeur") {
+            router.replace("/chauffeur-onboarding");
+            return;
+          }
+          // Already onboarded — fall through to normal role-based routing below.
         }
 
         if (needsRoleSelect === "1") {

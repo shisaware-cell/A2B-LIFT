@@ -3647,7 +3647,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       return res.status(201).json(vehicle);
     } catch (error: any) {
-      return res.status(400).json({ message: error.message });
+      const rawMessage = String(error?.message || "");
+      const isDuplicatePlate =
+        error?.code === "23505" ||
+        rawMessage.includes("vehicles_active_plate_unique") ||
+        rawMessage.toLowerCase().includes("duplicate key");
+      if (isDuplicatePlate) {
+        return res.status(409).json({
+          message:
+            "This number plate is already registered on A2B. If this is your vehicle, contact A2B support to have it released to your account.",
+        });
+      }
+      return res.status(400).json({ message: rawMessage });
     }
   });
 
