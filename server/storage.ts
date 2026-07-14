@@ -1451,6 +1451,77 @@ export class DatabaseStorage implements IStorage {
     return deleted.length > 0;
   }
 
+  // Hard-delete a user together with every row that references them, in FK
+  // dependency order, inside a single transaction. This is what the admin
+  // "delete user" action uses so a driver/partner account (which owns an
+  // operator_profile + vehicles) can be removed without hitting foreign-key
+  // constraint violations. Either the whole delete succeeds or nothing changes.
+  async deleteUserCascade(id: string): Promise<boolean> {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const profRes = await client.query(
+        "SELECT id FROM operator_profiles WHERE user_id = $1",
+        [id],
+      );
+      const profileIds: string[] = profRes.rows.map((r: any) => r.id);
+
+      let vehicleIds: string[] = [];
+      if (profileIds.length) {
+        const vehRes = await client.query(
+          "SELECT id FROM vehicles WHERE owner_operator_profile_id = ANY($1)",
+          [profileIds],
+        );
+        vehicleIds = vehRes.rows.map((r: any) => r.id);
+      }
+
+      if (vehicleIds.length) {
+        await client.query("UPDATE lift_club_routes SET vehicle_id = NULL WHERE vehicle_id = ANY($1)", [vehicleIds]);
+        await client.query("DELETE FROM vehicle_assignments WHERE vehicle_id = ANY($1)", [vehicleIds]);
+        await client.query("DELETE FROM documents WHERE vehicle_id = ANY($1)", [vehicleIds]);
+      }
+
+      if (profileIds.length) {
+        await client.query("DELETE FROM vehicle_assignments WHERE driver_operator_profile_id = ANY($1) OR assigned_by_operator_profile_id = ANY($1)", [profileIds]);
+        await client.query("DELETE FROM fleet_driver_invites WHERE driver_operator_profile_id = ANY($1) OR invited_by_operator_profile_id = ANY($1)", [profileIds]);
+        await client.query("DELETE FROM partner_profiles WHERE operator_profile_id = ANY($1)", [profileIds]);
+        await client.query("DELETE FROM vehicles WHERE owner_operator_profile_id = ANY($1)", [profileIds]);
+        await client.query("DELETE FROM operator_profiles WHERE user_id = $1", [id]);
+      }
+
+      // Rows that directly reference this user
+      await client.query("DELETE FROM fleet_driver_invites WHERE invited_by_user_id = $1", [id]);
+      await client.query("DELETE FROM referral_events WHERE referred_user_id = $1 OR referrer_user_id = $1", [id]);
+      await client.query("DELETE FROM reward_transactions WHERE user_id = $1 OR source_user_id = $1", [id]);
+      await client.query("DELETE FROM reward_cashouts WHERE user_id = $1", [id]);
+      await client.query("DELETE FROM lift_club_bookings WHERE rider_id = $1", [id]);
+      await client.query("DELETE FROM lift_club_memberships WHERE user_id = $1", [id]);
+      await client.query("DELETE FROM liveness_sessions WHERE user_id = $1", [id]);
+      await client.query("DELETE FROM password_reset_tokens WHERE user_id = $1", [id]);
+      await client.query("DELETE FROM push_delivery_logs WHERE user_id = $1", [id]);
+      await client.query("DELETE FROM client_ratings WHERE client_id = $1", [id]);
+      await client.query("DELETE FROM documents WHERE user_id = $1", [id]);
+
+      // Soft references — keep the row, drop the pointer to this user
+      await client.query("UPDATE users SET referred_by_user_id = NULL WHERE referred_by_user_id = $1", [id]);
+      await client.query("UPDATE lift_club_memberships SET reviewer_admin_id = NULL WHERE reviewer_admin_id = $1", [id]);
+      await client.query("UPDATE reward_cashouts SET reviewed_by_admin_id = NULL WHERE reviewed_by_admin_id = $1", [id]);
+      await client.query("UPDATE operator_profiles SET reviewer_admin_id = NULL WHERE reviewer_admin_id = $1", [id]);
+      await client.query("UPDATE vehicles SET reviewer_admin_id = NULL WHERE reviewer_admin_id = $1", [id]);
+      await client.query("DELETE FROM admin_audit_logs WHERE admin_user_id = $1", [id]);
+
+      const del = await client.query("DELETE FROM users WHERE id = $1 RETURNING id", [id]);
+      await client.query("COMMIT");
+      return (del.rowCount ?? 0) > 0;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async deleteWithdrawal(id: string): Promise<boolean> {
     const deleted = await db.delete(withdrawals).where(eq(withdrawals.id, id)).returning();
     return deleted.length > 0;

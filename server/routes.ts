@@ -8380,7 +8380,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (app) await storage.deleteDriverApplication(app.id);
         await storage.deleteChauffeur(chauffeur.id);
       }
-      const deleted = await storage.deleteUser(req.params.id);
+      // Cascade the operator side (operator_profiles, vehicles, assignments,
+      // referrals, rewards, etc.) in one transaction so driver/partner accounts
+      // delete cleanly instead of failing on operator_profiles_user_id_fkey.
+      const deleted = await storage.deleteUserCascade(req.params.id);
       if (!deleted) return res.status(404).json({ message: "User not found" });
       return res.json({ message: "User deleted" });
     } catch (error: any) {
