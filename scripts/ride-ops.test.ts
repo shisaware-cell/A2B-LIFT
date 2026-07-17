@@ -71,6 +71,11 @@ const baseBudgetFare = 50;
   assert.equal(isVehicleEligibleForRide("budget", "luxury_van"), false);
   assert.equal(isVehicleEligibleForRide("luxury_van", "luxury_van"), true);
   assert.equal(isVehicleEligibleForRide("luxury_van", "van"), false);
+  assert.equal(isVehicleEligibleForRide("luxury_van", "executive"), true);
+  assert.equal(isVehicleEligibleForRide("business", "executive"), true);
+  assert.equal(isVehicleEligibleForRide("luxury", "executive"), true);
+  assert.equal(isVehicleEligibleForRide("van", "luxury_van"), true);
+  assert.equal(isVehicleEligibleForRide("budget", "executive"), false);
 }
 
 {

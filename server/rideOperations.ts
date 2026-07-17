@@ -18,7 +18,8 @@ const CATEGORY_ALIASES: Record<string, string> = {
 // Vehicle categories that are eligible for MULTIPLE request categories.
 // e.g. an "executive" vehicle can serve both business and luxury requests.
 const MULTI_CATEGORY_MATCHES: Record<string, string[]> = {
-  executive: ["business", "luxury"],
+  executive: ["business", "luxury", "luxury_van"],
+  luxury_van: ["van"],
 };
 
 export function normalizeVehicleType(vehicleType?: string | null) {

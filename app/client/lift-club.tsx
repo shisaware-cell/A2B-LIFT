@@ -143,7 +143,7 @@ export default function LiftClubMembershipScreen() {
   return (
     <ScrollView
       style={[styles.container, { paddingTop: insets.top + (Platform.OS === "web" ? 60 : 12) }]}
-      contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 48 }]}
+      contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 140 }]}
       showsVerticalScrollIndicator={false}
     >
       <Pressable style={styles.backButton} onPress={() => router.back()}>

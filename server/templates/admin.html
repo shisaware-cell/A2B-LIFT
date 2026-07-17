@@ -1014,7 +1014,7 @@ function editChauf(id) {
             <option value="business" ${c.vehicleType==='business'?'selected':''}>business</option>
             <option value="van" ${c.vehicleType==='van'?'selected':''}>van</option>
             <option value="luxury_van" ${c.vehicleType==='luxury_van'?'selected':''}>luxury_van</option>
-            <option value="executive" ${c.vehicleType==='executive'?'selected':''}>executive (business + luxury)</option>
+            <option value="executive" ${c.vehicleType==='executive'?'selected':''}>executive (business + luxury + V-Class)</option>
           </select></div>
         <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Passengers</label>
           <input id="edit-passengerCapacity" class="f-input" type="number" value="${c.passengerCapacity||4}" /></div>

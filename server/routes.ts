@@ -668,6 +668,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }).length + 1;
   }
 
+  const DISPATCH_RETRY_MS = 15_000;
+  const DISPATCH_MAX_SEARCH_WINDOW_MS = 15 * 60 * 1000;
+
+  function getRideCreatedAtMs(ride: any): number {
+    const ms = new Date(ride?.createdAt ?? 0).getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  // Retry matching while the ride is still searching — drivers may come online
+  // or move into range seconds after the ride was created.
+  function scheduleDispatchRetry(rideId: string) {
+    const existingTimer = dispatchTimers.get(rideId);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const timer = setTimeout(async () => {
+      dispatchTimers.delete(rideId);
+      try {
+        const ride = await storage.getRide(rideId);
+        if (!ride || ride.status !== "searching") return;
+        await dispatchNextRideOffer(ride);
+      } catch (error: any) {
+        console.error("[dispatch] retry failed:", error.message);
+      }
+    }, DISPATCH_RETRY_MS);
+
+    dispatchTimers.set(rideId, timer);
+  }
+
+  // Safety net: sweep all searching rides without an active offer and try to
+  // dispatch them. Covers server restarts (in-memory timers lost) and drivers
+  // going online after a ride was created.
+  let dispatchPumpRunning = false;
+  async function pumpUnassignedSearchingRides() {
+    if (dispatchPumpRunning) return;
+    dispatchPumpRunning = true;
+    try {
+      const allRides = await storage.getAllRides();
+      const now = Date.now();
+      for (const ride of allRides) {
+        if (ride.status !== "searching") continue;
+        const createdAtMs = getRideCreatedAtMs(ride);
+        if (!createdAtMs || now - createdAtMs > DISPATCH_MAX_SEARCH_WINDOW_MS) continue;
+        if (
+          ride.currentOfferedChauffeurId &&
+          isRideOfferActive(ride as any, ride.currentOfferedChauffeurId)
+        ) {
+          continue; // a driver is currently deciding — leave it alone
+        }
+        if (dispatchTimers.has(ride.id)) continue; // retry/expiry already scheduled
+        await dispatchNextRideOffer(ride);
+      }
+    } catch (error: any) {
+      console.error("[dispatch] pump failed:", error.message);
+    } finally {
+      dispatchPumpRunning = false;
+    }
+  }
+  setInterval(pumpUnassignedSearchingRides, 20_000);
+
   function scheduleOfferExpiry(rideId: string) {
     const existingTimer = dispatchTimers.get(rideId);
     if (existingTimer) clearTimeout(existingTimer);
@@ -699,12 +758,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const latestRide = await storage.getRide(ride.id);
     if (!latestRide || latestRide.status !== "searching") return { offered: null, ride: latestRide };
 
-    const eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true });
+    let eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true });
+    if (!eligible.length && skippedChauffeursByRide.get(latestRide.id)?.size) {
+      // Everyone eligible has skipped/timed out — reset and give them another round.
+      skippedChauffeursByRide.delete(latestRide.id);
+      eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true });
+    }
     if (!eligible.length) {
       const updated = await storage.updateRide(latestRide.id, {
         currentOfferedChauffeurId: null,
         currentOfferExpiresAt: null,
       } as any);
+      // Keep searching — retry until a driver becomes eligible or the window lapses.
+      if (Date.now() - getRideCreatedAtMs(latestRide) <= DISPATCH_MAX_SEARCH_WINDOW_MS) {
+        scheduleDispatchRetry(latestRide.id);
+      }
       return { offered: null, ride: updated || latestRide };
     }
 
@@ -4437,6 +4505,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updated = await storage.updateChauffeur(req.params.id, {
         isOnline: nextOnline,
       });
+      if (nextOnline) {
+        // Driver just came online — immediately try to match waiting rides.
+        pumpUnassignedSearchingRides().catch(() => {});
+      }
       return res.json(updated);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
