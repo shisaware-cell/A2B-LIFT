@@ -23,6 +23,7 @@ import {
   isRideOfferActive,
   isVehicleEligibleForRide,
 } from "./rideOperations";
+import { getReleaseFingerprint } from "./release-info";
 import { authOptional, requireAuth, requireRole, type AuthedRequest } from "./auth-middleware";
 import { signAccessToken, type UserRole } from "./auth";
 import { externalApiService } from "./external-api-service";
@@ -3097,7 +3098,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Version probe — confirms this build is live
   app.get("/api/version", (_req: Request, res: Response) => {
-    res.json({ version: "google-oauth-v2", built: new Date().toISOString() });
+    res.json({
+      version: "google-oauth-v2",
+      built: new Date().toISOString(),
+      commit: getReleaseFingerprint(),
+    });
   });
 
   // -----------------------------
