@@ -123,6 +123,8 @@ export const rides = pgTable("rides", {
   routeCurrency: text("route_currency").default("ZAR"),
   routeSelectedAt: timestamp("route_selected_at"),
   rewardsAmountUsed: real("rewards_amount_used").default(0),
+  // Reservations: rider books in advance; status stays "reserved" until dispatch time
+  scheduledFor: timestamp("scheduled_for"),
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
 });

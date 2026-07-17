@@ -671,6 +671,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const DISPATCH_RETRY_MS = 15_000;
   const DISPATCH_MAX_SEARCH_WINDOW_MS = 15 * 60 * 1000;
+  const RESERVATION_DISPATCH_LEAD_MS = 20 * 60 * 1000;
+  const RESERVATION_CANCELLATION_FEE_RATE = 0.5;
 
   function getRideCreatedAtMs(ride: any): number {
     const ms = new Date(ride?.createdAt ?? 0).getTime();
@@ -708,9 +710,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allRides = await storage.getAllRides();
       const now = Date.now();
       for (const ride of allRides) {
+        // Promote reservations to "searching" ~20 minutes before pickup time
+        if (ride.status === "reserved" && (ride as any).scheduledFor) {
+          const scheduledMs = new Date((ride as any).scheduledFor).getTime();
+          if (Number.isFinite(scheduledMs) && now >= scheduledMs - RESERVATION_DISPATCH_LEAD_MS) {
+            const promoted = await storage.updateRide(ride.id, { status: "searching" } as any).catch(() => null);
+            if (promoted) {
+              (ride as any).status = "searching";
+              try {
+                const rider = await storage.getUser(ride.clientId);
+                if ((rider as any)?.pushToken) {
+                  sendExpoPushNotification(
+                    [(rider as any).pushToken],
+                    "Your reserved ride is starting",
+                    "We're finding your driver now.",
+                    { rideId: ride.id, type: "ride:reserved_dispatch" },
+                    { urgent: true, channelId: "client-alerts" },
+                  );
+                }
+              } catch {}
+            }
+          } else {
+            continue;
+          }
+        }
         if (ride.status !== "searching") continue;
-        const createdAtMs = getRideCreatedAtMs(ride);
-        if (!createdAtMs || now - createdAtMs > DISPATCH_MAX_SEARCH_WINDOW_MS) continue;
+        const scheduledMs = (ride as any).scheduledFor ? new Date((ride as any).scheduledFor).getTime() : NaN;
+        const referenceMs = Number.isFinite(scheduledMs) ? scheduledMs : getRideCreatedAtMs(ride);
+        if (!referenceMs || now - referenceMs > DISPATCH_MAX_SEARCH_WINDOW_MS) continue;
         if (
           ride.currentOfferedChauffeurId &&
           isRideOfferActive(ride as any, ride.currentOfferedChauffeurId)
@@ -6242,7 +6269,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         : priceEstimate.currency;
 
       const paymentMethod = (rideData.paymentMethod || "cash") as string;
-      
+
+      // ── Reservations: book a ride in advance ──
+      let scheduledFor: Date | null = null;
+      if (rideData.scheduledFor) {
+        const parsed = new Date(rideData.scheduledFor);
+        const minLeadMs = 25 * 60 * 1000;
+        const maxLeadMs = 30 * 24 * 60 * 60 * 1000;
+        if (!Number.isFinite(parsed.getTime())) {
+          return res.status(400).json({ success: false, message: "Invalid reservation time." });
+        }
+        if (parsed.getTime() < Date.now() + minLeadMs) {
+          return res.status(400).json({ success: false, message: "Reservations must be at least 30 minutes in advance." });
+        }
+        if (parsed.getTime() > Date.now() + maxLeadMs) {
+          return res.status(400).json({ success: false, message: "Reservations can be at most 30 days in advance." });
+        }
+        if (paymentMethod !== "card") {
+          return res.status(400).json({ success: false, message: "Reservations must be paid by card." });
+        }
+        scheduledFor = parsed;
+      }
+
       // Set livenessVerifiedAt on server side (Date object, never trust client strings for timestamps)
       const livenessVerifiedAt = (rideData as any).livenessStatus === "passed" ? new Date() : undefined;
 
@@ -6265,7 +6313,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         baseFare: priceEstimate.baseFare,
         surgeMultiplier: priceEstimate.surgeMultiplier,
         surgeReason: priceEstimate.surgeReason,
-        status: "searching",
+        status: scheduledFor ? "reserved" : "searching",
+        ...(scheduledFor ? { scheduledFor } : {}),
         paymentStatus: paymentMethod === "cash" ? "unpaid" : (rideData.paymentStatus || "pending"),
         cashSelfieUrl: rideData.cashSelfieUrl || null,
         livenessStatus: rideData.livenessStatus || "not_required",
@@ -6287,6 +6336,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         clientFirstName = getUserFirstName(clientUser, "Rider");
       } catch {}
       const enrichedRide = { ...ride, clientFirstName };
+
+      // Reserved rides are NOT dispatched now — the dispatch pump promotes them
+      // to "searching" shortly before their scheduled time.
+      if (scheduledFor) {
+        return res.json({
+          success: true,
+          status: "reserved",
+          message: `Ride reserved for ${scheduledFor.toISOString()}. We'll find your driver closer to the time.`,
+          ride: enrichedRide,
+        });
+      }
 
       const dispatch = await dispatchNextRideOffer(enrichedRide);
 
@@ -6676,14 +6736,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         updateData.price = Math.round((Number(existingRide.price || 0) + additionalAdjustment) * 100) / 100;
       }
       if (status === "cancelled") {
-        const cancellation = calculateCancellationFee(
-          existingRide.vehicleType || "budget",
-          (existingRide as any).acceptedAt,
-          now,
-          cancelledBy,
-        );
+        // Reserved (pre-booked, card-paid) rides cancelled by the rider forfeit
+        // 50% of the fare; the other 50% is refunded by the block below.
+        const isReservation = (existingRide as any).scheduledFor && existingRide.status === "reserved";
+        if (isReservation && cancelledBy === "client" && (existingRide as any).paymentStatus === "paid") {
+          updateData.cancellationFee = Math.round(Number(existingRide.price || 0) * RESERVATION_CANCELLATION_FEE_RATE * 100) / 100;
+        } else if (isReservation) {
+          updateData.cancellationFee = 0; // driver/admin cancelled, or unpaid → full refund
+        } else {
+          const cancellation = calculateCancellationFee(
+            existingRide.vehicleType || "budget",
+            (existingRide as any).acceptedAt,
+            now,
+            cancelledBy,
+          );
+          updateData.cancellationFee = cancellation.fee;
+        }
         updateData.cancelledBy = cancelledBy;
-        updateData.cancellationFee = cancellation.fee;
         updateData.currentOfferedChauffeurId = null;
         updateData.currentOfferExpiresAt = null;
       }
@@ -8123,23 +8192,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const user = await storage.getUser(userId);
       if (!user) return res.status(404).json({ message: "User not found" });
-      if ((user.walletBalance || 0) < amount) {
+
+      // Spendable balance = wallet (commissions/top-ups) + rewards (referrals etc.)
+      const walletBefore = Number(user.walletBalance || 0);
+      const rewardsBefore = Number((user as any).rewardsBalance || 0);
+      if (walletBefore + rewardsBefore < amount) {
         return res.status(400).json({ message: "Insufficient wallet balance" });
       }
 
-      const balanceBefore = user.walletBalance || 0;
-      const newBalance = balanceBefore - amount;
+      // Draw from wallet first, then rewards for the remainder
+      const fromWallet = Math.min(walletBefore, amount);
+      const fromRewards = amount - fromWallet;
 
-      await storage.updateUser(userId, { walletBalance: newBalance });
+      await storage.updateUser(userId, {
+        walletBalance: walletBefore - fromWallet,
+        ...(fromRewards > 0 ? { rewardsBalance: rewardsBefore - fromRewards } : {}),
+      } as any);
       await storage.createPayment({
         rideId, payerUserId: userId, amount,
         method: "wallet", status: "paid",
         currency: "ZAR", paidAt: new Date(),
       });
-      await storage.updateRide(rideId, { paymentStatus: "paid" });
-      await recordWalletTx(userId, "ride_charge", amount, balanceBefore, "Ride payment", undefined, rideId);
+      await storage.updateRide(rideId, {
+        paymentStatus: "paid",
+        ...(fromRewards > 0 ? { rewardsAmountUsed: fromRewards } : {}),
+      } as any);
+      if (fromWallet > 0) {
+        await recordWalletTx(userId, "ride_charge", fromWallet, walletBefore, "Ride payment", undefined, rideId);
+      }
+      if (fromRewards > 0) {
+        await storage.createNotification({
+          userId,
+          title: "Rewards used",
+          body: `R${fromRewards.toFixed(2)} of your rewards balance was used to pay for your ride.`,
+          type: "reward",
+        }).catch(() => {});
+      }
 
-      return res.json({ success: true, newBalance });
+      return res.json({ success: true, newBalance: walletBefore - fromWallet, rewardsBalance: rewardsBefore - fromRewards });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }

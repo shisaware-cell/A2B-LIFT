@@ -1048,12 +1048,23 @@ export default function ChauffeurDashboard() {
   async function loadChauffeur() {
     if (!user) return;
     try {
-      const profileRes = await apiRequest("GET", "/api/operator-profile/me");
-      const profileData = profileRes.ok ? await profileRes.json() : null;
+      // Ask the server for the operator profile. Only a definitive 404
+      // ("you have never applied") may route to onboarding — transient
+      // network/server errors must NEVER bounce an active driver there.
+      let definitelyNoProfile = false;
+      let profileData: any = null;
+      try {
+        const profileRes = await apiRequest("GET", "/api/operator-profile/me");
+        profileData = await profileRes.json();
+      } catch (e: any) {
+        if (/^404\b/.test(e?.message || "")) definitelyNoProfile = true;
+      }
       if (profileData?.profile) {
         setOperatorProfile(profileData.profile);
         if (profileData.profile.type === "partner") {
+          // Partners manage vehicles, they don't drive — land them on the fleet list.
           await loadFleetOverview();
+          router.replace("/chauffeur/fleet" as never);
           return;
         }
       }
@@ -1067,15 +1078,29 @@ export default function ChauffeurDashboard() {
           restoreActiveRide();
           return;
         }
+        // Refresh failed (may be offline) — keep showing cached profile instead of bouncing.
+        if (cached?.id && !definitelyNoProfile) {
+          setChauffeur(cached);
+          setIsOnline(cached.isOnline || false);
+          restoreActiveRide();
+          return;
+        }
         await AsyncStorage.removeItem("a2b_chauffeur");
       }
       const c = await fetchChauffeurForUser(user.id);
-      if (!c) throw new Error("not found");
-      await loadDriverVehicles();
-      await loadFleetOverview();
-      restoreActiveRide();
+      if (c?.id) {
+        await loadDriverVehicles();
+        await loadFleetOverview();
+        restoreActiveRide();
+        return;
+      }
+      // Route to onboarding ONLY when the server definitively said 404 —
+      // never on network errors or transient failures.
+      if (definitelyNoProfile) {
+        router.replace("/chauffeur-onboarding");
+      }
     } catch {
-      router.replace("/chauffeur-onboarding");
+      // Unexpected error — do not bounce active users to onboarding.
     } finally {
       setLoading(false);
     }

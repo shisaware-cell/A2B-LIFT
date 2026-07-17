@@ -12,6 +12,7 @@ import { apiRequest, queryClient } from "@/lib/query-client";
 import Colors from "@/constants/colors";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+  reserved:           { label: "Reserved",    color: "#7B5CD6" },
   searching:          { label: "Searching",   color: Colors.warning },
   requested:          { label: "Searching",   color: Colors.warning },
   chauffeur_assigned: { label: "Assigned",    color: "#4A9EFF" },
@@ -73,8 +74,8 @@ export default function TripsScreen() {
             <Text style={[styles.statusLabel, { color }]}>{label}</Text>
           </View>
           <View style={styles.dateTimeRow}>
-            <Text style={styles.tripDate}>{formatDate(item.createdAt)}</Text>
-            <Text style={styles.tripTime}>{formatTime(item.createdAt)}</Text>
+            <Text style={styles.tripDate}>{formatDate(item.status === "reserved" && item.scheduledFor ? item.scheduledFor : item.createdAt)}</Text>
+            <Text style={styles.tripTime}>{formatTime(item.status === "reserved" && item.scheduledFor ? item.scheduledFor : item.createdAt)}</Text>
           </View>
         </View>
         <View style={styles.routeRow}>
@@ -142,9 +143,46 @@ export default function TripsScreen() {
               })()}
 
               <View style={styles.detailSection}>
-                <Text style={styles.detailLabel}>Date & Time</Text>
-                <Text style={styles.detailValue}>{formatDate(selectedTrip.createdAt)} at {formatTime(selectedTrip.createdAt)}</Text>
+                <Text style={styles.detailLabel}>{selectedTrip.status === "reserved" ? "Reserved for" : "Date & Time"}</Text>
+                <Text style={styles.detailValue}>
+                  {selectedTrip.status === "reserved" && selectedTrip.scheduledFor
+                    ? `${formatDate(selectedTrip.scheduledFor)} at ${formatTime(selectedTrip.scheduledFor)}`
+                    : `${formatDate(selectedTrip.createdAt)} at ${formatTime(selectedTrip.createdAt)}`}
+                </Text>
               </View>
+
+              {selectedTrip.status === "reserved" && (
+                <Pressable
+                  style={({ pressed }) => [styles.cancelReservationBtn, pressed && { opacity: 0.8 }]}
+                  onPress={() => {
+                    const half = (Number(selectedTrip.price || 0) / 2).toFixed(2);
+                    Alert.alert(
+                      "Cancel reservation?",
+                      `If you cancel, a 50% cancellation fee of R${half} applies and R${half} is refunded to your card.`,
+                      [
+                        { text: "Keep reservation", style: "cancel" },
+                        {
+                          text: `Cancel & pay R${half} fee`,
+                          style: "destructive",
+                          onPress: async () => {
+                            try {
+                              await apiRequest("PUT", `/api/rides/${selectedTrip.id}/status`, { status: "cancelled" });
+                              queryClient.invalidateQueries({ queryKey: ["/api/rides/client", user?.id ?? ""] });
+                              closeTrip();
+                              Alert.alert("Reservation cancelled", `R${half} will be refunded to your card.`);
+                            } catch (e: any) {
+                              Alert.alert("Error", (e?.message || "Could not cancel.").replace(/^\d+:\s*/, ""));
+                            }
+                          },
+                        },
+                      ],
+                    );
+                  }}
+                >
+                  <Ionicons name="close-circle-outline" size={18} color={Colors.error} />
+                  <Text style={styles.cancelReservationText}>Cancel reservation (50% fee applies)</Text>
+                </Pressable>
+              )}
 
               <View style={styles.detailSection}>
                 <Text style={styles.detailLabel}>Route</Text>
@@ -280,4 +318,6 @@ const styles = StyleSheet.create({
   helpSendBtnText: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.primary },
   helpSentBox: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: `${Colors.success}18`, borderRadius: 10, padding: 14 },
   helpSentText: { fontSize: 13, fontFamily: "Inter_500Medium", color: Colors.success, flex: 1 },
+  cancelReservationBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 12, paddingVertical: 13, borderWidth: 1, borderColor: `${Colors.error}55`, backgroundColor: `${Colors.error}11` },
+  cancelReservationText: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: Colors.error },
 });

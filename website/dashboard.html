@@ -185,8 +185,11 @@
         <div class="dash-nav-item" id="nav-driverapply" style="display:none;" onclick="showPage('driverapply')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M17 11l2 2 4-5"/></svg>Become a driver
         </div>
-        <div class="dash-nav-item" id="nav-driverapply" style="display:none;" onclick="showPage('driverapply')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M17 11l2 2 4-5"/></svg>Become a driver
+        <div class="dash-nav-item" id="nav-partnerapply" style="display:none;" onclick="showPage('partnerapply')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/></svg>Become a partner
+        </div>
+        <div class="dash-nav-item" id="nav-applications" onclick="showPage('applications'); loadApplications();">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>My Applications
         </div>
         <div class="dash-sidebar-sep" id="driverSep" style="display:none;"></div>
         <div class="dash-nav-item" id="nav-availability" style="display:none;" onclick="showPage('availability')">
@@ -386,41 +389,58 @@
         </div>
       </div>
 
-      <!-- DRIVER APPLICATION -->
-      <div class="dash-page" id="page-driverapply">
-        <h1 class="dash-page-title">Become a Driver</h1>
+      <!-- PARTNER APPLICATION -->
+      <div class="dash-page" id="page-partnerapply">
+        <h1 class="dash-page-title">Become a Fleet Partner</h1>
         <div class="driver-apply-card">
-          <h3>Submit your driver application</h3>
-          <p>Use this form if you already have an A2B rider account and want to become a driver. Your account will move into the same admin approval flow used by the driver app.</p>
-          <div id="driverApplyStatus" style="font-size:13px;color:var(--grey-500);line-height:1.7;margin-bottom:16px;"></div>
+          <h3>Register your company</h3>
+          <p>Register your fleet company, upload the required documents, and after admin approval add fleet vehicles and assign A2B-approved drivers to them.</p>
+          <div id="partnerApplyStatus" style="font-size:13px;color:var(--grey-500);line-height:1.7;margin-bottom:16px;"></div>
           <div class="ld-form-grid">
-            <div><label>Phone number</label><input type="tel" id="driverApplyPhone" placeholder="+27 82 123 4567" /></div>
-            <div><label>Driver photo</label><input type="file" id="driverApplyPhoto" accept="image/*" /></div>
+            <div><label>Company name</label><input type="text" id="paCompanyName" placeholder="e.g. Mzansi Fleet (Pty) Ltd" /></div>
+            <div><label>Registration number</label><input type="text" id="paRegNumber" placeholder="e.g. 2019/123456/07" /></div>
+            <div><label>Contact person</label><input type="text" id="paContactName" placeholder="Full name" /></div>
+            <div><label>Contact phone</label><input type="tel" id="paContactPhone" placeholder="+27 82 123 4567" /></div>
+            <div><label>Contact email</label><input type="email" id="paContactEmail" placeholder="you@company.co.za" /></div>
+            <div><label>Bank name</label><input type="text" id="paBankName" placeholder="e.g. FNB" /></div>
+            <div><label>Account holder</label><input type="text" id="paAccountHolder" placeholder="Account holder name" /></div>
+            <div><label>Account number</label><input type="text" id="paAccountNumber" placeholder="Account number" /></div>
           </div>
           <div class="doc-upload-grid">
-            <label class="doc-upload-tile" data-doc-tile="driver:pdrp_certificate">
-              <input type="file" id="docPdrp" accept="image/*,application/pdf" />
-              <div class="doc-upload-title">PDRP Certificate</div>
+            <label class="doc-upload-tile" data-doc-tile="partner:company_registration">
+              <input type="file" id="pdocRegistration" accept="image/*,application/pdf" />
+              <div class="doc-upload-title">Company Registration</div>
               <div class="doc-upload-meta">Required · JPG, PNG or PDF</div>
             </label>
-            <label class="doc-upload-tile" data-doc-tile="driver:drivers_license">
-              <input type="file" id="docLicense" accept="image/*,application/pdf" />
-              <div class="doc-upload-title">Valid Driver's License</div>
+            <label class="doc-upload-tile" data-doc-tile="partner:director_id">
+              <input type="file" id="pdocDirectorId" accept="image/*,application/pdf" />
+              <div class="doc-upload-title">Director ID</div>
               <div class="doc-upload-meta">Required · JPG, PNG or PDF</div>
             </label>
-            <label class="doc-upload-tile" data-doc-tile="driver:criminal_background_check">
-              <input type="file" id="docBackground" accept="image/*,application/pdf" />
-              <div class="doc-upload-title">Criminal Background Check</div>
+            <label class="doc-upload-tile" data-doc-tile="partner:proof_of_address">
+              <input type="file" id="pdocAddress" accept="image/*,application/pdf" />
+              <div class="doc-upload-title">Proof of Address</div>
               <div class="doc-upload-meta">Required · JPG, PNG or PDF</div>
             </label>
-            <label class="doc-upload-tile" data-doc-tile="driver:driver_evaluation">
-              <input type="file" id="docEvaluation" accept="image/*,application/pdf" />
-              <div class="doc-upload-title">Driver Evaluation</div>
-              <div class="doc-upload-meta">Optional · JPG, PNG or PDF</div>
+            <label class="doc-upload-tile" data-doc-tile="partner:operating_permit">
+              <input type="file" id="pdocPermit" accept="image/*,application/pdf" />
+              <div class="doc-upload-title">Operating Permit</div>
+              <div class="doc-upload-meta">Required · JPG, PNG or PDF</div>
+            </label>
+            <label class="doc-upload-tile" data-doc-tile="partner:bank_account_details">
+              <input type="file" id="pdocBank" accept="image/*,application/pdf" />
+              <div class="doc-upload-title">Bank Account Details</div>
+              <div class="doc-upload-meta">Required · JPG, PNG or PDF</div>
             </label>
           </div>
-          <button class="btn btn-primary" id="driverApplySubmitBtn" style="margin-top:20px;" onclick="submitDriverApplication()">Submit driver application</button>
+          <button class="btn btn-primary" id="partnerApplySubmitBtn" style="margin-top:20px;" onclick="submitPartnerApplication()">Submit partner application</button>
         </div>
+      </div>
+
+      <!-- MY APPLICATIONS -->
+      <div class="dash-page" id="page-applications">
+        <h1 class="dash-page-title">My Applications</h1>
+        <div id="applicationsContent"><div class="empty-state"><p>Loading…</p></div></div>
       </div>
 
       <!-- DRIVER AVAILABILITY -->
@@ -890,12 +910,169 @@
     function updateDriverApplicationVisibility(user) {
       const isDriver = user?.role === 'chauffeur';
       const navItem = document.getElementById('nav-driverapply');
+      const partnerNavItem = document.getElementById('nav-partnerapply');
       const overviewCard = document.getElementById('overviewDriverApplyCard');
       if (navItem) navItem.style.display = isDriver ? 'none' : 'flex';
+      if (partnerNavItem) partnerNavItem.style.display = isDriver ? 'none' : 'flex';
       if (overviewCard) overviewCard.style.display = isDriver ? 'none' : 'block';
       const phoneInput = document.getElementById('driverApplyPhone');
       if (phoneInput && !phoneInput.value) phoneInput.value = user?.phone || '';
+      const paPhone = document.getElementById('paContactPhone');
+      if (paPhone && !paPhone.value) paPhone.value = user?.phone || '';
+      const paName = document.getElementById('paContactName');
+      if (paName && !paName.value) paName.value = user?.name || '';
+      const paEmail = document.getElementById('paContactEmail');
+      if (paEmail && !paEmail.value && String(user?.username || '').includes('@')) paEmail.value = user.username;
       if (!isDriver) loadDriverApplicationStatus();
+    }
+
+    async function submitPartnerApplication() {
+      if (!currentUser) return;
+      const form = {
+        companyName: document.getElementById('paCompanyName').value.trim(),
+        registrationNumber: document.getElementById('paRegNumber').value.trim(),
+        contactPersonName: document.getElementById('paContactName').value.trim(),
+        contactPhone: document.getElementById('paContactPhone').value.trim(),
+        contactEmail: document.getElementById('paContactEmail').value.trim(),
+        bankName: document.getElementById('paBankName').value.trim(),
+        accountHolder: document.getElementById('paAccountHolder').value.trim(),
+        accountNumber: document.getElementById('paAccountNumber').value.trim(),
+      };
+      const emptyField = Object.entries(form).find(([, v]) => !v);
+      if (emptyField) { showNotification('Please complete all company and banking fields.', 'error'); return; }
+      const requiredDocs = [
+        ['partner:company_registration', document.getElementById('pdocRegistration').files?.[0]],
+        ['partner:director_id', document.getElementById('pdocDirectorId').files?.[0]],
+        ['partner:proof_of_address', document.getElementById('pdocAddress').files?.[0]],
+        ['partner:operating_permit', document.getElementById('pdocPermit').files?.[0]],
+        ['partner:bank_account_details', document.getElementById('pdocBank').files?.[0]],
+      ];
+      const missing = requiredDocs.filter(([, f]) => !f).map(([t]) => t.replace('partner:', '').replace(/_/g, ' '));
+      if (missing.length) { showNotification(`Please upload: ${missing.join(', ')}.`, 'error'); return; }
+
+      const btn = document.getElementById('partnerApplySubmitBtn');
+      const statusEl = document.getElementById('partnerApplyStatus');
+      btn.disabled = true;
+      btn.textContent = 'Submitting...';
+      if (statusEl) { statusEl.textContent = 'Uploading documents and submitting your application...'; statusEl.style.color = 'var(--grey-500)'; }
+      try {
+        for (const [type, file] of requiredDocs) {
+          const url = await uploadDriverApplicationFile(file, type);
+          await saveDriverDocument(type, url);
+        }
+        const token = localStorage.getItem('a2b_token');
+        const res = await fetch(`${API}/api/operator-profile/partner`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify(form),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(payload.message || 'Partner application failed.');
+        currentUser = { ...currentUser, role: 'chauffeur', phone: form.contactPhone };
+        localStorage.setItem('a2b_user', JSON.stringify(currentUser));
+        document.getElementById('dashRole').textContent = 'partner';
+        updateDriverApplicationVisibility(currentUser);
+        if (statusEl) { statusEl.textContent = 'Partner application submitted. Your company is pending admin approval.'; statusEl.style.color = '#15803d'; }
+        showNotification('Partner application submitted.', 'success');
+        showPage('applications');
+        loadApplications();
+      } catch(e) {
+        if (statusEl) { statusEl.textContent = e?.message || 'Unable to submit partner application.'; statusEl.style.color = '#dc2626'; }
+        showNotification(e?.message || 'Unable to submit partner application.', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Submit partner application';
+      }
+    }
+
+    function applicationStatusPill(status) {
+      const s = String(status || 'pending').toLowerCase();
+      const cls = s === 'approved' ? 'completed' : (s === 'rejected' || s === 'waitlisted') ? 'cancelled' : 'pending';
+      return `<span class="trip-status trip-status--${cls}"><span class="trip-status-dot"></span>${s.replace(/_/g, ' ')}</span>`;
+    }
+
+    async function loadApplications() {
+      const token = localStorage.getItem('a2b_token');
+      const el = document.getElementById('applicationsContent');
+      if (!token || !el) return;
+      el.innerHTML = '<div class="empty-state"><p>Loading…</p></div>';
+      try {
+        const [profileRes, docsRes] = await Promise.all([
+          fetch(`${API}/api/operator-profile/me`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${API}/api/operator-profile/me/documents`, { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+        const data = profileRes.ok ? await profileRes.json() : null;
+        const docs = docsRes.ok ? await docsRes.json() : [];
+
+        let html = '';
+        if (!data?.profile) {
+          html += `<div class="driver-apply-card">
+            <h3>No application yet</h3>
+            <p>You haven't applied as a driver or fleet partner. Start an application below — it goes into the same admin review flow as the mobile apps.</p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+              <button class="btn btn-primary btn-sm" onclick="showPage('driverapply')">Start driver application</button>
+              <button class="btn btn-ghost btn-sm" onclick="showPage('partnerapply')">Start partner application</button>
+            </div>
+          </div>`;
+        } else {
+          const p = data.profile;
+          html += `<div class="driver-apply-card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+              <div>
+                <h3 style="text-transform:capitalize;">${p.type === 'partner' ? 'Fleet partner' : 'Driver'} application</h3>
+                <p style="margin-bottom:8px;">Submitted ${p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' }) : '—'}</p>
+              </div>
+              ${applicationStatusPill(p.status)}
+            </div>
+            ${p.status === 'approved'
+              ? `<p style="color:#15803d;">Your ${p.type === 'partner' ? 'company' : 'driver profile'} is approved.${p.type === 'partner' ? ' Manage your fleet vehicles and drivers from the A2B DRIVER app.' : ' Select your approved vehicle and go online in the A2B DRIVER app to receive trips.'}</p>`
+              : p.status === 'rejected'
+                ? '<p style="color:#dc2626;">Your application was not approved. Check your documents below, replace any that were rejected, and contact support if you need help.</p>'
+                : '<p>Your application is with the A2B admin team. You will be notified once it has been reviewed.</p>'}
+          </div>`;
+          if (data.partnerProfile) {
+            const pp = data.partnerProfile;
+            html += `<div class="driver-apply-card">
+              <h3>Company details</h3>
+              <table class="trips-table"><tbody>
+                <tr><td style="color:var(--grey-400);">Company</td><td style="font-weight:700;">${pp.companyName || '—'}</td></tr>
+                <tr><td style="color:var(--grey-400);">Registration no.</td><td>${pp.registrationNumber || '—'}</td></tr>
+                <tr><td style="color:var(--grey-400);">Contact</td><td>${pp.contactPersonName || '—'} · ${pp.contactPhone || '—'}</td></tr>
+                <tr><td style="color:var(--grey-400);">Bank</td><td>${pp.bankName || '—'} · ${pp.accountHolder || '—'} · ${pp.accountNumber || '—'}</td></tr>
+              </tbody></table>
+            </div>`;
+          }
+          if (data.chauffeur) {
+            html += `<div class="driver-apply-card">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+                <h3 style="margin-bottom:0;">Driver profile</h3>
+                ${applicationStatusPill(data.chauffeur.isApproved ? 'approved' : 'pending')}
+              </div>
+            </div>`;
+          }
+        }
+
+        html += `<div class="driver-apply-card">
+          <h3>My documents</h3>
+          ${Array.isArray(docs) && docs.length
+            ? `<table class="trips-table">
+                <thead><tr><th>Document</th><th>Status</th><th>Uploaded</th><th></th></tr></thead>
+                <tbody>${docs.map(d => `
+                  <tr>
+                    <td style="font-weight:600;text-transform:capitalize;">${String(d.type || '').replace(/^(driver|partner):/, '').replace(/_/g, ' ')}</td>
+                    <td>${applicationStatusPill(d.status || 'pending')}</td>
+                    <td style="color:var(--grey-400);white-space:nowrap;">${(d.uploadedAt || d.createdAt) ? new Date(d.uploadedAt || d.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</td>
+                    <td>${d.url ? `<a href="${d.url}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">View</a>` : ''}</td>
+                  </tr>`).join('')}
+                </tbody>
+              </table>`
+            : '<p style="color:var(--grey-400);font-size:14px;">No documents uploaded yet.</p>'}
+        </div>`;
+
+        el.innerHTML = html;
+      } catch(e) {
+        el.innerHTML = '<div class="empty-state"><p>Could not load your applications. Please try again.</p></div>';
+      }
     }
 
     function setDriverApplyStatus(message, type = 'info') {

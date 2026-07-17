@@ -70,7 +70,7 @@ export default function SplashLanding() {
             style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
             onPress={() => router.push("/login")}
           >
-            <Text style={styles.primaryBtnText}>Get Started</Text>
+            <Text style={styles.primaryBtnText}>Login</Text>
             <Ionicons name="arrow-forward" size={20} color={Colors.primary} />
           </Pressable>
 

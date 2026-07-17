@@ -888,6 +888,11 @@ export default function ClientHomeScreen() {
   const [showCashSelfieCamera, setShowCashSelfieCamera] = useState(false);
   const [cashSelfieSaving, setCashSelfieSaving] = useState(false);
   const [savedCards, setSavedCards] = useState<{ id: string; last4: string; cardType: string; isDefault: boolean }[]>([]);
+  // Reserve-a-ride (advance booking)
+  const [showReservePicker, setShowReservePicker] = useState(false);
+  const [reserveDayOffset, setReserveDayOffset] = useState(0);
+  const [reserveSlot, setReserveSlot] = useState<string | null>(null);
+  const [reserveSubmitting, setReserveSubmitting] = useState(false);
 
   // Driver profile modal
   const [showDriverProfile, setShowDriverProfile] = useState(false);
@@ -2013,6 +2018,7 @@ export default function ClientHomeScreen() {
         setCurrentRide(ride);
         setRideStatus("requested");
         queryClient.invalidateQueries({ queryKey: ["/api/rides/client", user!.id] });
+        refreshUser().catch(() => {});
         if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         return;
       }
@@ -2081,6 +2087,80 @@ export default function ClientHomeScreen() {
         return;
       }
       Alert.alert("Error", err?.message || "Failed to request ride. Please try again.");
+    }
+  }
+
+  // ─── Reserve a ride (advance booking, card only, 50% cancellation fee) ────
+  function getReserveSlots(dayOffset: number): string[] {
+    const slots: string[] = [];
+    const minTime = Date.now() + 45 * 60 * 1000;
+    const day = new Date();
+    day.setDate(day.getDate() + dayOffset);
+    for (let h = 0; h < 24; h++) {
+      for (const m of [0, 30]) {
+        const slot = new Date(day);
+        slot.setHours(h, m, 0, 0);
+        if (slot.getTime() < minTime) continue;
+        slots.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
+      }
+    }
+    return slots;
+  }
+
+  function getReserveDate(): Date | null {
+    if (!reserveSlot) return null;
+    const [h, m] = reserveSlot.split(":").map(Number);
+    const d = new Date();
+    d.setDate(d.getDate() + reserveDayOffset);
+    d.setHours(h, m, 0, 0);
+    return d;
+  }
+
+  async function handleReserveRide() {
+    const when = getReserveDate();
+    const fare = selectedRouteChoice?.fare ?? estimatedPrice ?? 0;
+    if (!when || !user || !location || !dropoffCoords) return;
+    const defaultCard = savedCards.find((c) => c.isDefault) || savedCards[0];
+    if (!defaultCard) {
+      Alert.alert("Card required", "Reservations are paid by card. Add a card in your wallet first.", [
+        { text: "Go to Wallet", onPress: () => { setShowReservePicker(false); router.push("/client/wallet"); } },
+        { text: "Cancel", style: "cancel" },
+      ]);
+      return;
+    }
+    setReserveSubmitting(true);
+    try {
+      const ride = await createRideRecord("card", { scheduledFor: when.toISOString() });
+      if (!ride?.id) throw new Error("Could not create reservation");
+      const chargeRes = await apiRequest("POST", "/api/payments/charge-ride", { rideId: ride.id });
+      const chargeData = await chargeRes.json().catch(() => ({}));
+      if (!chargeData.success) {
+        await apiRequest("PUT", `/api/rides/${ride.id}/status`, { status: "cancelled" }).catch(() => {});
+        Alert.alert("Payment failed", chargeData.message || "Your card could not be charged.");
+        return;
+      }
+      setShowReservePicker(false);
+      setReserveSlot(null);
+      setRideStatus("idle");
+      setDropoffAddress("");
+      setDropoffCoords(null);
+      setRouteChoices([]);
+      setSelectedRouteId(null);
+      setRoutePolyline(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/rides/client", user.id] });
+      Alert.alert(
+        "Ride reserved ✓",
+        `Your ride is booked for ${when.toLocaleString("en-ZA", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })} and R${Number(fare).toFixed(2)} was charged to your card.\n\nIf you cancel, 50% (R${(Number(fare) / 2).toFixed(2)}) is kept as a cancellation fee and 50% is refunded. You can manage it under Trips.`,
+      );
+      if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch (err: any) {
+      if (isUnauthorizedError(err)) {
+        await handleUnauthorizedRideRequest();
+        return;
+      }
+      Alert.alert("Error", (err?.message || "Could not reserve your ride.").replace(/^\d+:\s*/, ""));
+    } finally {
+      setReserveSubmitting(false);
     }
   }
 
@@ -3011,20 +3091,8 @@ export default function ClientHomeScreen() {
                 </Pressable>
               );
             })()}
-            {(user?.walletBalance || 0) >= (estimatedPrice || 0) && (estimatedPrice || 0) > 0 && (
-              <Pressable style={styles.payMethodRow} onPress={() => handlePayAndRide("wallet")}>
-                <View style={[styles.payMethodIcon, { backgroundColor: Colors.success }]}>
-                  <Ionicons name="wallet" size={20} color="#fff" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.payMethodName}>Wallet Balance</Text>
-                  <Text style={styles.payMethodSub}>R {(user?.walletBalance || 0).toFixed(2)} available</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-              </Pressable>
-            )}
             <Pressable style={styles.payMethodRow} onPress={() => handlePayAndRide("cash")}>
-              <View style={[styles.payMethodIcon, { backgroundColor: Colors.accent }]}> 
+              <View style={[styles.payMethodIcon, { backgroundColor: Colors.accent }]}>
                 <Ionicons name="cash" size={20} color="#fff" />
               </View>
               <View style={{ flex: 1 }}>
@@ -3032,6 +3100,135 @@ export default function ClientHomeScreen() {
                 <Text style={styles.payMethodSub}>Pay driver directly after ride</Text>
               </View>
               <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+            </Pressable>
+            {(() => {
+              const spendable = Number(user?.walletBalance || 0) + Number((user as any)?.rewardsBalance || 0);
+              const fare = estimatedPrice || 0;
+              const canAfford = fare > 0 && spendable >= fare;
+              return (
+                <Pressable
+                  style={[styles.payMethodRow, !canAfford && { opacity: 0.45 }]}
+                  disabled={!canAfford}
+                  onPress={() => handlePayAndRide("wallet")}
+                >
+                  <View style={[styles.payMethodIcon, { backgroundColor: Colors.success }]}>
+                    <Ionicons name="wallet" size={20} color="#fff" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.payMethodName}>Wallet</Text>
+                    <Text style={styles.payMethodSub}>
+                      {canAfford
+                        ? `R ${spendable.toFixed(2)} available (incl. rewards)`
+                        : `R ${spendable.toFixed(2)} available — not enough for this trip`}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+                </Pressable>
+              );
+            })()}
+            <Pressable
+              style={[styles.payMethodRow, { borderTopWidth: 1, borderTopColor: Colors.border, marginTop: 6, paddingTop: 14 }]}
+              onPress={() => {
+                setShowPaymentPicker(false);
+                setReserveDayOffset(0);
+                setReserveSlot(null);
+                setShowReservePicker(true);
+              }}
+            >
+              <View style={[styles.payMethodIcon, { backgroundColor: "#7B5CD6" }]}>
+                <Ionicons name="calendar" size={20} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.payMethodName}>Reserve for later</Text>
+                <Text style={styles.payMethodSub}>Book this trip in advance — card payment</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={showReservePicker} transparent animationType="slide" onRequestClose={() => setShowReservePicker(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowReservePicker(false)}>
+          <View
+            style={[styles.modalSheet, { paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 16) }]}
+            onStartShouldSetResponder={() => true}
+          >
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Reserve your ride</Text>
+            <Text style={{ fontSize: 13, color: Colors.textMuted, fontFamily: "Inter_400Regular", marginBottom: 10 }}>
+              Fare: R {selectedRouteChoice?.fare ?? estimatedPrice} · charged to your card now
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+              {Array.from({ length: 8 }).map((_, offset) => {
+                const d = new Date();
+                d.setDate(d.getDate() + offset);
+                const label = offset === 0 ? "Today" : offset === 1 ? "Tomorrow" : d.toLocaleDateString("en-ZA", { weekday: "short", day: "numeric", month: "short" });
+                const active = reserveDayOffset === offset;
+                return (
+                  <Pressable
+                    key={offset}
+                    onPress={() => { setReserveDayOffset(offset); setReserveSlot(null); }}
+                    style={{
+                      paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, marginRight: 8,
+                      backgroundColor: active ? Colors.white : Colors.card,
+                      borderWidth: 1, borderColor: active ? Colors.white : Colors.border,
+                    }}
+                  >
+                    <Text style={{ fontSize: 13, fontFamily: "Inter_600SemiBold", color: active ? Colors.primary : Colors.textSecondary }}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <ScrollView style={{ maxHeight: 190, marginBottom: 12 }} showsVerticalScrollIndicator={false}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {getReserveSlots(reserveDayOffset).map((slot) => {
+                  const active = reserveSlot === slot;
+                  return (
+                    <Pressable
+                      key={slot}
+                      onPress={() => setReserveSlot(slot)}
+                      style={{
+                        paddingHorizontal: 13, paddingVertical: 8, borderRadius: 10,
+                        backgroundColor: active ? Colors.white : Colors.card,
+                        borderWidth: 1, borderColor: active ? Colors.white : Colors.border,
+                      }}
+                    >
+                      <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: active ? Colors.primary : Colors.textSecondary }}>{slot}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {getReserveSlots(reserveDayOffset).length === 0 && (
+                <Text style={{ fontSize: 13, color: Colors.textMuted, fontFamily: "Inter_400Regular" }}>
+                  No more times available today — pick another day.
+                </Text>
+              )}
+            </ScrollView>
+            <View style={{ flexDirection: "row", gap: 8, backgroundColor: "rgba(255,193,7,0.08)", borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: "rgba(255,193,7,0.25)" }}>
+              <Ionicons name="alert-circle" size={18} color="#FFC107" />
+              <Text style={{ flex: 1, fontSize: 12, lineHeight: 17, color: Colors.textSecondary, fontFamily: "Inter_400Regular" }}>
+                Cancellation policy: if you cancel this reservation, 50% of the fare
+                (R {(Number(selectedRouteChoice?.fare ?? estimatedPrice ?? 0) / 2).toFixed(2)}) is charged as a
+                cancellation fee and the other 50% is refunded to your card.
+              </Text>
+            </View>
+            <Pressable
+              disabled={!reserveSlot || reserveSubmitting}
+              onPress={handleReserveRide}
+              style={{
+                backgroundColor: reserveSlot ? Colors.white : Colors.card,
+                opacity: reserveSubmitting ? 0.6 : 1,
+                paddingVertical: 15, borderRadius: 14, alignItems: "center",
+              }}
+            >
+              {reserveSubmitting ? (
+                <ActivityIndicator color={Colors.primary} />
+              ) : (
+                <Text style={{ fontSize: 15, fontFamily: "Inter_600SemiBold", color: reserveSlot ? Colors.primary : Colors.textMuted }}>
+                  {reserveSlot ? `Reserve for ${reserveSlot}` : "Pick a time"}
+                </Text>
+              )}
             </Pressable>
           </View>
         </Pressable>
