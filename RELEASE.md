@@ -54,6 +54,17 @@ All four iOS submit profiles in `eas.json` have `ascAppId` pinned, so even a raw
 
 ## Backend deploys (Railway via GitHub)
 
+**IMPORTANT:** Railway runs the committed `server_dist/index.js` bundle — its build step has
+been observed NOT rebuilding it. Before every backend push, rebuild and commit the bundle:
+
+```bash
+npm run server:build && git add server_dist && git commit -m "Rebuild server bundle"
+```
+
+Verify after deploy: `https://a2blift.com/api/version` must return a `commit` field matching
+the pushed SHA.
+
+
 Railway builds from `railway.json` (`npm run build`, starts `server_dist/index.js`,
 healthcheck `/api/health`). Once the repo is connected in Railway
 (Service → Settings → Source → Connect Repo → branch `release/production`),

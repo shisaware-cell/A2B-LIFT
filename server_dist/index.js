@@ -1347,6 +1347,67 @@ var DatabaseStorage = class {
     const deleted = await db.delete(users).where((0, import_drizzle_orm2.eq)(users.id, id)).returning();
     return deleted.length > 0;
   }
+  // Hard-delete a user together with every row that references them, in FK
+  // dependency order, inside a single transaction. This is what the admin
+  // "delete user" action uses so a driver/partner account (which owns an
+  // operator_profile + vehicles) can be removed without hitting foreign-key
+  // constraint violations. Either the whole delete succeeds or nothing changes.
+  async deleteUserCascade(id) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const profRes = await client.query(
+        "SELECT id FROM operator_profiles WHERE user_id = $1",
+        [id]
+      );
+      const profileIds = profRes.rows.map((r) => r.id);
+      let vehicleIds = [];
+      if (profileIds.length) {
+        const vehRes = await client.query(
+          "SELECT id FROM vehicles WHERE owner_operator_profile_id = ANY($1)",
+          [profileIds]
+        );
+        vehicleIds = vehRes.rows.map((r) => r.id);
+      }
+      if (vehicleIds.length) {
+        await client.query("UPDATE lift_club_routes SET vehicle_id = NULL WHERE vehicle_id = ANY($1)", [vehicleIds]);
+        await client.query("DELETE FROM vehicle_assignments WHERE vehicle_id = ANY($1)", [vehicleIds]);
+        await client.query("DELETE FROM documents WHERE vehicle_id = ANY($1)", [vehicleIds]);
+      }
+      if (profileIds.length) {
+        await client.query("DELETE FROM vehicle_assignments WHERE driver_operator_profile_id = ANY($1) OR assigned_by_operator_profile_id = ANY($1)", [profileIds]);
+        await client.query("DELETE FROM fleet_driver_invites WHERE driver_operator_profile_id = ANY($1) OR invited_by_operator_profile_id = ANY($1)", [profileIds]);
+        await client.query("DELETE FROM partner_profiles WHERE operator_profile_id = ANY($1)", [profileIds]);
+        await client.query("DELETE FROM vehicles WHERE owner_operator_profile_id = ANY($1)", [profileIds]);
+        await client.query("DELETE FROM operator_profiles WHERE user_id = $1", [id]);
+      }
+      await client.query("DELETE FROM fleet_driver_invites WHERE invited_by_user_id = $1", [id]);
+      await client.query("DELETE FROM referral_events WHERE referred_user_id = $1 OR referrer_user_id = $1", [id]);
+      await client.query("DELETE FROM reward_transactions WHERE user_id = $1 OR source_user_id = $1", [id]);
+      await client.query("DELETE FROM reward_cashouts WHERE user_id = $1", [id]);
+      await client.query("DELETE FROM lift_club_bookings WHERE rider_id = $1", [id]);
+      await client.query("DELETE FROM lift_club_memberships WHERE user_id = $1", [id]);
+      await client.query("DELETE FROM liveness_sessions WHERE user_id = $1", [id]);
+      await client.query("DELETE FROM password_reset_tokens WHERE user_id = $1", [id]);
+      await client.query("DELETE FROM push_delivery_logs WHERE user_id = $1", [id]);
+      await client.query("DELETE FROM client_ratings WHERE client_id = $1", [id]);
+      await client.query("DELETE FROM documents WHERE user_id = $1", [id]);
+      await client.query("UPDATE users SET referred_by_user_id = NULL WHERE referred_by_user_id = $1", [id]);
+      await client.query("UPDATE lift_club_memberships SET reviewer_admin_id = NULL WHERE reviewer_admin_id = $1", [id]);
+      await client.query("UPDATE reward_cashouts SET reviewed_by_admin_id = NULL WHERE reviewed_by_admin_id = $1", [id]);
+      await client.query("UPDATE operator_profiles SET reviewer_admin_id = NULL WHERE reviewer_admin_id = $1", [id]);
+      await client.query("UPDATE vehicles SET reviewer_admin_id = NULL WHERE reviewer_admin_id = $1", [id]);
+      await client.query("DELETE FROM admin_audit_logs WHERE admin_user_id = $1", [id]);
+      const del = await client.query("DELETE FROM users WHERE id = $1 RETURNING id", [id]);
+      await client.query("COMMIT");
+      return (del.rowCount ?? 0) > 0;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
   async deleteWithdrawal(id) {
     const deleted = await db.delete(withdrawals).where((0, import_drizzle_orm2.eq)(withdrawals.id, id)).returning();
     return deleted.length > 0;
@@ -1586,6 +1647,7 @@ var CATEGORY_ALIASES = {
   budget: "budget",
   economy: "budget",
   standard: "budget",
+  sedan: "budget",
   luxury: "luxury",
   business: "business",
   business_class: "business",
@@ -1595,12 +1657,19 @@ var CATEGORY_ALIASES = {
   v_class: "luxury_van",
   "v-class": "luxury_van"
 };
+var MULTI_CATEGORY_MATCHES = {
+  executive: ["business", "luxury", "luxury_van"],
+  luxury_van: ["van"]
+};
 function normalizeVehicleType(vehicleType) {
   const normalized = String(vehicleType || "budget").trim().toLowerCase().replace(/\s+/g, "_");
   return CATEGORY_ALIASES[normalized] || normalized || "budget";
 }
 function isVehicleEligibleForRide(requestedVehicleType, activeVehicleType) {
-  return normalizeVehicleType(requestedVehicleType) === normalizeVehicleType(activeVehicleType);
+  const requested = normalizeVehicleType(requestedVehicleType);
+  const active = normalizeVehicleType(activeVehicleType);
+  if (requested === active) return true;
+  return (MULTI_CATEGORY_MATCHES[active] || []).includes(requested);
 }
 function getRideOfferExpiresAt(now = /* @__PURE__ */ new Date()) {
   return new Date(now.getTime() + RIDE_OFFER_WINDOW_MS);
@@ -1613,6 +1682,11 @@ function isRideOfferActive(ride, chauffeurId, now = /* @__PURE__ */ new Date()) 
     return false;
   }
   return new Date(ride.currentOfferExpiresAt).getTime() > now.getTime();
+}
+
+// server/release-info.ts
+function getReleaseFingerprint(environment = process.env) {
+  return environment.RAILWAY_GIT_COMMIT_SHA || environment.GIT_COMMIT_SHA || "local";
 }
 
 // server/auth.ts
@@ -2180,8 +2254,23 @@ async function registerRoutes(app2) {
     return Array.from(tokens);
   }
   async function getApprovedActiveVehicle(chauffeur) {
-    if (!chauffeur?.activeVehicleId) return null;
-    const vehicle = await storage.getVehicle(chauffeur.activeVehicleId).catch(() => void 0);
+    if (!chauffeur?.userId) return null;
+    let activeVehicleId = chauffeur.activeVehicleId || null;
+    if (!activeVehicleId) {
+      const profile = await storage.getOperatorProfileByUserId(chauffeur.userId).catch(() => void 0);
+      if (profile?.id) {
+        const assignments = await storage.getVehicleAssignments({ driverOperatorProfileId: profile.id, status: "active" }).catch(() => []);
+        for (const assignment of assignments) {
+          const assignedVehicle = await storage.getVehicle(assignment.vehicleId).catch(() => void 0);
+          if (assignedVehicle && assignedVehicle.status === "approved" && Number(assignedVehicle.vehicleYear || 0) >= 2015) {
+            await storage.updateChauffeur(chauffeur.id, { activeVehicleId: assignedVehicle.id }).catch(() => void 0);
+            return assignedVehicle;
+          }
+        }
+      }
+      return null;
+    }
+    const vehicle = await storage.getVehicle(activeVehicleId).catch(() => void 0);
     if (vehicle && vehicle.status === "approved" && Number(vehicle.vehicleYear || 0) >= 2015) {
       return vehicle;
     }
@@ -2226,6 +2315,51 @@ async function registerRoutes(app2) {
       return calculateHaversineDistanceKm(pickupLat, pickupLng, candidateLat, candidateLng) <= RIDE_MATCH_RADIUS_KM;
     }).length + 1;
   }
+  const DISPATCH_RETRY_MS = 15e3;
+  const DISPATCH_MAX_SEARCH_WINDOW_MS = 15 * 60 * 1e3;
+  function getRideCreatedAtMs(ride) {
+    const ms = new Date(ride?.createdAt ?? 0).getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+  function scheduleDispatchRetry(rideId) {
+    const existingTimer = dispatchTimers.get(rideId);
+    if (existingTimer) clearTimeout(existingTimer);
+    const timer = setTimeout(async () => {
+      dispatchTimers.delete(rideId);
+      try {
+        const ride = await storage.getRide(rideId);
+        if (!ride || ride.status !== "searching") return;
+        await dispatchNextRideOffer(ride);
+      } catch (error) {
+        console.error("[dispatch] retry failed:", error.message);
+      }
+    }, DISPATCH_RETRY_MS);
+    dispatchTimers.set(rideId, timer);
+  }
+  let dispatchPumpRunning = false;
+  async function pumpUnassignedSearchingRides() {
+    if (dispatchPumpRunning) return;
+    dispatchPumpRunning = true;
+    try {
+      const allRides = await storage.getAllRides();
+      const now = Date.now();
+      for (const ride of allRides) {
+        if (ride.status !== "searching") continue;
+        const createdAtMs = getRideCreatedAtMs(ride);
+        if (!createdAtMs || now - createdAtMs > DISPATCH_MAX_SEARCH_WINDOW_MS) continue;
+        if (ride.currentOfferedChauffeurId && isRideOfferActive(ride, ride.currentOfferedChauffeurId)) {
+          continue;
+        }
+        if (dispatchTimers.has(ride.id)) continue;
+        await dispatchNextRideOffer(ride);
+      }
+    } catch (error) {
+      console.error("[dispatch] pump failed:", error.message);
+    } finally {
+      dispatchPumpRunning = false;
+    }
+  }
+  setInterval(pumpUnassignedSearchingRides, 2e4);
   function scheduleOfferExpiry(rideId) {
     const existingTimer = dispatchTimers.get(rideId);
     if (existingTimer) clearTimeout(existingTimer);
@@ -2253,12 +2387,19 @@ async function registerRoutes(app2) {
   async function dispatchNextRideOffer(ride) {
     const latestRide = await storage.getRide(ride.id);
     if (!latestRide || latestRide.status !== "searching") return { offered: null, ride: latestRide };
-    const eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true });
+    let eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true });
+    if (!eligible.length && skippedChauffeursByRide.get(latestRide.id)?.size) {
+      skippedChauffeursByRide.delete(latestRide.id);
+      eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true });
+    }
     if (!eligible.length) {
       const updated2 = await storage.updateRide(latestRide.id, {
         currentOfferedChauffeurId: null,
         currentOfferExpiresAt: null
       });
+      if (Date.now() - getRideCreatedAtMs(latestRide) <= DISPATCH_MAX_SEARCH_WINDOW_MS) {
+        scheduleDispatchRetry(latestRide.id);
+      }
       return { offered: null, ride: updated2 || latestRide };
     }
     const offered = eligible[0];
@@ -4126,7 +4267,11 @@ async function registerRoutes(app2) {
     }
   });
   app2.get("/api/version", (_req, res) => {
-    res.json({ version: "google-oauth-v2", built: (/* @__PURE__ */ new Date()).toISOString() });
+    res.json({
+      version: "google-oauth-v2",
+      built: (/* @__PURE__ */ new Date()).toISOString(),
+      commit: getReleaseFingerprint()
+    });
   });
   app2.get("/api/auth/google/start", (req, res) => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -4653,7 +4798,14 @@ async function registerRoutes(app2) {
       });
       return res.status(201).json(vehicle);
     } catch (error) {
-      return res.status(400).json({ message: error.message });
+      const rawMessage = String(error?.message || "");
+      const isDuplicatePlate = error?.code === "23505" || rawMessage.includes("vehicles_active_plate_unique") || rawMessage.toLowerCase().includes("duplicate key");
+      if (isDuplicatePlate) {
+        return res.status(409).json({
+          message: "This number plate is already registered on A2B. If this is your vehicle, contact A2B support to have it released to your account."
+        });
+      }
+      return res.status(400).json({ message: rawMessage });
     }
   });
   app2.get("/api/vehicles/:id", requireAuth, async (req, res) => {
@@ -5360,6 +5512,10 @@ async function registerRoutes(app2) {
       const updated = await storage.updateChauffeur(req.params.id, {
         isOnline: nextOnline
       });
+      if (nextOnline) {
+        pumpUnassignedSearchingRides().catch(() => {
+        });
+      }
       return res.json(updated);
     } catch (error) {
       return res.status(500).json({ message: error.message });
@@ -8726,7 +8882,7 @@ async function registerRoutes(app2) {
         if (app3) await storage.deleteDriverApplication(app3.id);
         await storage.deleteChauffeur(chauffeur.id);
       }
-      const deleted = await storage.deleteUser(req.params.id);
+      const deleted = await storage.deleteUserCascade(req.params.id);
       if (!deleted) return res.status(404).json({ message: "User not found" });
       return res.json({ message: "User deleted" });
     } catch (error) {
