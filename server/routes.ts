@@ -24,6 +24,7 @@ import {
   isVehicleEligibleForRide,
 } from "./rideOperations";
 import { getReleaseFingerprint } from "./release-info";
+import { validateAdminPassword } from "./admin-password-policy";
 import { authOptional, requireAuth, requireRole, type AuthedRequest } from "./auth-middleware";
 import { signAccessToken, type UserRole } from "./auth";
 import { externalApiService } from "./external-api-service";
@@ -8755,6 +8756,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const deleted = await storage.deleteRide(req.params.id);
       if (!deleted) return res.status(404).json({ message: "Ride not found" });
       return res.json({ message: "Ride deleted" });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Admin: set a new password for any user (also used for admin's own password)
+  app.put("/api/admin/users/:id/password", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
+    try {
+      const validation = validateAdminPassword(req.body?.password);
+      if (!validation.ok) return res.status(400).json({ message: validation.message });
+
+      const user = await storage.getUser(req.params.id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const hashed = await bcrypt.hash(String(req.body.password), 10);
+      await storage.updateUser(user.id, { password: hashed } as any);
+
+      await storage.createNotification({
+        userId: user.id,
+        title: "Password updated",
+        body: "Your A2B LIFT password was updated by an administrator. If this wasn't expected, contact support.",
+        type: "account",
+      }).catch(() => {});
+
+      return res.json({ success: true, message: "Password updated." });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }

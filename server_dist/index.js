@@ -1698,6 +1698,14 @@ function getReleaseFingerprint(environment = process.env) {
   return environment.RAILWAY_GIT_COMMIT_SHA || environment.GIT_COMMIT_SHA || "local";
 }
 
+// server/admin-password-policy.ts
+function validateAdminPassword(value) {
+  if (String(value || "").length < 8) {
+    return { ok: false, message: "Password must be at least 8 characters." };
+  }
+  return { ok: true };
+}
+
 // server/auth.ts
 var import_jsonwebtoken = __toESM(require("jsonwebtoken"));
 var JWT_ISSUER = "a2b-lift";
@@ -9151,6 +9159,26 @@ async function registerRoutes(app2) {
       const deleted = await storage.deleteRide(req.params.id);
       if (!deleted) return res.status(404).json({ message: "Ride not found" });
       return res.json({ message: "Ride deleted" });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.put("/api/admin/users/:id/password", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const validation = validateAdminPassword(req.body?.password);
+      if (!validation.ok) return res.status(400).json({ message: validation.message });
+      const user = await storage.getUser(req.params.id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      const hashed = await import_bcryptjs.default.hash(String(req.body.password), 10);
+      await storage.updateUser(user.id, { password: hashed });
+      await storage.createNotification({
+        userId: user.id,
+        title: "Password updated",
+        body: "Your A2B LIFT password was updated by an administrator. If this wasn't expected, contact support.",
+        type: "account"
+      }).catch(() => {
+      });
+      return res.json({ success: true, message: "Password updated." });
     } catch (error) {
       return res.status(500).json({ message: error.message });
     }
