@@ -335,11 +335,11 @@ export default function ChauffeurDashboard() {
     return reorderRoutesForClientSelection(uniqueRoutes, currentRide);
   }
 
-  /** Estimate the fare for a given route distance using the ride's vehicle type */
+  /** Estimate the full trip fare for a route distance — matches the rider's app. */
   function calcRoutePrice(distanceKm: number | undefined): string {
     if (!distanceKm || !currentRide) return "";
-    if (currentRide?.status === "trip_started" && getRideFare(currentRide) > 0 && Math.abs(Number(currentRide.selectedRouteDistanceKm || 0) - Number(distanceKm || 0)) < 0.35) {
-      return `R ${getRideFare(currentRide).toFixed(0)}`;
+    if (currentRide?.status === "trip_started" && getRideClientFare(currentRide) > 0 && Math.abs(Number(currentRide.selectedRouteDistanceKm || 0) - Number(distanceKm || 0)) < 0.35) {
+      return `R ${getRideClientFare(currentRide).toFixed(0)}`;
     }
     const rates: Record<string, { pricePerKm: number; baseFare: number }> = {
       budget:      { pricePerKm: 7,  baseFare: 50  },
@@ -350,7 +350,7 @@ export default function ChauffeurDashboard() {
     };
     const cat = rates[currentRide.vehicleType || "budget"] || rates.budget;
     const total = Math.round(cat.baseFare + distanceKm * cat.pricePerKm);
-    return `R ${Math.round(total * DRIVER_SHARE)}`;
+    return `R ${total}`;
   }
 
   function getRideRouteLabel(routeId?: string | null) {
@@ -1942,7 +1942,7 @@ export default function ChauffeurDashboard() {
                       <Text style={styles.tripClientName}>{trip.clientFirstName || (trip.clientName ? String(trip.clientName).split(" ")[0] : "Client")}</Text>
                       <Ionicons name="chevron-forward" size={12} color={Colors.textMuted} />
                     </Pressable>
-                    {getRideFare(trip) ? <Text style={styles.tripPrice}>R {getRideFare(trip)}</Text> : null}
+                    {getRideClientFare(trip) ? <Text style={styles.tripPrice}>R {getRideClientFare(trip).toFixed(0)}</Text> : null}
                   </View>
                   <View style={styles.tripAddrRow}>
                     <View style={styles.dotGreen} />
@@ -2047,7 +2047,7 @@ export default function ChauffeurDashboard() {
               </ScrollView>
             </View>
           )}
-          {getRideFare(currentRide) ? <Text style={styles.priceText}>R {getRideFare(currentRide)}</Text> : null}
+          {getRideClientFare(currentRide) ? <Text style={styles.priceText}>R {getRideClientFare(currentRide).toFixed(0)}</Text> : null}
           <View style={styles.rideActions}>
             <Pressable style={styles.rideSecBtn} onPress={() => router.push({ pathname: "/chauffeur/chat", params: { rideId: currentRide.id, riderName: currentRide.clientFirstName || currentRide.clientName || "Client" } })}>
               <Ionicons name="chatbubble-outline" size={15} color={Colors.white} />
@@ -2090,7 +2090,7 @@ export default function ChauffeurDashboard() {
               <View style={styles.offerTimerPill}>
                 <Text style={styles.offerTimerText}>{incomingOfferSeconds}s</Text>
               </View>
-              {getRideFare(incomingRide) ? <Text style={styles.incomingPrice}>R {getRideFare(incomingRide)}</Text> : null}
+              {getRideClientFare(incomingRide) ? <Text style={styles.incomingPrice}>R {getRideClientFare(incomingRide).toFixed(0)}</Text> : null}
             </View>
             <View style={styles.addrRow}>
               <View style={styles.dotGreen} />
