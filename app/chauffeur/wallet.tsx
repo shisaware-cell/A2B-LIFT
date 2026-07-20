@@ -101,22 +101,21 @@ export default function ChauffeurWalletScreen() {
 
     setWithdrawLoading(true);
     try {
-      const res = await apiRequest("POST", "/api/wallet/withdraw", {
+      const res = await apiRequest("POST", "/api/withdrawals", {
         amount,
-        bankCode: selectedBank.code,
         bankName: selectedBank.name,
         accountNumber: accountNumber.trim(),
-        accountName: accountName.trim(),
+        accountHolder: accountName.trim(),
       });
       const data = await res.json();
       setShowWithdraw(false);
       loadData();
       Alert.alert("✅ Withdrawal Requested",
-        data.message || "Your funds will arrive within 24 hours.",
+        data.message || "Your request was sent to the A2B admin team for approval. Once approved, you will be paid via EFT.",
         [{ text: "OK" }]
       );
     } catch (e: any) {
-      Alert.alert("Withdrawal Failed", e.message || "Please try again");
+      Alert.alert("Withdrawal Failed", (e.message || "Please try again").replace(/^\d+:\s*/, ""));
     } finally { setWithdrawLoading(false); }
   }
 
@@ -127,7 +126,7 @@ export default function ChauffeurWalletScreen() {
   const totalEarned = earnings
     .filter(e => e.type === "card" || e.type === "wallet")
     .reduce((sum, e) => sum + e.amount, 0);
-  const totalWithdrawn = withdrawals.filter(w => w.status === "completed").reduce((sum, w) => sum + w.amount, 0);
+  const totalWithdrawn = withdrawals.filter(w => ["completed", "paid", "approved"].includes(w.status)).reduce((sum, w) => sum + w.amount, 0);
 
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
   const todayEarnings = earnings

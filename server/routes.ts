@@ -7372,10 +7372,130 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/withdrawals", async (req: Request, res: Response) => {
+  // ── Manual withdrawals: user requests → admin approves → admin pays via EFT ──
+
+  /** Return held funds to the requester (used on reject/delete). */
+  async function refundWithdrawalHold(withdrawal: any) {
+    const amount = Number(withdrawal?.amount || 0);
+    if (!(amount > 0)) return;
+    if (withdrawal.source === "wallet" && withdrawal.userId) {
+      const user = await storage.getUser(withdrawal.userId);
+      if (user) {
+        const balanceBefore = Number(user.walletBalance || 0);
+        await storage.updateUser(user.id, { walletBalance: balanceBefore + amount });
+        await recordWalletTx(user.id, "refund", amount, balanceBefore, "Withdrawal request refunded");
+      }
+    } else if (withdrawal.chauffeurId) {
+      const chauffeur = await storage.getChauffeur(withdrawal.chauffeurId);
+      if (chauffeur) {
+        await storage.updateChauffeur(chauffeur.id, {
+          earningsTotal: Number(chauffeur.earningsTotal || 0) + amount,
+        });
+      }
+    }
+  }
+
+  async function getWithdrawalRequesterUserId(withdrawal: any): Promise<string | null> {
+    if (withdrawal?.userId) return withdrawal.userId;
+    if (withdrawal?.chauffeurId) {
+      const chauffeur = await storage.getChauffeur(withdrawal.chauffeurId).catch(() => undefined);
+      return chauffeur?.userId || null;
+    }
+    return null;
+  }
+
+  // User (rider or driver) submits a withdrawal request for admin approval.
+  app.post("/api/withdrawals", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
-      const withdrawal = await storage.createWithdrawal(req.body);
-      return res.json(withdrawal);
+      const amount = Math.round(Number(req.body?.amount) * 100) / 100;
+      const bankName = String(req.body?.bankName || "").trim();
+      const accountNumber = String(req.body?.accountNumber || "").trim();
+      const accountHolder = String(req.body?.accountHolder || req.body?.accountName || "").trim();
+      if (!Number.isFinite(amount) || amount < 50) {
+        return res.status(400).json({ message: "Minimum withdrawal is R50." });
+      }
+      if (!bankName || !accountNumber || accountNumber.length < 6 || !accountHolder) {
+        return res.status(400).json({ message: "Bank name, account number and account holder are required." });
+      }
+
+      const userId = req.auth!.sub;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      const chauffeur = await storage.getChauffeurByUserId(userId).catch(() => undefined);
+
+      // Prefer driver earnings; fall back to wallet balance (rider top-ups, commissions, refunds)
+      let source: "driver_earnings" | "wallet";
+      if (chauffeur && Number(chauffeur.earningsTotal || 0) >= amount) {
+        source = "driver_earnings";
+      } else if (Number(user.walletBalance || 0) >= amount) {
+        source = "wallet";
+      } else {
+        const available = Math.max(Number(chauffeur?.earningsTotal || 0), Number(user.walletBalance || 0));
+        return res.status(400).json({ message: `You only have R${available.toFixed(2)} available to withdraw.` });
+      }
+
+      // Hold the funds now — refunded automatically if admin declines or deletes.
+      if (source === "driver_earnings" && chauffeur) {
+        await storage.updateChauffeur(chauffeur.id, {
+          earningsTotal: Number(chauffeur.earningsTotal || 0) - amount,
+        });
+      } else {
+        const balanceBefore = Number(user.walletBalance || 0);
+        await storage.updateUser(userId, { walletBalance: balanceBefore - amount });
+        await recordWalletTx(userId, "withdrawal", amount, balanceBefore, "Withdrawal request (pending admin approval)");
+      }
+
+      const withdrawal = await storage.createWithdrawal({
+        userId,
+        chauffeurId: chauffeur?.id || null,
+        source,
+        amount,
+        status: "pending",
+        bankName,
+        accountNumber,
+        accountHolder,
+      });
+
+      // Notify admins
+      try {
+        const admins = ((await storage.getAllUsers()) || []).filter((u: any) => u.role === "admin");
+        for (const admin of admins) {
+          await storage.createNotification({
+            userId: admin.id,
+            title: "New withdrawal request",
+            body: `${user.name || user.username}: R${amount.toFixed(2)} to ${bankName} (${accountHolder}). Approve in the admin dashboard, then pay via EFT.`,
+            type: "withdrawal",
+          });
+          if ((admin as any).pushToken) {
+            sendExpoPushNotification(
+              [(admin as any).pushToken],
+              "New withdrawal request",
+              `${user.name || user.username}: R${amount.toFixed(2)} to ${bankName}`,
+              { type: "withdrawal", withdrawalId: withdrawal.id },
+            );
+          }
+        }
+      } catch {}
+
+      return res.json({
+        success: true,
+        withdrawal,
+        message: "Withdrawal request sent for admin approval. Once approved, you will be paid via EFT.",
+      });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/withdrawals/my", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId = req.auth!.sub;
+      const chauffeur = await storage.getChauffeurByUserId(userId).catch(() => undefined);
+      const all = await storage.getAllWithdrawals();
+      const mine = (all || []).filter((w: any) =>
+        w.userId === userId || (chauffeur && w.chauffeurId === chauffeur.id)
+      );
+      return res.json(mine);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -7390,19 +7510,121 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/withdrawals", async (_req: Request, res: Response) => {
+  app.get("/api/withdrawals", requireAuth, requireRole(["admin"]), async (_req: Request, res: Response) => {
     try {
       const allWithdrawals = await storage.getAllWithdrawals();
-      return res.json(allWithdrawals);
+      // Enrich with requester details for the admin dashboard
+      const enriched = await Promise.all((allWithdrawals || []).map(async (w: any) => {
+        try {
+          const requesterUserId = await getWithdrawalRequesterUserId(w);
+          const requester = requesterUserId ? await storage.getUser(requesterUserId) : null;
+          return {
+            ...w,
+            requesterName: requester?.name || w.accountHolder || "—",
+            requesterEmail: requester?.username || "—",
+            requesterRole: w.chauffeurId ? "driver" : (requester?.role || "client"),
+          };
+        } catch {
+          return { ...w, requesterName: w.accountHolder || "—", requesterEmail: "—", requesterRole: w.chauffeurId ? "driver" : "client" };
+        }
+      }));
+      return res.json(enriched);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
   });
 
-  app.put("/api/withdrawals/:id", async (req: Request, res: Response) => {
+  // Admin: edit details, approve, decline, or mark paid.
+  app.put("/api/withdrawals/:id", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
     try {
-      const withdrawal = await storage.updateWithdrawal(req.params.id, req.body);
+      const existing = await storage.getWithdrawal(req.params.id);
+      if (!existing) return res.status(404).json({ message: "Withdrawal not found" });
+
+      const updates: Record<string, any> = {};
+      for (const field of ["bankName", "accountNumber", "accountHolder"]) {
+        if (typeof req.body?.[field] === "string" && req.body[field].trim()) {
+          updates[field] = req.body[field].trim();
+        }
+      }
+
+      // Amount edits adjust the held funds by the difference
+      if (req.body?.amount !== undefined) {
+        const newAmount = Math.round(Number(req.body.amount) * 100) / 100;
+        if (!Number.isFinite(newAmount) || newAmount < 1) {
+          return res.status(400).json({ message: "Invalid amount." });
+        }
+        const delta = newAmount - Number(existing.amount || 0);
+        if (delta !== 0 && ["pending", "approved"].includes(existing.status)) {
+          if ((existing as any).source === "wallet" && (existing as any).userId) {
+            const holder = await storage.getUser((existing as any).userId);
+            if (holder) {
+              const balanceBefore = Number(holder.walletBalance || 0);
+              if (delta > 0 && balanceBefore < delta) {
+                return res.status(400).json({ message: "User does not have enough wallet balance for the increased amount." });
+              }
+              await storage.updateUser(holder.id, { walletBalance: balanceBefore - delta });
+              await recordWalletTx(holder.id, delta > 0 ? "withdrawal" : "refund", Math.abs(delta), balanceBefore, "Withdrawal amount adjusted by admin");
+            }
+          } else if (existing.chauffeurId) {
+            const chauffeur = await storage.getChauffeur(existing.chauffeurId);
+            if (chauffeur) {
+              if (delta > 0 && Number(chauffeur.earningsTotal || 0) < delta) {
+                return res.status(400).json({ message: "Driver does not have enough earnings for the increased amount." });
+              }
+              await storage.updateChauffeur(chauffeur.id, {
+                earningsTotal: Number(chauffeur.earningsTotal || 0) - delta,
+              });
+            }
+          }
+        }
+        updates.amount = newAmount;
+      }
+
+      // Status transitions
+      const nextStatus = typeof req.body?.status === "string" ? req.body.status : null;
+      if (nextStatus && nextStatus !== existing.status) {
+        if (!["pending", "approved", "rejected", "paid"].includes(nextStatus)) {
+          return res.status(400).json({ message: "Invalid status." });
+        }
+        updates.status = nextStatus;
+        if (["approved", "rejected", "paid"].includes(nextStatus)) {
+          updates.processedAt = new Date();
+        }
+        if (nextStatus === "rejected" && ["pending", "approved"].includes(existing.status)) {
+          await refundWithdrawalHold({ ...existing, amount: updates.amount ?? existing.amount });
+        }
+      }
+
+      const withdrawal = await storage.updateWithdrawal(req.params.id, updates as any);
       if (!withdrawal) return res.status(404).json({ message: "Withdrawal not found" });
+
+      // Notify the requester about status changes
+      if (updates.status) {
+        try {
+          const requesterUserId = await getWithdrawalRequesterUserId(withdrawal);
+          if (requesterUserId) {
+            const amt = Number(withdrawal.amount || 0).toFixed(2);
+            const copy = updates.status === "approved"
+              ? `Your withdrawal of R${amt} was approved. The EFT payment is being processed.`
+              : updates.status === "paid"
+                ? `Your withdrawal of R${amt} has been paid via EFT to ${withdrawal.bankName}.`
+                : updates.status === "rejected"
+                  ? `Your withdrawal of R${amt} was declined. The funds have been returned to your balance.`
+                  : `Your withdrawal of R${amt} was updated.`;
+            await storage.createNotification({
+              userId: requesterUserId,
+              title: "Withdrawal update",
+              body: copy,
+              type: "withdrawal",
+            });
+            const requester = await storage.getUser(requesterUserId);
+            if ((requester as any)?.pushToken) {
+              sendExpoPushNotification([(requester as any).pushToken], "Withdrawal update", copy, { type: "withdrawal" });
+            }
+          }
+        } catch {}
+      }
+
       return res.json(withdrawal);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -8560,6 +8782,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/admin/withdrawals/:id", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
     try {
+      const existing = await storage.getWithdrawal(req.params.id);
+      if (!existing) return res.status(404).json({ message: "Withdrawal not found" });
+      // Return held funds unless the withdrawal was already paid out or refunded
+      if (["pending", "approved"].includes(existing.status)) {
+        await refundWithdrawalHold(existing);
+      }
       const deleted = await storage.deleteWithdrawal(req.params.id);
       if (!deleted) return res.status(404).json({ message: "Withdrawal not found" });
       return res.json({ message: "Withdrawal deleted" });

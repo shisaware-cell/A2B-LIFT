@@ -63,6 +63,15 @@ export default function ClientWalletScreen() {
   const [showAddCard, setShowAddCard] = useState(false);
   const [addCardLoading, setAddCardLoading] = useState(false);
 
+  // Withdrawal modal state
+  const [showWithdraw, setShowWithdraw] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawBank, setWithdrawBank] = useState("");
+  const [withdrawAccountNumber, setWithdrawAccountNumber] = useState("");
+  const [withdrawAccountHolder, setWithdrawAccountHolder] = useState("");
+  const [withdrawLoading, setWithdrawLoading] = useState(false);
+  const [myWithdrawals, setMyWithdrawals] = useState<any[]>([]);
+
   // In-app Paystack popup state
   const [paystackVerifying, setPaystackVerifying] = useState(false);
   const paystackRef = useRef<string | null>(null);
@@ -82,6 +91,10 @@ export default function ClientWalletScreen() {
       ]);
       if (cardsRes) setCards(await cardsRes.json());
       if (txRes) setTransactions(await txRes.json());
+      apiRequest("GET", "/api/withdrawals/my")
+        .then((r) => r.json())
+        .then((list) => setMyWithdrawals(Array.isArray(list) ? list : []))
+        .catch(() => {});
     } catch (e: any) {
       const msg = e?.message || "";
       if (msg.startsWith("401")) {
@@ -286,6 +299,34 @@ export default function ClientWalletScreen() {
 
   const balance = user?.walletBalance || 0;
 
+  async function handleWithdrawRequest() {
+    const amount = parseFloat(withdrawAmount);
+    if (isNaN(amount) || amount < 50) { Alert.alert("Minimum withdrawal is R50"); return; }
+    if (amount > balance) { Alert.alert("Not enough balance", `You have R ${balance.toFixed(2)} available.`); return; }
+    if (!withdrawBank.trim()) { Alert.alert("Please enter your bank name"); return; }
+    if (withdrawAccountNumber.trim().length < 6) { Alert.alert("Please enter a valid account number"); return; }
+    if (!withdrawAccountHolder.trim()) { Alert.alert("Please enter the account holder name"); return; }
+    setWithdrawLoading(true);
+    try {
+      const res = await apiRequest("POST", "/api/withdrawals", {
+        amount,
+        bankName: withdrawBank.trim(),
+        accountNumber: withdrawAccountNumber.trim(),
+        accountHolder: withdrawAccountHolder.trim(),
+      });
+      const data = await res.json();
+      setShowWithdraw(false);
+      setWithdrawAmount("");
+      await refreshUser();
+      await loadData();
+      Alert.alert("✅ Withdrawal Requested", data.message || "Your request was sent to the A2B admin team for approval. Once approved, you will be paid via EFT.");
+    } catch (e: any) {
+      Alert.alert("Withdrawal Failed", (e?.message || "Please try again.").replace(/^\d+:\s*/, ""));
+    } finally {
+      setWithdrawLoading(false);
+    }
+  }
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + (Platform.OS === "web" ? 67 : 0) }]}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}>
@@ -295,14 +336,52 @@ export default function ClientWalletScreen() {
           <Text style={styles.balanceLabel}>Wallet Balance</Text>
           <Text style={styles.balanceAmount}>R {balance.toFixed(2)}</Text>
           <Text style={styles.balanceSub}>Available for rides</Text>
-          <Pressable
-            style={({ pressed }) => [styles.topupBtn, pressed && { opacity: 0.85 }]}
-            onPress={() => setShowTopup(true)}
-          >
-            <Ionicons name="add" size={16} color={Colors.primary} />
-            <Text style={styles.topupBtnText}>Add Money</Text>
-          </Pressable>
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <Pressable
+              style={({ pressed }) => [styles.topupBtn, pressed && { opacity: 0.85 }]}
+              onPress={() => setShowTopup(true)}
+            >
+              <Ionicons name="add" size={16} color={Colors.primary} />
+              <Text style={styles.topupBtnText}>Add Money</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.topupBtn, { backgroundColor: "transparent", borderWidth: 1, borderColor: "rgba(255,255,255,0.35)" }, pressed && { opacity: 0.85 }]}
+              onPress={() => {
+                if (balance < 50) { Alert.alert("Not enough balance", "You need at least R50 in your wallet to request a withdrawal."); return; }
+                setWithdrawAccountHolder((prev) => prev || user?.name || "");
+                setShowWithdraw(true);
+              }}
+            >
+              <Ionicons name="arrow-down" size={16} color="#fff" />
+              <Text style={[styles.topupBtnText, { color: "#fff" }]}>Withdraw</Text>
+            </Pressable>
+          </View>
         </View>
+
+        {myWithdrawals.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Withdrawal Requests</Text>
+            </View>
+            {myWithdrawals.slice(0, 5).map((w) => (
+              <View key={w.id} style={styles.paymentRow}>
+                <View style={[styles.paymentIcon, { backgroundColor: w.status === "paid" ? Colors.success : w.status === "rejected" ? Colors.error : "#B8860B" }]}>
+                  <Ionicons name={w.status === "paid" ? "checkmark" : w.status === "rejected" ? "close" : "time-outline"} size={18} color="#fff" />
+                </View>
+                <View style={styles.paymentInfo}>
+                  <Text style={styles.paymentName}>R {Number(w.amount || 0).toFixed(2)} · {w.bankName || "Bank"}</Text>
+                  <Text style={styles.paymentSub}>
+                    {w.status === "pending" ? "Waiting for admin approval"
+                      : w.status === "approved" ? "Approved — EFT being processed"
+                      : w.status === "paid" ? "Paid via EFT"
+                      : w.status === "rejected" ? "Declined — funds returned"
+                      : w.status}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
 
         <Pressable style={styles.rewardsCard} onPress={() => router.push("/client/referrals") as any}>
           <View style={styles.rewardsInfo}>
@@ -474,6 +553,78 @@ export default function ClientWalletScreen() {
               {topupLoading
                 ? <ActivityIndicator color={Colors.primary} />
                 : <Text style={styles.payBtnText}>Pay R{topupAmount} with Card</Text>
+              }
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* ── Withdraw Modal ── */}
+      <Modal visible={showWithdraw} transparent animationType="slide" onRequestClose={() => setShowWithdraw(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowWithdraw(false)}>
+          <View
+            style={[styles.modalSheet, { paddingBottom: insets.bottom + 24 }]}
+            onStartShouldSetResponder={() => true}
+          >
+            <View style={styles.sheetHandle} />
+            <Text style={styles.modalTitle}>Withdraw Funds</Text>
+            <Text style={styles.modalSub}>
+              Your request is reviewed by the A2B admin team. Once approved, payment is made via EFT to your bank account.
+            </Text>
+
+            <View style={styles.customAmountWrap}>
+              <Text style={styles.randSign}>R</Text>
+              <TextInput
+                style={styles.customAmountInput}
+                value={withdrawAmount}
+                onChangeText={setWithdrawAmount}
+                keyboardType="numeric"
+                placeholder={`Amount (max R ${balance.toFixed(0)})`}
+                placeholderTextColor={Colors.textMuted}
+              />
+            </View>
+            <View style={[styles.customAmountWrap, { marginTop: 10 }]}>
+              <TextInput
+                style={styles.customAmountInput}
+                value={withdrawBank}
+                onChangeText={setWithdrawBank}
+                placeholder="Bank name (e.g. Capitec)"
+                placeholderTextColor={Colors.textMuted}
+              />
+            </View>
+            <View style={[styles.customAmountWrap, { marginTop: 10 }]}>
+              <TextInput
+                style={styles.customAmountInput}
+                value={withdrawAccountNumber}
+                onChangeText={setWithdrawAccountNumber}
+                keyboardType="numeric"
+                placeholder="Account number"
+                placeholderTextColor={Colors.textMuted}
+              />
+            </View>
+            <View style={[styles.customAmountWrap, { marginTop: 10 }]}>
+              <TextInput
+                style={styles.customAmountInput}
+                value={withdrawAccountHolder}
+                onChangeText={setWithdrawAccountHolder}
+                placeholder="Account holder name"
+                placeholderTextColor={Colors.textMuted}
+              />
+            </View>
+
+            <View style={styles.paystackNote}>
+              <Ionicons name="time-outline" size={14} color={Colors.textSecondary} />
+              <Text style={styles.paystackNoteText}>The amount is reserved from your wallet while the request is reviewed</Text>
+            </View>
+
+            <Pressable
+              style={[styles.payBtn, withdrawLoading && { opacity: 0.7 }]}
+              onPress={handleWithdrawRequest}
+              disabled={withdrawLoading}
+            >
+              {withdrawLoading
+                ? <ActivityIndicator color={Colors.primary} />
+                : <Text style={styles.payBtnText}>Request Withdrawal</Text>
               }
             </Pressable>
           </View>

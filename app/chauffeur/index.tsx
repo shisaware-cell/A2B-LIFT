@@ -755,18 +755,31 @@ export default function ChauffeurDashboard() {
     return () => subscription.remove();
   }, [user?.id]);
 
+  const locationSeededRef = useRef(false);
   useEffect(() => {
-    if (!chauffeur || myLocation) return;
+    if (!chauffeur || myLocation || locationSeededRef.current) return;
+    locationSeededRef.current = true;
 
     let cancelled = false;
 
     async function seedInitialLocation() {
+      // Instantly centre the map on the driver's last known position (their
+      // city) with a pin, instead of a blank Johannesburg default. Live GPS
+      // replaces this as soon as a fix arrives.
+      const lastKnown = Number.isFinite(Number(chauffeur?.lat)) && Number.isFinite(Number(chauffeur?.lng)) && Number(chauffeur?.lat) !== 0
+        ? { lat: Number(chauffeur.lat), lng: Number(chauffeur.lng) }
+        : null;
+      if (lastKnown && !cancelled) {
+        setMyLocation(lastKnown);
+      }
+      const fallback = lastKnown || JHB_FALLBACK;
+
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (cancelled) return;
 
         if (status !== "granted") {
-          setMyLocation(JHB_FALLBACK);
+          setMyLocation(fallback);
           return;
         }
 
@@ -777,12 +790,12 @@ export default function ChauffeurDashboard() {
           }
         } catch {
           if (!cancelled) {
-            setMyLocation(JHB_FALLBACK);
+            setMyLocation(fallback);
           }
         }
       } catch {
         if (!cancelled) {
-          setMyLocation(JHB_FALLBACK);
+          setMyLocation(fallback);
         }
       }
     }
@@ -792,7 +805,7 @@ export default function ChauffeurDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [chauffeur, myLocation]);
+  }, [chauffeur?.id]);
 
   // ─── Poll approval status ─────────────────────────────────────────────────
   useEffect(() => {

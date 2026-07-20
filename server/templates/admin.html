@@ -463,7 +463,7 @@ tbody tr:hover { background:#fafaf8; }
     <!-- WITHDRAWALS -->
     <div class="view" id="view-withdrawals">
       <div class="sec-head">
-        <div class="sec-title">Driver Withdrawal Requests</div>
+        <div class="sec-title">Withdrawal Requests (Drivers &amp; Riders)</div>
         <div class="filter-group">
           <button class="ftab active" onclick="fWd('all',this)">All</button>
           <button class="ftab" onclick="fWd('pending',this)">Pending</button>
@@ -2249,24 +2249,68 @@ function fWd(f, el) {
 function renderFilteredWd() {
   const list = wdFilter === 'all' ? allWd : allWd.filter(w => w.status === wdFilter);
   const w = document.getElementById('wd-table');
-  if (!list.length) { w.innerHTML = emptyState('🏦', 'No withdrawal requests', 'Driver withdrawal requests appear here'); return; }
+  if (!list.length) { w.innerHTML = emptyState('🏦', 'No withdrawal requests', 'Driver and rider withdrawal requests appear here'); return; }
   w.innerHTML = `<table>
-    <thead><tr><th>Driver</th><th>Bank</th><th>Account</th><th>Amount</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Requester</th><th>Bank</th><th>Account</th><th>Amount</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
     <tbody>${list.map(wd => `<tr>
-      <td style="font-size:13px;font-weight:600">${wd.accountHolder || ('ID …' + (wd.chauffeurId||'').slice(-6))}</td>
+      <td style="font-size:13px;font-weight:600">${wd.requesterName || wd.accountHolder || ('ID …' + (wd.chauffeurId||wd.userId||'').slice(-6))}
+        <div style="font-size:11px;color:var(--muted);font-weight:400;text-transform:capitalize">${wd.requesterRole || (wd.chauffeurId ? 'driver' : 'client')}${wd.accountHolder ? ' · ' + wd.accountHolder : ''}</div></td>
       <td>${wd.bankName || '—'}</td>
       <td style="font-family:var(--mono);font-size:12px">${wd.accountNumber ? '•••• ' + String(wd.accountNumber).slice(-4) : '—'}</td>
       <td style="font-weight:700;color:var(--green)">R ${Number(wd.amount||0).toFixed(2)}</td>
       <td><span class="badge b-${wd.status}">${wd.status}</span></td>
       <td style="font-size:12px">${fmt(wd.processedAt || wd.createdAt)}</td>
       <td><div class="action-cell">
-        ${wd.status === 'pending' ? `<button class="btn-sm btn-approve" onclick="actWd('${wd.id}','approved')">✓ Approve</button><button class="btn-sm btn-reject" onclick="actWd('${wd.id}','rejected')">✕ Reject</button>` : ''}
-        ${wd.status === 'approved' ? `<button class="btn-sm btn-paid" onclick="actWd('${wd.id}','paid')">Mark Paid</button>` : ''}
+        ${wd.status === 'pending' ? `<button class="btn-sm btn-approve" onclick="actWd('${wd.id}','approved')">✓ Approve</button><button class="btn-sm btn-reject" onclick="actWd('${wd.id}','rejected')">✕ Decline</button>` : ''}
+        ${wd.status === 'approved' ? `<button class="btn-sm btn-paid" onclick="actWd('${wd.id}','paid')">Mark Paid</button><button class="btn-sm btn-reject" onclick="actWd('${wd.id}','rejected')">✕ Decline</button>` : ''}
         ${wd.status === 'paid' || wd.status === 'rejected' ? '<span style="font-size:12px;color:var(--muted-light)">Done</span>' : ''}
+        <button class="btn-sm btn-outline" onclick="event.stopPropagation();openWdEdit('${wd.id}')">✏️ Edit</button>
         <button class="btn-sm btn-delete" onclick="event.stopPropagation();adminDelete('withdrawal','${wd.id}','R${Number(wd.amount||0).toFixed(2)} withdrawal')">🗑</button>
       </div></td>
     </tr>`).join('')}
     </tbody></table>`;
+}
+
+function openWdEdit(id) {
+  const wd = allWd.find(x => x.id === id);
+  if (!wd) return;
+  document.getElementById('m-title').textContent = `Edit withdrawal — ${wd.requesterName || wd.accountHolder || ''}`;
+  document.getElementById('m-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Amount (R)</label>
+        <input id="wd-edit-amount" class="f-input" type="number" min="1" step="0.01" value="${Number(wd.amount||0).toFixed(2)}" /></div>
+      <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Bank Name</label>
+        <input id="wd-edit-bank" class="f-input" value="${(wd.bankName||'').replace(/"/g,'&quot;')}" /></div>
+      <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Account Number</label>
+        <input id="wd-edit-account" class="f-input" value="${(wd.accountNumber||'').replace(/"/g,'&quot;')}" /></div>
+      <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Account Holder</label>
+        <input id="wd-edit-holder" class="f-input" value="${(wd.accountHolder||'').replace(/"/g,'&quot;')}" /></div>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin-top:12px">Changing the amount automatically adjusts the funds held from the ${wd.source === 'wallet' ? "user's wallet" : "driver's earnings"}. Payment itself is a manual EFT.</p>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-green" onclick="saveWdEdit('${wd.id}')">💾 Save Changes</button>`;
+  openModal();
+}
+
+async function saveWdEdit(id) {
+  try {
+    const body = {
+      amount: Number(document.getElementById('wd-edit-amount').value),
+      bankName: document.getElementById('wd-edit-bank').value.trim(),
+      accountNumber: document.getElementById('wd-edit-account').value.trim(),
+      accountHolder: document.getElementById('wd-edit-holder').value.trim(),
+    };
+    const res = await apiFetch('/api/withdrawals/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || res.status);
+    toast('💾 Withdrawal updated', 'ok');
+    closeModal();
+    loadWd();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
 }
 
 async function actWd(id, status) {

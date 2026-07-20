@@ -431,9 +431,9 @@ export const withdrawals = pgTable("withdrawals", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  chauffeurId: varchar("chauffeur_id")
-    .notNull()
-    .references(() => chauffeurs.id),
+  chauffeurId: varchar("chauffeur_id").references(() => chauffeurs.id),
+  userId: varchar("user_id").references(() => users.id),
+  source: text("source"), // "driver_earnings" | "wallet"
   amount: real("amount").notNull(),
   status: text("status").notNull().default("pending"),
   bankName: text("bank_name"),
