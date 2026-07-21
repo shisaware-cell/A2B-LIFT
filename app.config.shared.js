@@ -25,8 +25,8 @@ const defaultPamolProjectId = "f282a582-7512-48d6-b563-13aa571d9115";
 const defaultPascalProjectId = "eb3b8747-40b2-4aad-b118-e64339bfeea0";
 const defaultClientProjectId = "9932543b-f023-4dec-8213-5d0fe99ad749";
 const defaultClientSlug = "a2b-lift-client-eas-mFdHJz";
-const appVersion = process.env.EXPO_APP_VERSION || "1.0.14";
-const currentAndroidVersionCode = Number(process.env.EXPO_ANDROID_VERSION_CODE || 123);
+const appVersion = process.env.EXPO_APP_VERSION || "1.0.15";
+const currentAndroidVersionCode = Number(process.env.EXPO_ANDROID_VERSION_CODE || 124);
 
 function getIosBuildNumber(variant, fallback) {
   const variantKey = variant === "client" ? "EXPO_CLIENT_IOS_BUILD_NUMBER" : "EXPO_DRIVER_IOS_BUILD_NUMBER";
@@ -62,7 +62,7 @@ function getVariantConfig(variant) {
       iosBundleIdentifier: "com.a2blift.client",
       androidPackage: "com.a2blift.client",
       androidVersionCode: currentAndroidVersionCode,
-      iosBuildNumber: getIosBuildNumber("client", "23"),
+      iosBuildNumber: getIosBuildNumber("client", "24"),
       runtimeVersion: "1.0.0-client",
       notificationChannel: "client-alerts",
     };

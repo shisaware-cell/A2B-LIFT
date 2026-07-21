@@ -27,10 +27,10 @@ Defaults live in **`app.config.shared.js`** and can be overridden per-build with
 
 | Number | Default | Env override |
 |---|---|---|
-| Marketing version | `1.0.14` | `EXPO_APP_VERSION` |
-| Android versionCode (both apps) | `123` | `EXPO_ANDROID_VERSION_CODE` |
+| Marketing version | `1.0.15` | `EXPO_APP_VERSION` |
+| Android versionCode (both apps) | `124` | `EXPO_ANDROID_VERSION_CODE` |
 | Driver iOS buildNumber | `23` | `EXPO_DRIVER_IOS_BUILD_NUMBER` |
-| Client iOS buildNumber | `23` | `EXPO_CLIENT_IOS_BUILD_NUMBER` |
+| Client iOS buildNumber | `24` | `EXPO_CLIENT_IOS_BUILD_NUMBER` |
 
 Rules: Google Play requires a versionCode higher than the last upload for that app;
 Apple rejects a build number already uploaded for that app + version. Bump by 1 each time,
