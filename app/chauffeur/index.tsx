@@ -1701,9 +1701,6 @@ export default function ChauffeurDashboard() {
 
   if (!chauffeur) return null;
   const activeVehicle = driverVehicles.find((vehicle) => vehicle.id === chauffeur.activeVehicleId);
-  const canManageFleetDrivers = driverVehicles.some((vehicle) => (
-    vehicle.ownerOperatorProfileId === operatorProfile?.id && vehicle.status === "approved"
-  ));
 
   // ─── Pending approval ─────────────────────────────────────────────────────
   if (!chauffeur.isApproved) {
@@ -1741,7 +1738,7 @@ export default function ChauffeurDashboard() {
   const menuItems = [
     { icon: isOnline ? "stop-circle-outline" : "play-circle-outline", label: isOnline ? "Go Offline" : "Go Online", onPress: toggleOnline, color: isOnline ? "#ff6b6b" : Colors.success },
     { icon: "car-outline", label: "Vehicles", onPress: () => { router.push("/chauffeur/vehicles" as never); closeMenu(); }, color: Colors.white },
-    ...(canManageFleetDrivers ? [{ icon: "people-outline", label: "Drivers", onPress: () => { router.push("/chauffeur/fleet" as never); closeMenu(); }, color: Colors.white }] : []),
+    { icon: "people-outline", label: "Fleet & Drivers", onPress: () => { router.push("/chauffeur/fleet" as never); closeMenu(); }, color: Colors.white },
     { icon: "car-sport-outline", label: "My Rides", onPress: () => { router.push("/chauffeur/rides"); closeMenu(); }, color: Colors.white },
     { icon: "map-outline", label: "Long Distance", onPress: () => { router.push("/chauffeur/long-distance" as never); closeMenu(); }, color: Colors.white },
     { icon: "calendar-outline", label: "Daily Lift Club", onPress: () => { router.push("/chauffeur/lift-club" as never); closeMenu(); }, color: "#F7C948" },

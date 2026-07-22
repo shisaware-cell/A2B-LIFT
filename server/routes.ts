@@ -28,6 +28,7 @@ import { validateAdminPassword } from "./admin-password-policy";
 import { authOptional, requireAuth, requireRole, type AuthedRequest } from "./auth-middleware";
 import { signAccessToken, type UserRole } from "./auth";
 import { externalApiService } from "./external-api-service";
+import { sendEmail, sendSms, renderBrandedEmail, emailEnabled, smsEnabled } from "./notification-service";
 
 const RIDE_MATCH_RADIUS_KM = 25;
 const CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
@@ -4085,6 +4086,177 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       return res.json(updated);
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message });
+    }
+  });
+
+  // ── Fleet driver invites: an approved operator (driver or partner) invites an
+  //    approved A2B driver to join their fleet. Email + SMS alerts are sent when
+  //    a provider is configured (see notification-service.ts); otherwise the invite
+  //    is saved with emailStatus "pending_configuration" and the driver still gets
+  //    an in-app notification and can accept/decline in the app or website. ──
+  async function serializeFleetInvite(invite: any) {
+    const [driverProfile, managerProfile] = await Promise.all([
+      storage.getOperatorProfile(invite.driverOperatorProfileId).catch(() => undefined),
+      storage.getOperatorProfile(invite.invitedByOperatorProfileId).catch(() => undefined),
+    ]);
+    return {
+      ...invite,
+      driver: driverProfile ? await serializeOperatorProfile(driverProfile) : null,
+      manager: managerProfile ? await serializeOperatorProfile(managerProfile) : null,
+    };
+  }
+
+  app.get("/api/fleet/invites", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      const [sent, received] = await Promise.all([
+        storage.getFleetDriverInvites({ invitedByOperatorProfileId: profile.id }),
+        storage.getFleetDriverInvites({ driverOperatorProfileId: profile.id }),
+      ]);
+      const [sentInvites, receivedInvites] = await Promise.all([
+        Promise.all(sent.map(serializeFleetInvite)),
+        Promise.all(received.map(serializeFleetInvite)),
+      ]);
+      return res.json({
+        sentInvites,
+        receivedInvites,
+        providers: { email: emailEnabled(), sms: smsEnabled() },
+      });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/fleet/invites", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      if (profile.status !== "approved") {
+        return res.status(403).json({ message: "Your operator profile must be approved first." });
+      }
+      const driverOperatorProfileId = requireStringField(req.body, "driverOperatorProfileId");
+      const message = typeof req.body?.message === "string" ? req.body.message.trim().slice(0, 500) : "";
+
+      if (driverOperatorProfileId === profile.id) {
+        return res.status(400).json({ message: "You cannot invite yourself." });
+      }
+      const driverProfile = await storage.getOperatorProfile(driverOperatorProfileId);
+      if (!driverProfile || driverProfile.type !== "driver" || driverProfile.status !== "approved") {
+        return res.status(400).json({ message: "Only approved A2B drivers can be invited." });
+      }
+      const existing = await storage.getActiveFleetDriverInvite(driverProfile.id, profile.id);
+      if (existing) {
+        return res.status(409).json({ message: "You already have a pending invite for this driver." });
+      }
+
+      let invite = await storage.createFleetDriverInvite({
+        driverOperatorProfileId: driverProfile.id,
+        invitedByOperatorProfileId: profile.id,
+        invitedByUserId: profile.userId,
+        status: "pending",
+        emailStatus: "queued",
+        message: message || null,
+      });
+
+      // Gather recipient + inviter details for the outbound alerts.
+      const [driverUser, inviterUser, inviterPartner] = await Promise.all([
+        storage.getUser(driverProfile.userId).catch(() => undefined),
+        storage.getUser(profile.userId).catch(() => undefined),
+        profile.type === "partner" ? storage.getPartnerProfileByOperatorId(profile.id).catch(() => undefined) : Promise.resolve(null),
+      ]);
+      const driverChauffeur = await storage.getChauffeurByUserId(driverProfile.userId).catch(() => undefined);
+      const inviterName = inviterPartner?.companyName || inviterUser?.name || "An A2B LIFT operator";
+      const driverEmail = driverUser?.username && driverUser.username.includes("@") ? driverUser.username : "";
+      const driverPhone = driverUser?.phone || (driverChauffeur as any)?.phone || "";
+      const driverName = driverUser?.name || "there";
+
+      const emailBody = `<p>Hi ${driverName},</p>
+        <p><strong>${inviterName}</strong> wants you to become one of their drivers on A2B LIFT and drive one of their vehicles.</p>
+        ${message ? `<p style="padding:12px 14px;background:#f4f4f6;border-radius:10px;">"${message}"</p>` : ""}
+        <p>Open the A2B LIFT driver app and go to <strong>Fleet → Invitations</strong> to accept or decline.</p>`;
+      const smsText = `A2B LIFT: ${inviterName} wants you to drive their vehicle. Open the A2B LIFT app → Fleet → Invitations to accept.`;
+
+      // Fire email + SMS (both no-op gracefully until providers are configured).
+      const [emailResult, smsResult] = await Promise.all([
+        sendEmail({
+          to: driverEmail,
+          subject: `${inviterName} invited you to their A2B LIFT fleet`,
+          html: renderBrandedEmail({ heading: "Fleet invitation", bodyHtml: emailBody }),
+        }),
+        sendSms({ to: driverPhone, message: smsText }),
+      ]);
+
+      // Persist the delivery outcome (email is the primary channel the UI reflects).
+      const emailStatus = emailResult.status === "sent"
+        ? "sent"
+        : emailResult.status === "pending_configuration"
+          ? "pending_configuration"
+          : emailResult.status === "skipped"
+            ? "skipped"
+            : "failed";
+      const emailError = emailResult.status === "sent" || emailResult.status === "skipped"
+        ? (smsResult.status === "sent" ? null : smsResult.error || null)
+        : emailResult.error || null;
+      invite = (await storage.updateFleetDriverInvite(invite.id, {
+        emailStatus,
+        emailError,
+        resendId: emailResult.id || null,
+        sentAt: emailResult.status === "sent" ? new Date() : null,
+      })) || invite;
+
+      // Always give the driver an in-app + push notification.
+      await notifyUserEvent({
+        userId: driverProfile.userId,
+        type: "fleet_invite",
+        title: "Fleet invitation",
+        body: `${inviterName} wants you to become one of their drivers. Open Fleet → Invitations to respond.`,
+        data: { inviteId: invite.id, invitedByOperatorProfileId: profile.id },
+      });
+
+      return res.status(201).json({ invite: await serializeFleetInvite(invite) });
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message });
+    }
+  });
+
+  app.put("/api/fleet/invites/:id/respond", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      const invite = await storage.getFleetDriverInvite(req.params.id);
+      if (!invite) return res.status(404).json({ message: "Invite not found" });
+      if (invite.driverOperatorProfileId !== profile.id) {
+        return res.status(403).json({ message: "This invite is not addressed to you." });
+      }
+      if (invite.status !== "pending") {
+        return res.status(400).json({ message: `This invite was already ${invite.status}.` });
+      }
+      const status = String(req.body?.status || "");
+      if (!["accepted", "declined"].includes(status)) {
+        return res.status(400).json({ message: "Status must be accepted or declined." });
+      }
+      const updated = await storage.updateFleetDriverInvite(invite.id, {
+        status,
+        acceptedAt: status === "accepted" ? new Date() : null,
+        declinedAt: status === "declined" ? new Date() : null,
+      });
+
+      const driverUser = await storage.getUser(profile.userId).catch(() => undefined);
+      const driverName = driverUser?.name || "A driver";
+      await notifyUserEvent({
+        userId: invite.invitedByUserId,
+        type: "fleet_invite_response",
+        title: status === "accepted" ? "Fleet invite accepted" : "Fleet invite declined",
+        body: status === "accepted"
+          ? `${driverName} accepted your fleet invite. You can now assign them to one of your vehicles.`
+          : `${driverName} declined your fleet invite.`,
+        data: { inviteId: invite.id, driverOperatorProfileId: profile.id, status },
+      });
+
+      return res.json({ invite: await serializeFleetInvite(updated) });
     } catch (error: any) {
       return res.status(400).json({ message: error.message });
     }

@@ -365,7 +365,7 @@ tbody tr[style*="cursor:pointer"]:hover { background:#f0f0ee; }
     <!-- WITHDRAWALS -->
     <div class="view" id="view-withdrawals">
       <div class="sec-head">
-        <div class="sec-title">Driver Withdrawal Requests</div>
+        <div class="sec-title">Withdrawal Requests <span style="font-weight:400;font-size:13px;color:var(--grey-400,#9ca3af)">· riders &amp; drivers</span></div>
         <div class="filter-group">
           <button class="ftab active" onclick="fWd('all',this)">All</button>
           <button class="ftab" onclick="fWd('pending',this)">Pending</button>
@@ -975,29 +975,44 @@ function fWd(f, el) {
   el.classList.add('active'); wdFilter = f; renderFilteredWd();
 }
 
+function wdRole(wd) {
+  // Prefer the enriched role from the API; fall back to chauffeurId/source heuristics.
+  return wd.requesterRole || (wd.chauffeurId ? 'driver' : (wd.source === 'wallet' ? 'rider' : 'rider'));
+}
+
 function renderFilteredWd() {
   const list = wdFilter === 'all' ? allWd : allWd.filter(w => w.status === wdFilter);
   const w = document.getElementById('wd-table');
-  if (!list.length) { w.innerHTML = emptyState('🏦', 'No withdrawal requests', 'Driver withdrawal requests appear here'); return; }
+  if (!list.length) { w.innerHTML = emptyState('🏦', 'No withdrawal requests', 'Rider and driver withdrawal requests appear here'); return; }
   w.innerHTML = `<table>
-    <thead><tr><th>Driver</th><th>Bank</th><th>Account</th><th>Amount</th><th>Status</th><th>Date</th><th></th></tr></thead>
-    <tbody>${list.map(wd => `<tr style="cursor:pointer" onclick="wdDetail('${wd.id}')">
-      <td style="font-size:13px;font-weight:600">${wd.accountHolder || ('ID …' + (wd.chauffeurId||'').slice(-6))}</td>
+    <thead><tr><th>Requester</th><th>Type</th><th>Bank</th><th>Account</th><th>Amount</th><th>Status</th><th>Date</th><th></th></tr></thead>
+    <tbody>${list.map(wd => {
+      const role = wdRole(wd);
+      const name = wd.requesterName || wd.accountHolder || ('ID …' + (wd.chauffeurId||wd.userId||'').slice(-6));
+      const email = wd.requesterEmail && wd.requesterEmail !== '—' ? wd.requesterEmail : '';
+      const roleColor = role === 'driver' ? 'var(--blue,#2563eb)' : 'var(--purple,#7c3aed)';
+      return `<tr style="cursor:pointer" onclick="wdDetail('${wd.id}')">
+      <td style="font-size:13px;font-weight:600">${name}${email ? `<div style="font-weight:400;font-size:11px;color:var(--grey-400,#9ca3af)">${email}</div>` : ''}</td>
+      <td><span class="badge" style="text-transform:capitalize;background:${roleColor};color:#fff">${role}</span></td>
       <td>${wd.bankName || '—'}</td>
       <td style="font-family:var(--mono);font-size:12px">${wd.accountNumber ? '•••• ' + String(wd.accountNumber).slice(-4) : '—'}</td>
       <td style="font-weight:700;color:var(--green)">R ${Number(wd.amount||0).toFixed(2)}</td>
       <td><span class="badge b-${wd.status}">${wd.status}</span></td>
       <td style="font-size:12px">${fmt(wd.processedAt || wd.createdAt)}</td>
       <td><button class="btn-sm btn-delete" onclick="event.stopPropagation();confirmDelete('withdrawal','${wd.id}','R${Number(wd.amount||0).toFixed(2)} withdrawal')">🗑</button></td>
-    </tr>`).join('')}
+    </tr>`; }).join('')}
     </tbody></table>`;
 }
 
 function wdDetail(id) {
   const wd = allWd.find(x => x.id === id); if (!wd) return;
+  const role = wdRole(wd);
   document.getElementById('m-title').textContent = 'Withdrawal Request';
-  document.getElementById('m-sub').textContent = wd.accountHolder || ('Chauffeur …' + (wd.chauffeurId||'').slice(-6));
+  document.getElementById('m-sub').textContent = `${wd.requesterName || wd.accountHolder || 'Requester'} · ${role}`;
   document.getElementById('m-body').innerHTML = `<div class="info-grid">
+    <div class="info-row"><div class="info-label">Requester</div><div class="info-val">${wd.requesterName || '—'}</div></div>
+    <div class="info-row"><div class="info-label">Type</div><div class="info-val" style="text-transform:capitalize">${role}${wd.source ? ` · ${wd.source}` : ''}</div></div>
+    <div class="info-row"><div class="info-label">Email</div><div class="info-val">${wd.requesterEmail && wd.requesterEmail !== '—' ? wd.requesterEmail : '—'}</div></div>
     <div class="info-row"><div class="info-label">Withdrawal ID</div><div class="info-val" style="font-family:var(--mono);font-size:12px">${wd.id}</div></div>
     <div class="info-row"><div class="info-label">Status</div><div class="info-val"><span class="badge b-${wd.status}">${wd.status}</span></div></div>
     <div class="info-row"><div class="info-label">Amount</div><div class="info-val" style="font-weight:700;color:var(--green);font-size:20px">R ${Number(wd.amount||0).toFixed(2)}</div></div>

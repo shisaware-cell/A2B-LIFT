@@ -57,7 +57,9 @@ export default function FleetScreen() {
   const [sendingInviteId, setSendingInviteId] = useState<string | null>(null);
   const [respondingInviteId, setRespondingInviteId] = useState<string | null>(null);
 
-  const isFleetManager = profile?.type === "partner" && profile?.status === "approved";
+  // Any approved operator — fleet partner OR an approved driver adding drivers to
+  // their own additional car(s) — can search, invite, and assign drivers.
+  const isFleetManager = profile?.status === "approved";
   const inviteByDriverId = useMemo(() => {
     const map = new Map<string, FleetInvite>();
     sentInvites.forEach((invite) => {
@@ -261,7 +263,7 @@ export default function FleetScreen() {
           ))}
         </View>
 
-        {isFleetManager ? (
+        {isFleetManager && (
           <>
             <View style={styles.panel}>
               <View style={styles.panelHeader}>
@@ -334,13 +336,13 @@ export default function FleetScreen() {
               saving={saving}
             />
           </>
-        ) : (
+        )}
+
+        {receivedInvites.length > 0 && (
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Fleet invitations for you</Text>
-            <Text style={styles.helperText}>Approved fleet partners can invite you to drive for their team. Accept an invite when you are ready to join.</Text>
-            {receivedInvites.length === 0 ? (
-              <Text style={styles.emptyText}>No fleet invites yet.</Text>
-            ) : receivedInvites.map((invite) => (
+            <Text style={styles.helperText}>Another operator wants you to drive one of their vehicles. Accept an invite when you are ready to join their fleet.</Text>
+            {receivedInvites.map((invite) => (
               <View key={invite.id} style={styles.inviteCard}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.assignmentTitle}>{invite.manager?.partnerProfile?.companyName || invite.manager?.user?.name || "Fleet partner"}</Text>

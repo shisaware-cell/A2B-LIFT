@@ -40,6 +40,7 @@ import {
   type PartnerProfile,
   type Vehicle,
   type VehicleAssignment,
+  type FleetDriverInvite,
   type LiftClubRoute,
   type LiftClubBooking,
   type Document,
@@ -128,6 +129,17 @@ export interface IStorage {
   }): Promise<VehicleAssignment[]>;
   createVehicleAssignment(data: any): Promise<VehicleAssignment>;
   updateVehicleAssignment(id: string, data: Partial<VehicleAssignment>): Promise<VehicleAssignment | undefined>;
+
+  // Fleet driver invites
+  getFleetDriverInvite(id: string): Promise<FleetDriverInvite | undefined>;
+  getFleetDriverInvites(filters?: {
+    driverOperatorProfileId?: string;
+    invitedByOperatorProfileId?: string;
+    status?: string;
+  }): Promise<FleetDriverInvite[]>;
+  getActiveFleetDriverInvite(driverOperatorProfileId: string, invitedByOperatorProfileId: string): Promise<FleetDriverInvite | undefined>;
+  createFleetDriverInvite(data: any): Promise<FleetDriverInvite>;
+  updateFleetDriverInvite(id: string, data: Partial<FleetDriverInvite>): Promise<FleetDriverInvite | undefined>;
 
   // Daily Lift Club
   searchLiftClubRoutes(filters?: { from?: string; to?: string }): Promise<any[]>;
@@ -610,6 +622,64 @@ export class DatabaseStorage implements IStorage {
       .where(eq(vehicleAssignments.id, id))
       .returning();
     return assignment;
+  }
+
+  async getFleetDriverInvite(id: string): Promise<FleetDriverInvite | undefined> {
+    const [invite] = await db.select().from(fleetDriverInvites).where(eq(fleetDriverInvites.id, id));
+    return invite;
+  }
+
+  async getFleetDriverInvites(filters: {
+    driverOperatorProfileId?: string;
+    invitedByOperatorProfileId?: string;
+    status?: string;
+  } = {}): Promise<FleetDriverInvite[]> {
+    const conditions = [
+      filters.driverOperatorProfileId ? eq(fleetDriverInvites.driverOperatorProfileId, filters.driverOperatorProfileId) : undefined,
+      filters.invitedByOperatorProfileId ? eq(fleetDriverInvites.invitedByOperatorProfileId, filters.invitedByOperatorProfileId) : undefined,
+      filters.status ? eq(fleetDriverInvites.status, filters.status) : undefined,
+    ].filter(Boolean) as any[];
+
+    if (conditions.length > 0) {
+      return db
+        .select()
+        .from(fleetDriverInvites)
+        .where(and(...conditions))
+        .orderBy(desc(fleetDriverInvites.createdAt));
+    }
+    return db.select().from(fleetDriverInvites).orderBy(desc(fleetDriverInvites.createdAt));
+  }
+
+  async getActiveFleetDriverInvite(
+    driverOperatorProfileId: string,
+    invitedByOperatorProfileId: string,
+  ): Promise<FleetDriverInvite | undefined> {
+    const [invite] = await db
+      .select()
+      .from(fleetDriverInvites)
+      .where(and(
+        eq(fleetDriverInvites.driverOperatorProfileId, driverOperatorProfileId),
+        eq(fleetDriverInvites.invitedByOperatorProfileId, invitedByOperatorProfileId),
+        eq(fleetDriverInvites.status, "pending"),
+      ));
+    return invite;
+  }
+
+  async createFleetDriverInvite(data: any): Promise<FleetDriverInvite> {
+    const [invite] = await db.insert(fleetDriverInvites).values(data).returning();
+    return invite;
+  }
+
+  async updateFleetDriverInvite(
+    id: string,
+    data: Partial<FleetDriverInvite>,
+  ): Promise<FleetDriverInvite | undefined> {
+    const [invite] = await db
+      .update(fleetDriverInvites)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(fleetDriverInvites.id, id))
+      .returning();
+    return invite;
   }
 
   private async enrichLiftClubRoute(route: LiftClubRoute): Promise<any | undefined> {

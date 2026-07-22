@@ -173,8 +173,8 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
         "expo-build-properties",
         {
           android: {
-            compileSdkVersion: 35,
-            targetSdkVersion: 35,
+            compileSdkVersion: 36,
+            targetSdkVersion: 36,
             minSdkVersion: 24,
             ndkVersion: "27.1.12297006",
             buildArchs: ["armeabi-v7a", "arm64-v8a", "x86", "x86_64"],

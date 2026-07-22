@@ -137,8 +137,7 @@
         <a href="rides.html">Rides</a>
         <a href="long-distance.html">Long Distance</a>
         <a href="earn.html">Earn</a>
-        <a href="safety.html">Safety</a>
-        <a href="blog.html">Blog</a>
+        <a href="dashboard.html#partner">Become a Partner</a>
       </nav>
       <div class="nav-actions">
         <a href="dashboard.html" class="btn btn-ghost btn-sm" id="navUser">My Account</a>
@@ -148,7 +147,10 @@
     </div>
   </header>
   <div class="mobile-nav" id="mobileNav">
-    <a href="rides.html">Rides</a><a href="long-distance.html">Long Distance</a><a href="earn.html">Earn</a><a href="safety.html">Safety</a><a href="blog.html">Blog</a>
+    <a href="rides.html">Rides</a>
+    <a href="long-distance.html">Long Distance</a>
+    <a href="earn.html">Earn</a>
+    <a href="dashboard.html#partner">Become a Partner</a>
     <div class="mobile-cta"><a href="dashboard.html" class="btn btn-ghost">My Account</a><button class="btn btn-primary" onclick="logout()">Log out</button></div>
   </div>
 
@@ -187,6 +189,9 @@
         </div>
         <div class="dash-nav-item" id="nav-partnerapply" style="display:none;" onclick="showPage('partnerapply')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/></svg>Become a partner
+        </div>
+        <div class="dash-nav-item" id="nav-fleet" style="display:none;" onclick="showPage('fleet'); loadFleet();">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Fleet &amp; Drivers
         </div>
         <div class="dash-nav-item" id="nav-applications" onclick="showPage('applications'); loadApplications();">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>My Applications
@@ -434,6 +439,44 @@
             </label>
           </div>
           <button class="btn btn-primary" id="partnerApplySubmitBtn" style="margin-top:20px;" onclick="submitPartnerApplication()">Submit partner application</button>
+        </div>
+      </div>
+
+      <!-- FLEET & DRIVERS -->
+      <div class="dash-page" id="page-fleet">
+        <h1 class="dash-page-title">Fleet &amp; Drivers</h1>
+        <p style="font-size:14px;color:var(--grey-500);line-height:1.7;margin:-6px 0 20px;max-width:640px;">
+          Add other approved A2B drivers to drive your additional cars. Search for a driver, send them an invite (they get an app notification, plus email/SMS once enabled), and once they accept, assign them to one of your approved vehicles.
+        </p>
+
+        <div class="driver-apply-card" style="margin-bottom:18px;">
+          <h3>Find an approved driver</h3>
+          <p>Search by name, phone or email. Only A2B-approved drivers appear here.</p>
+          <input type="text" id="fleetDriverSearch" placeholder="Search drivers…" oninput="fleetSearchDebounced()" style="margin-bottom:8px;" />
+          <textarea id="fleetInviteMessage" placeholder="Optional message to include with the invite" rows="2" style="margin-bottom:12px;"></textarea>
+          <div id="fleetSearchResults"><div class="empty-state"><p>Start typing to find drivers.</p></div></div>
+        </div>
+
+        <div class="driver-apply-card" style="margin-bottom:18px;">
+          <h3>Your vehicles</h3>
+          <p>Select the approved car you want an accepted driver to drive.</p>
+          <div id="fleetVehicles"><div class="empty-state"><p>Loading your vehicles…</p></div></div>
+        </div>
+
+        <div class="driver-apply-card" style="margin-bottom:18px;">
+          <h3>Invites you've sent</h3>
+          <div id="fleetSentInvites"><div class="empty-state"><p>No invites sent yet.</p></div></div>
+        </div>
+
+        <div class="driver-apply-card" id="fleetReceivedCard" style="margin-bottom:18px;display:none;">
+          <h3>Invitations for you</h3>
+          <p>Another operator wants you to drive one of their vehicles.</p>
+          <div id="fleetReceivedInvites"></div>
+        </div>
+
+        <div class="driver-apply-card">
+          <h3>Current assignments</h3>
+          <div id="fleetAssignments"><div class="empty-state"><p>No assignments yet.</p></div></div>
         </div>
       </div>
 
@@ -1264,6 +1307,217 @@
       await loadWallet();
       await loadLiftClubBookings();
       await loadLiftClubMembershipStatus();
+      await refreshFleetGate();
+      handleDashboardDeepLink();
+    }
+
+    // ── Fleet & Drivers ──────────────────────────────────────────────────────
+    const fleetState = { profile: null, selectedVehicleId: '', vehicles: [], searchTimer: null };
+
+    function fleetToken() { return localStorage.getItem('a2b_token'); }
+    async function fleetFetch(path, opts = {}) {
+      const res = await fetch(`${API}${path}`, {
+        ...opts,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${fleetToken()}`, ...(opts.headers || {}) },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || 'Request failed');
+      return data;
+    }
+
+    // Show the Fleet nav item to any approved operator (driver or partner).
+    async function refreshFleetGate() {
+      try {
+        const data = await fleetFetch('/api/operator-profile/me');
+        fleetState.profile = data.profile || null;
+        const approved = fleetState.profile && fleetState.profile.status === 'approved';
+        const nav = document.getElementById('nav-fleet');
+        if (nav) nav.style.display = approved ? 'flex' : 'none';
+      } catch (e) {
+        const nav = document.getElementById('nav-fleet');
+        if (nav) nav.style.display = 'none';
+      }
+    }
+
+    function handleDashboardDeepLink() {
+      const hash = (window.location.hash || '').replace('#', '').toLowerCase();
+      if (hash === 'partner' || hash === 'partnerapply') {
+        document.getElementById('nav-partnerapply').style.display = 'flex';
+        showPage('partnerapply');
+      } else if (hash === 'fleet') {
+        const nav = document.getElementById('nav-fleet');
+        if (nav && nav.style.display !== 'none') { showPage('fleet'); loadFleet(); }
+      }
+    }
+
+    async function loadFleet() {
+      try {
+        const [vehicleData, assignmentData, inviteData] = await Promise.all([
+          fleetFetch('/api/vehicles'),
+          fleetFetch('/api/fleet/assignments').catch(() => ({ assignments: [] })),
+          fleetFetch('/api/fleet/invites').catch(() => ({ sentInvites: [], receivedInvites: [] })),
+        ]);
+        const ownedApproved = (vehicleData.vehicles || []).filter(v =>
+          v.status === 'approved' && (!fleetState.profile?.id || v.ownerOperatorProfileId === fleetState.profile.id));
+        fleetState.vehicles = ownedApproved;
+        renderFleetVehicles(ownedApproved);
+        renderFleetAssignments(assignmentData.assignments || []);
+        renderFleetSentInvites(inviteData.sentInvites || []);
+        renderFleetReceivedInvites(inviteData.receivedInvites || []);
+      } catch (e) {
+        showNotification(e.message || 'Could not load fleet.', 'error');
+      }
+    }
+
+    function fleetSearchDebounced() {
+      clearTimeout(fleetState.searchTimer);
+      fleetState.searchTimer = setTimeout(fleetSearch, 300);
+    }
+
+    async function fleetSearch() {
+      const q = document.getElementById('fleetDriverSearch').value.trim();
+      const box = document.getElementById('fleetSearchResults');
+      try {
+        const data = await fleetFetch(`/api/fleet/drivers/search?q=${encodeURIComponent(q)}`);
+        const drivers = data.drivers || [];
+        if (!drivers.length) { box.innerHTML = '<div class="empty-state"><p>No approved drivers found.</p></div>'; return; }
+        box.innerHTML = drivers.map(d => {
+          const name = (d.user && d.user.name) || 'Approved driver';
+          const email = (d.user && d.user.username) || '';
+          const phone = (d.user && d.user.phone) || (d.chauffeur && d.chauffeur.phone) || '';
+          return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--grey-100);">
+            <div><div style="font-weight:600;font-size:14px;">${escapeHtml(name)}</div>
+            <div style="font-size:12px;color:var(--grey-400);">${escapeHtml(email)}${phone ? ' · ' + escapeHtml(phone) : ''}</div></div>
+            <button class="btn btn-primary btn-sm" onclick="sendFleetInvite('${d.id}')">Invite</button>
+          </div>`;
+        }).join('');
+      } catch (e) {
+        box.innerHTML = `<div class="empty-state"><p>${escapeHtml(e.message || 'Search failed.')}</p></div>`;
+      }
+    }
+
+    async function sendFleetInvite(driverOperatorProfileId) {
+      const message = document.getElementById('fleetInviteMessage').value.trim();
+      try {
+        const data = await fleetFetch('/api/fleet/invites', {
+          method: 'POST',
+          body: JSON.stringify({ driverOperatorProfileId, message: message || undefined }),
+        });
+        const status = data.invite && data.invite.emailStatus;
+        if (status === 'sent') showNotification('Invite sent — the driver was emailed and notified in the app.', 'success');
+        else if (status === 'pending_configuration') showNotification('Invite saved and the driver was notified in-app. Email/SMS will send once the provider is configured.', 'success');
+        else showNotification('Invite saved and the driver was notified in the app.', 'success');
+        document.getElementById('fleetInviteMessage').value = '';
+        await loadFleet();
+      } catch (e) {
+        showNotification(e.message || 'Could not send invite.', 'error');
+      }
+    }
+
+    async function respondFleetInvite(id, status) {
+      try {
+        await fleetFetch(`/api/fleet/invites/${id}/respond`, { method: 'PUT', body: JSON.stringify({ status }) });
+        showNotification(status === 'accepted' ? 'Invite accepted.' : 'Invite declined.', 'success');
+        await loadFleet();
+      } catch (e) {
+        showNotification(e.message || 'Could not update invite.', 'error');
+      }
+    }
+
+    function selectFleetVehicle(id) {
+      fleetState.selectedVehicleId = id;
+      renderFleetVehicles(fleetState.vehicles);
+    }
+
+    async function assignFleetDriver(driverOperatorProfileId) {
+      if (!fleetState.selectedVehicleId) { showNotification('Select one of your vehicles first.', 'error'); return; }
+      try {
+        await fleetFetch('/api/fleet/assignments', {
+          method: 'POST',
+          body: JSON.stringify({ vehicleId: fleetState.selectedVehicleId, driverOperatorProfileId }),
+        });
+        showNotification('Driver assigned to your vehicle.', 'success');
+        await loadFleet();
+      } catch (e) {
+        showNotification(e.message || 'Could not assign driver.', 'error');
+      }
+    }
+
+    async function removeFleetAssignment(id) {
+      try {
+        await fleetFetch(`/api/fleet/assignments/${id}`, { method: 'DELETE' });
+        showNotification('Assignment removed.', 'success');
+        await loadFleet();
+      } catch (e) {
+        showNotification(e.message || 'Could not remove assignment.', 'error');
+      }
+    }
+
+    function renderFleetVehicles(vehicles) {
+      const box = document.getElementById('fleetVehicles');
+      if (!vehicles.length) { box.innerHTML = '<div class="empty-state"><p>No approved vehicles yet. Add and get a vehicle approved first.</p></div>'; return; }
+      box.innerHTML = vehicles.map(v => {
+        const sel = fleetState.selectedVehicleId === v.id;
+        return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid ${sel ? 'var(--black,#111)' : 'var(--grey-100)'};border-radius:10px;margin-bottom:8px;cursor:pointer;background:${sel ? 'var(--grey-50,#f7f7f8)' : 'transparent'};">
+          <input type="radio" name="fleetVehicle" ${sel ? 'checked' : ''} onchange="selectFleetVehicle('${v.id}')" />
+          <div><div style="font-weight:600;font-size:14px;">${escapeHtml((v.carMake || '') + ' ' + (v.vehicleModel || ''))}</div>
+          <div style="font-size:12px;color:var(--grey-400);">${escapeHtml(v.plateNumber || '')}</div></div>
+        </label>`;
+      }).join('');
+    }
+
+    function renderFleetSentInvites(invites) {
+      const box = document.getElementById('fleetSentInvites');
+      if (!invites.length) { box.innerHTML = '<div class="empty-state"><p>No invites sent yet.</p></div>'; return; }
+      box.innerHTML = invites.map(inv => {
+        const name = (inv.driver && inv.driver.user && inv.driver.user.name) || 'Approved driver';
+        const canAssign = inv.status === 'accepted';
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--grey-100);">
+          <div><div style="font-weight:600;font-size:14px;">${escapeHtml(name)}</div>
+          <div style="font-size:12px;color:var(--grey-400);">Status: ${escapeHtml(inv.status)} · Email: ${escapeHtml(inv.emailStatus || 'n/a')}</div></div>
+          ${canAssign ? `<button class="btn btn-primary btn-sm" onclick="assignFleetDriver('${inv.driver.id}')">Assign to selected car</button>` : ''}
+        </div>`;
+      }).join('');
+    }
+
+    function renderFleetReceivedInvites(invites) {
+      const card = document.getElementById('fleetReceivedCard');
+      const box = document.getElementById('fleetReceivedInvites');
+      const pending = invites.filter(i => i.status === 'pending');
+      if (!invites.length) { card.style.display = 'none'; return; }
+      card.style.display = 'block';
+      box.innerHTML = invites.map(inv => {
+        const mgr = (inv.manager && inv.manager.partnerProfile && inv.manager.partnerProfile.companyName)
+          || (inv.manager && inv.manager.user && inv.manager.user.name) || 'An A2B operator';
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--grey-100);">
+          <div><div style="font-weight:600;font-size:14px;">${escapeHtml(mgr)}</div>
+          <div style="font-size:12px;color:var(--grey-400);">Status: ${escapeHtml(inv.status)}</div>
+          ${inv.message ? `<div style="font-size:12px;color:var(--grey-500);margin-top:4px;">"${escapeHtml(inv.message)}"</div>` : ''}</div>
+          ${inv.status === 'pending' ? `<div style="display:flex;gap:8px;">
+            <button class="btn btn-primary btn-sm" onclick="respondFleetInvite('${inv.id}','accepted')">Accept</button>
+            <button class="btn btn-outline btn-sm" onclick="respondFleetInvite('${inv.id}','declined')">Decline</button></div>` : ''}
+        </div>`;
+      }).join('');
+      void pending;
+    }
+
+    function renderFleetAssignments(assignments) {
+      const box = document.getElementById('fleetAssignments');
+      if (!assignments.length) { box.innerHTML = '<div class="empty-state"><p>No assignments yet.</p></div>'; return; }
+      box.innerHTML = assignments.map(a => {
+        const veh = a.vehicle ? `${a.vehicle.carMake || ''} ${a.vehicle.vehicleModel || ''}`.trim() : 'Vehicle';
+        const drv = (a.driver && a.driver.user && a.driver.user.name) || 'Driver';
+        const mine = fleetState.profile && a.assignedByOperatorProfileId === fleetState.profile.id;
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--grey-100);">
+          <div><div style="font-weight:600;font-size:14px;">${escapeHtml(veh)}</div>
+          <div style="font-size:12px;color:var(--grey-400);">${escapeHtml(drv)} · ${escapeHtml(a.status)}</div></div>
+          ${(mine && a.status === 'active') ? `<button class="btn btn-outline btn-sm" onclick="removeFleetAssignment('${a.id}')">Remove</button>` : ''}
+        </div>`;
+      }).join('');
+    }
+
+    function escapeHtml(str) {
+      return String(str == null ? '' : str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
 
     async function loadTrips(user) {
