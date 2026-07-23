@@ -45,6 +45,7 @@ export default function ChauffeurWalletScreen() {
   const [chauffeur, setChauffeur] = useState<any>(null);
   const [earnings, setEarnings] = useState<Earning[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
+  const [walletBalance, setWalletBalance] = useState(0);
   const [banks, setBanks] = useState<Bank[]>(SA_BANKS);
   const [loading, setLoading] = useState(true);
   const [showWithdraw, setShowWithdraw] = useState(false);
@@ -60,10 +61,17 @@ export default function ChauffeurWalletScreen() {
   const loadData = useCallback(async () => {
     if (!user) return;
     try {
-      const [chaufRes, banksRes] = await Promise.all([
+      const [chaufRes, banksRes, meRes] = await Promise.all([
         apiRequest("GET", `/api/chauffeurs/user/${user.id}`).catch(() => null),
         apiRequest("GET", "/api/wallet/banks").catch(() => null),
+        apiRequest("GET", "/api/auth/me").catch(() => null),
       ]);
+      if (meRes) {
+        try {
+          const meData = await meRes.json();
+          setWalletBalance(Number((meData?.user || meData)?.walletBalance || 0));
+        } catch {}
+      }
       if (chaufRes) {
         const chaufData = await chaufRes.json();
         setChauffeur(chaufData);
@@ -93,9 +101,12 @@ export default function ChauffeurWalletScreen() {
     if (!selectedBank) { Alert.alert("Please select your bank"); return; }
     if (!accountNumber.trim() || accountNumber.length < 8) { Alert.alert("Please enter a valid account number"); return; }
     if (!accountName.trim()) { Alert.alert("Please enter the account holder name"); return; }
-    const available = earnings.filter(e => e.type === "card").reduce((s, e) => s + e.amount, 0);
+    const cardAvailable = earnings.filter(e => e.type === "card").reduce((s, e) => s + e.amount, 0);
+    // Server draws from card earnings first, otherwise the wallet (referral earnings),
+    // so a single request can withdraw up to the larger of the two sources.
+    const available = Math.max(cardAvailable, walletBalance);
     if (available < amount) {
-      Alert.alert("Not Enough Balance", `You only have R${available.toFixed(2)} in card earnings available to withdraw. Please enter a lower amount.`);
+      Alert.alert("Not Enough Balance", `You have R${cardAvailable.toFixed(2)} in card earnings and R${walletBalance.toFixed(2)} in referral wallet available to withdraw. Please enter a lower amount.`);
       return;
     }
 
@@ -127,6 +138,7 @@ export default function ChauffeurWalletScreen() {
     .filter(e => e.type === "card" || e.type === "wallet")
     .reduce((sum, e) => sum + e.amount, 0);
   const totalWithdrawn = withdrawals.filter(w => ["completed", "paid", "approved"].includes(w.status)).reduce((sum, w) => sum + w.amount, 0);
+  const maxWithdrawable = Math.max(earnings_total, walletBalance);
 
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
   const todayEarnings = earnings
@@ -171,20 +183,34 @@ export default function ChauffeurWalletScreen() {
             </View>
           </View>
           <Pressable
-            style={[styles.withdrawBtn, earnings_total < 50 && styles.withdrawBtnDisabled]}
+            style={[styles.withdrawBtn, maxWithdrawable < 50 && styles.withdrawBtnDisabled]}
             onPress={() => setShowWithdraw(true)}
-            disabled={earnings_total < 50}
+            disabled={maxWithdrawable < 50}
           >
-            <Ionicons name="arrow-down-circle-outline" size={16} color={earnings_total < 50 ? Colors.textMuted : Colors.primary} />
-            <Text style={[styles.withdrawBtnText, earnings_total < 50 && styles.withdrawBtnTextDisabled]}>Withdraw to Bank</Text>
+            <Ionicons name="arrow-down-circle-outline" size={16} color={maxWithdrawable < 50 ? Colors.textMuted : Colors.primary} />
+            <Text style={[styles.withdrawBtnText, maxWithdrawable < 50 && styles.withdrawBtnTextDisabled]}>Withdraw to Bank</Text>
           </Pressable>
-          {earnings_total < 50 && (
+          {maxWithdrawable < 50 && (
             <View style={styles.minNoteRow}>
               <Ionicons name="information-circle-outline" size={14} color={Colors.textMuted} />
-              <Text style={styles.minNote}>Minimum withdrawal is R50. Earn more rides to unlock.</Text>
+              <Text style={styles.minNote}>Minimum withdrawal is R50. Earn more rides or referral rewards to unlock.</Text>
             </View>
           )}
         </View>
+
+        {/* ── Referral Wallet Card ── */}
+        {walletBalance > 0 && (
+          <View style={styles.referralWalletCard}>
+            <View style={styles.referralWalletRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.referralWalletLabel}>Referral Wallet (Withdrawable)</Text>
+                <Text style={styles.referralWalletAmount}>R {walletBalance.toFixed(2)}</Text>
+                <Text style={styles.referralWalletSub}>Earnings from your referral programme. Withdraw them with the button above — requests go to A2B admin for approval.</Text>
+              </View>
+              <Ionicons name="gift-outline" size={26} color={Colors.accent} />
+            </View>
+          </View>
+        )}
 
         {/* ── Tabs ── */}
         <View style={styles.tabs}>
@@ -411,6 +437,15 @@ const styles = StyleSheet.create({
   },
   earningsLabel: { fontSize: 12, fontFamily: "Inter_500Medium", color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 1 },
   earningsAmount: { fontSize: 42, fontFamily: "Inter_700Bold", color: Colors.white, letterSpacing: -1 },
+  referralWalletCard: {
+    marginHorizontal: 20, marginBottom: 4, padding: 18,
+    backgroundColor: Colors.card, borderRadius: 16,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  referralWalletRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  referralWalletLabel: { fontSize: 11, fontFamily: "Inter_500Medium", color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 1 },
+  referralWalletAmount: { fontSize: 26, fontFamily: "Inter_700Bold", color: Colors.white, marginTop: 4 },
+  referralWalletSub: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textSecondary, marginTop: 6, lineHeight: 17 },
   statsRow: { flexDirection: "row", alignItems: "center", marginTop: 8, marginBottom: 4 },
   stat: { flex: 1, alignItems: "center", gap: 2 },
   statValue: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.white },

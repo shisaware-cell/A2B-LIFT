@@ -119,9 +119,26 @@ async function creditReferralReward(options: {
   const referrer = await storage.getUser(referrerUserId);
   if (!referrer) return;
 
-  const balanceBefore = referrer.rewardsBalance || 0;
-  const balanceAfter = balanceBefore + reward;
-  await storage.updateUser(referrer.id, { rewardsBalance: balanceAfter });
+  // Referral earnings are paid straight into the wallet so they show in the
+  // wallet balance and can be withdrawn through the normal admin-approved
+  // withdrawal flow (POST /api/withdrawals).
+  const balanceBefore = Number(referrer.walletBalance || 0);
+  const balanceAfter = Math.round((balanceBefore + reward) * 100) / 100;
+  const reference = `${options.referencePrefix}_${options.rideId || Date.now()}_${referrer.id.slice(0, 6)}`;
+  await storage.updateUser(referrer.id, { walletBalance: balanceAfter });
+  // Wallet ledger entry — surfaces the credit in wallet transaction history.
+  await storage.createWalletTransaction({
+    userId: referrer.id,
+    type: "referral_reward",
+    amount: reward,
+    balanceBefore,
+    balanceAfter,
+    reference,
+    description: options.description,
+    rideId: options.rideId || null,
+    status: "completed",
+  });
+  // Reward transaction kept as the referral audit trail + dedupe key.
   await storage.createRewardTransaction({
     userId: referrer.id,
     sourceUserId,
@@ -132,7 +149,7 @@ async function creditReferralReward(options: {
     balanceAfter,
     description: options.description,
     status: "completed",
-    reference: `${options.referencePrefix}_${options.rideId || Date.now()}_${referrer.id.slice(0, 6)}`,
+    reference,
   });
 
   if (sourceUserId) {
@@ -149,7 +166,7 @@ async function creditReferralReward(options: {
   await storage.createNotification({
     userId: referrer.id,
     title: "Reward Earnings",
-    body: options.notificationBody.replace("{amount}", reward.toFixed(2)),
+    body: `${options.notificationBody.replace("{amount}", reward.toFixed(2))} It's been added to your wallet — withdraw it anytime.`,
     type: "reward",
   });
 }
@@ -1097,11 +1114,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!referrer) return;
 
     const reward = LIFT_CLUB_MEMBERSHIP_REFERRAL_BONUS;
-    const balanceBefore = Number(referrer.rewardsBalance || 0);
+    // Paid into the wallet so it is withdrawable via the admin-approved flow.
+    const balanceBefore = Number(referrer.walletBalance || 0);
     const balanceAfter = Math.round((balanceBefore + reward) * 100) / 100;
     const referralEvent = await storage.getReferralEventByReferredUserId(referredUser.id);
+    const bonusDescription = `${referredUser.name || "A referred member"} was approved as a Lift Club member after payment review.`;
 
-    await storage.updateUser(referrer.id, { rewardsBalance: balanceAfter });
+    await storage.updateUser(referrer.id, { walletBalance: balanceAfter });
+    await storage.createWalletTransaction({
+      userId: referrer.id,
+      type: "referral_reward",
+      amount: reward,
+      balanceBefore,
+      balanceAfter,
+      reference,
+      description: bonusDescription,
+      rideId: null,
+      status: "completed",
+    });
     await storage.createRewardTransaction({
       userId: referrer.id,
       referralEventId: referralEvent?.id || null,
@@ -1112,7 +1142,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       balanceBefore,
       balanceAfter,
       type: "lift_club_membership_bonus",
-      description: `${referredUser.name || "A referred member"} was approved as a Lift Club member after payment review.`,
+      description: bonusDescription,
       status: "completed",
     });
 
@@ -1127,7 +1157,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await storage.createNotification({
       userId: referrer.id,
       title: "Lift Club Reward",
-      body: `You earned R${reward.toFixed(2)} because your invited member was approved for Lift Club.`,
+      body: `You earned R${reward.toFixed(2)} because your invited member was approved for Lift Club. It's been added to your wallet — withdraw it anytime.`,
       type: "reward",
     });
   }
