@@ -7,12 +7,17 @@
 #
 # Usage:
 #   bash scripts/release.sh <driver|client> <ios|android> <build|submit>
+#   bash scripts/release.sh <driver|client> ota ["update message"]   # over-the-air JS update
+#
+# OTA note: `ota` ships JavaScript-only changes to already-installed apps
+# (iOS + Android) via EAS Update — no store build. Native changes (SDK bumps,
+# new native modules, versionCode) still require a full build + store upload.
 
 set -euo pipefail
 
-VARIANT="${1:?Usage: release.sh <driver|client> <ios|android> <build|submit>}"
-PLATFORM="${2:?Usage: release.sh <driver|client> <ios|android> <build|submit>}"
-ACTION="${3:?Usage: release.sh <driver|client> <ios|android> <build|submit>}"
+VARIANT="${1:?Usage: release.sh <driver|client> <ios|android|ota> <build|submit|message>}"
+PLATFORM="${2:?Usage: release.sh <driver|client> <ios|android|ota> <build|submit|message>}"
+ACTION="${3:-OTA update}"
 
 DRIVER_PROJECT_ID="8ccd04f4-997e-44f6-9a40-bac2550cb75f"
 CLIENT_PROJECT_ID="9932543b-f023-4dec-8213-5d0fe99ad749"
@@ -28,6 +33,7 @@ case "$VARIANT" in
     export EXPO_PUBLIC_EAS_PROJECT_ID="$DRIVER_PROJECT_ID"
     BUILD_PROFILE_ANDROID="production"
     PROFILE_IOS="ios-production"
+    UPDATE_CHANNEL="production"
     EXPECTED_BUNDLE_ID="com.a2blift"
     EXPECTED_ASC_APP_ID="$DRIVER_ASC_APP_ID"
     ;;
@@ -39,6 +45,7 @@ case "$VARIANT" in
     export EXPO_PUBLIC_EAS_PROJECT_ID_CLIENT="$CLIENT_PROJECT_ID"
     BUILD_PROFILE_ANDROID="client-production"
     PROFILE_IOS="client-ios-production"
+    UPDATE_CHANNEL="client-production"
     EXPECTED_BUNDLE_ID="com.a2blift.client"
     EXPECTED_ASC_APP_ID="$CLIENT_ASC_APP_ID"
     ;;
@@ -67,7 +74,15 @@ echo " Target   : $VARIANT ($EXPECTED_BUNDLE_ID)"
 echo " Platform : $PLATFORM | Action: $ACTION"
 echo " $RESOLVED_VERSIONS"
 [[ "$PLATFORM" == "ios" ]] && echo " ASC app  : $EXPECTED_ASC_APP_ID"
+[[ "$PLATFORM" == "ota" ]] && echo " OTA chan : $UPDATE_CHANNEL"
 echo "──────────────────────────────────────────────"
+
+# --- OTA: ship JS-only changes to installed apps via EAS Update ---
+if [[ "$PLATFORM" == "ota" || "$PLATFORM" == "update" ]]; then
+  echo "Publishing OTA update to channel '$UPDATE_CHANNEL'…"
+  npx eas-cli update --branch "$UPDATE_CHANNEL" --message "$ACTION" --non-interactive
+  exit $?
+fi
 
 case "$PLATFORM-$ACTION" in
   android-build)
