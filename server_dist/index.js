@@ -33,7 +33,7 @@ var import_express = __toESM(require("express"));
 // server/routes.ts
 var import_node_http = require("node:http");
 var import_socket = require("socket.io");
-var import_axios = __toESM(require("axios"));
+var import_axios2 = __toESM(require("axios"));
 var import_bcryptjs = __toESM(require("bcryptjs"));
 var import_node_crypto = __toESM(require("node:crypto"));
 
@@ -813,6 +813,37 @@ var DatabaseStorage = class {
     const [assignment] = await db.update(vehicleAssignments).set(data).where((0, import_drizzle_orm2.eq)(vehicleAssignments.id, id)).returning();
     return assignment;
   }
+  async getFleetDriverInvite(id) {
+    const [invite] = await db.select().from(fleetDriverInvites).where((0, import_drizzle_orm2.eq)(fleetDriverInvites.id, id));
+    return invite;
+  }
+  async getFleetDriverInvites(filters = {}) {
+    const conditions = [
+      filters.driverOperatorProfileId ? (0, import_drizzle_orm2.eq)(fleetDriverInvites.driverOperatorProfileId, filters.driverOperatorProfileId) : void 0,
+      filters.invitedByOperatorProfileId ? (0, import_drizzle_orm2.eq)(fleetDriverInvites.invitedByOperatorProfileId, filters.invitedByOperatorProfileId) : void 0,
+      filters.status ? (0, import_drizzle_orm2.eq)(fleetDriverInvites.status, filters.status) : void 0
+    ].filter(Boolean);
+    if (conditions.length > 0) {
+      return db.select().from(fleetDriverInvites).where((0, import_drizzle_orm2.and)(...conditions)).orderBy((0, import_drizzle_orm2.desc)(fleetDriverInvites.createdAt));
+    }
+    return db.select().from(fleetDriverInvites).orderBy((0, import_drizzle_orm2.desc)(fleetDriverInvites.createdAt));
+  }
+  async getActiveFleetDriverInvite(driverOperatorProfileId, invitedByOperatorProfileId) {
+    const [invite] = await db.select().from(fleetDriverInvites).where((0, import_drizzle_orm2.and)(
+      (0, import_drizzle_orm2.eq)(fleetDriverInvites.driverOperatorProfileId, driverOperatorProfileId),
+      (0, import_drizzle_orm2.eq)(fleetDriverInvites.invitedByOperatorProfileId, invitedByOperatorProfileId),
+      (0, import_drizzle_orm2.eq)(fleetDriverInvites.status, "pending")
+    ));
+    return invite;
+  }
+  async createFleetDriverInvite(data) {
+    const [invite] = await db.insert(fleetDriverInvites).values(data).returning();
+    return invite;
+  }
+  async updateFleetDriverInvite(id, data) {
+    const [invite] = await db.update(fleetDriverInvites).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm2.eq)(fleetDriverInvites.id, id)).returning();
+    return invite;
+  }
   async enrichLiftClubRoute(route) {
     const [chauffeur, vehicle] = await Promise.all([
       this.getChauffeur(route.chauffeurId),
@@ -1550,25 +1581,30 @@ var PRICING_CONFIG = {
   commissionRate: 0.25,
   platformFeeRate: 0.2,
   driverAnnualShareRate: 0.05,
-  maxSurgeMultiplier: 5,
+  maxSurgeMultiplier: 1.5,
+  // Surge only kicks in once there is genuine, sustained demand — not just
+  // because few drivers happen to be online on a quiet/new app.
+  minActiveRequestsForSurge: 4,
+  surgeDampingFactor: 0.5,
   perMinuteAdjustmentRate: 1,
   cancellationGracePeriodMin: 3
 };
 function calculateSurgeMultiplier(input) {
   const activeRequests = Math.max(0, Math.floor(Number(input.activeRequests) || 0));
   const eligibleDrivers = Math.max(0, Math.floor(Number(input.eligibleDrivers) || 0));
-  if (activeRequests <= 0 || activeRequests <= eligibleDrivers) {
+  if (activeRequests < PRICING_CONFIG.minActiveRequestsForSurge || activeRequests <= eligibleDrivers) {
     return { multiplier: 1, reason: null, highDemand: false };
   }
   const driverCount = Math.max(eligibleDrivers, 1);
-  const rawMultiplier = activeRequests / driverCount;
+  const excessRatio = (activeRequests - eligibleDrivers) / driverCount;
+  const rawMultiplier = 1 + excessRatio * PRICING_CONFIG.surgeDampingFactor;
   const multiplier = Math.min(
     PRICING_CONFIG.maxSurgeMultiplier,
-    Math.max(1, Math.ceil(rawMultiplier * 10) / 10)
+    Math.max(1, Math.round(rawMultiplier * 10) / 10)
   );
   return {
     multiplier,
-    reason: "High demand: more ride requests than nearby matching cars",
+    reason: multiplier > 1 ? "High demand: more ride requests than nearby matching cars" : null,
     highDemand: multiplier > 1
   };
 }
@@ -1869,6 +1905,101 @@ var ExternalApiService = class {
 };
 var externalApiService = new ExternalApiService();
 
+// server/notification-service.ts
+var import_axios = __toESM(require("axios"));
+var RESEND_API_KEY = process.env.RESEND_API_KEY || "";
+var RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "A2B LIFT <no-reply@a2blift.com>";
+var SMS_API_URL = process.env.SMS_API_URL || "";
+var SMS_API_KEY = process.env.SMS_API_KEY || "";
+var SMS_SENDER_ID = process.env.SMS_SENDER_ID || "A2BLIFT";
+var emailEnabled = () => Boolean(RESEND_API_KEY);
+var smsEnabled = () => Boolean(SMS_API_URL && SMS_API_KEY);
+async function sendEmail(options) {
+  if (!options.to || !options.to.includes("@")) {
+    return { status: "skipped", error: "No valid email address on file." };
+  }
+  if (!emailEnabled()) {
+    return { status: "pending_configuration", error: "RESEND_API_KEY is not configured yet." };
+  }
+  try {
+    const res = await import_axios.default.post(
+      "https://api.resend.com/emails",
+      {
+        from: RESEND_FROM_EMAIL,
+        to: [options.to],
+        subject: options.subject,
+        html: options.html,
+        ...options.text ? { text: options.text } : {},
+        ...options.replyTo ? { reply_to: options.replyTo } : {}
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${RESEND_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        timeout: 15e3
+      }
+    );
+    return { status: "sent", id: res.data?.id || null };
+  } catch (error) {
+    const message = error?.response?.data?.message || error?.message || "Email send failed.";
+    return { status: "failed", error: String(message) };
+  }
+}
+async function sendSms(options) {
+  const to = normalisePhone(options.to);
+  if (!to) {
+    return { status: "skipped", error: "No valid phone number on file." };
+  }
+  if (!smsEnabled()) {
+    return { status: "pending_configuration", error: "SMS provider is not configured yet." };
+  }
+  try {
+    const res = await import_axios.default.post(
+      SMS_API_URL,
+      {
+        to,
+        from: SMS_SENDER_ID,
+        body: options.message,
+        text: options.message
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${SMS_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        timeout: 15e3
+      }
+    );
+    return { status: "sent", id: res.data?.id || res.data?.messageId || null };
+  } catch (error) {
+    const message = error?.response?.data?.message || error?.message || "SMS send failed.";
+    return { status: "failed", error: String(message) };
+  }
+}
+function normalisePhone(raw) {
+  if (!raw) return "";
+  const trimmed = String(raw).trim();
+  if (!trimmed) return "";
+  const cleaned = trimmed.replace(/(?!^\+)[^\d]/g, "");
+  return cleaned.length >= 9 ? cleaned : "";
+}
+function renderBrandedEmail(opts) {
+  const cta = opts.ctaLabel && opts.ctaUrl ? `<a href="${opts.ctaUrl}" style="display:inline-block;margin-top:20px;padding:12px 22px;background:#0b0b0f;color:#ffffff;border-radius:10px;text-decoration:none;font-weight:600;font-family:Arial,sans-serif;">${opts.ctaLabel}</a>` : "";
+  return `<!DOCTYPE html><html><body style="margin:0;background:#f4f4f6;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;">
+  <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #ececf1;">
+    <div style="background:#0b0b0f;padding:20px 24px;color:#ffffff;font-size:20px;font-weight:700;">A2B&nbsp;LIFT</div>
+    <div style="padding:24px;">
+      <h1 style="font-size:20px;margin:0 0 12px;">${opts.heading}</h1>
+      <div style="font-size:15px;line-height:1.6;color:#333;">${opts.bodyHtml}</div>
+      ${cta}
+    </div>
+    <div style="padding:16px 24px;background:#fafafa;color:#888;font-size:12px;border-top:1px solid #ececf1;">
+      A2B LIFT \xB7 Improving Drivers' Lives and Building True Partnerships.
+    </div>
+  </div></body></html>`;
+}
+
 // server/routes.ts
 var RIDE_MATCH_RADIUS_KM = 25;
 var CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1e3;
@@ -1932,9 +2063,21 @@ async function creditReferralReward(options) {
   }
   const referrer = await storage.getUser(referrerUserId);
   if (!referrer) return;
-  const balanceBefore = referrer.rewardsBalance || 0;
-  const balanceAfter = balanceBefore + reward;
-  await storage.updateUser(referrer.id, { rewardsBalance: balanceAfter });
+  const balanceBefore = Number(referrer.walletBalance || 0);
+  const balanceAfter = Math.round((balanceBefore + reward) * 100) / 100;
+  const reference = `${options.referencePrefix}_${options.rideId || Date.now()}_${referrer.id.slice(0, 6)}`;
+  await storage.updateUser(referrer.id, { walletBalance: balanceAfter });
+  await storage.createWalletTransaction({
+    userId: referrer.id,
+    type: "referral_reward",
+    amount: reward,
+    balanceBefore,
+    balanceAfter,
+    reference,
+    description: options.description,
+    rideId: options.rideId || null,
+    status: "completed"
+  });
   await storage.createRewardTransaction({
     userId: referrer.id,
     sourceUserId,
@@ -1945,7 +2088,7 @@ async function creditReferralReward(options) {
     balanceAfter,
     description: options.description,
     status: "completed",
-    reference: `${options.referencePrefix}_${options.rideId || Date.now()}_${referrer.id.slice(0, 6)}`
+    reference
   });
   if (sourceUserId) {
     const refEvent = await storage.getReferralEventByReferredUserId(sourceUserId);
@@ -1960,7 +2103,7 @@ async function creditReferralReward(options) {
   await storage.createNotification({
     userId: referrer.id,
     title: "Reward Earnings",
-    body: options.notificationBody.replace("{amount}", reward.toFixed(2)),
+    body: `${options.notificationBody.replace("{amount}", reward.toFixed(2))} It's been added to your wallet \u2014 withdraw it anytime.`,
     type: "reward"
   });
 }
@@ -1998,7 +2141,7 @@ async function sendExpoPushNotification(tokens, title, body, data, options) {
   }));
   if (messages2.length === 0) return;
   try {
-    const res = await import_axios.default.post("https://exp.host/--/api/v2/push/send", messages2, {
+    const res = await import_axios2.default.post("https://exp.host/--/api/v2/push/send", messages2, {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
@@ -2686,10 +2829,22 @@ async function registerRoutes(app2) {
     const referrer = await storage.getUser(referrerUserId);
     if (!referrer) return;
     const reward = LIFT_CLUB_MEMBERSHIP_REFERRAL_BONUS;
-    const balanceBefore = Number(referrer.rewardsBalance || 0);
+    const balanceBefore = Number(referrer.walletBalance || 0);
     const balanceAfter = Math.round((balanceBefore + reward) * 100) / 100;
     const referralEvent = await storage.getReferralEventByReferredUserId(referredUser.id);
-    await storage.updateUser(referrer.id, { rewardsBalance: balanceAfter });
+    const bonusDescription = `${referredUser.name || "A referred member"} was approved as a Lift Club member after payment review.`;
+    await storage.updateUser(referrer.id, { walletBalance: balanceAfter });
+    await storage.createWalletTransaction({
+      userId: referrer.id,
+      type: "referral_reward",
+      amount: reward,
+      balanceBefore,
+      balanceAfter,
+      reference,
+      description: bonusDescription,
+      rideId: null,
+      status: "completed"
+    });
     await storage.createRewardTransaction({
       userId: referrer.id,
       referralEventId: referralEvent?.id || null,
@@ -2700,7 +2855,7 @@ async function registerRoutes(app2) {
       balanceBefore,
       balanceAfter,
       type: "lift_club_membership_bonus",
-      description: `${referredUser.name || "A referred member"} was approved as a Lift Club member after payment review.`,
+      description: bonusDescription,
       status: "completed"
     });
     if (referralEvent) {
@@ -2713,7 +2868,7 @@ async function registerRoutes(app2) {
     await storage.createNotification({
       userId: referrer.id,
       title: "Lift Club Reward",
-      body: `You earned R${reward.toFixed(2)} because your invited member was approved for Lift Club.`,
+      body: `You earned R${reward.toFixed(2)} because your invited member was approved for Lift Club. It's been added to your wallet \u2014 withdraw it anytime.`,
       type: "reward"
     });
   }
@@ -2779,20 +2934,37 @@ async function registerRoutes(app2) {
   app2.post("/api/auth/login", async (req, res) => {
     try {
       const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ message: "Email and password are required." });
+      }
       const user = await storage.getUserByUsername(username);
       if (!user) {
+        console.warn(`[auth/login] no account for "${String(username).toLowerCase().trim()}"`);
         return res.status(401).json({ message: "Invalid credentials" });
+      }
+      if (!user.password) {
+        console.warn(`[auth/login] account "${user.username}" has no password (Google sign-in only)`);
+        return res.status(401).json({ message: "This account has no password. Please sign in with Google, or reset your password." });
       }
       const valid = await import_bcryptjs.default.compare(password, user.password);
       if (!valid) {
+        console.warn(`[auth/login] password mismatch for "${user.username}"`);
         return res.status(401).json({ message: "Invalid credentials" });
       }
       const token = signAccessToken({ sub: user.id, role: user.role, email: user.username, name: user.name });
       setAuthCookie(res, token);
-      const safeUser = await hydrateAuthUser(user);
+      let safeUser;
+      try {
+        safeUser = await hydrateAuthUser(user);
+      } catch (hydrationError) {
+        console.error("[auth/login] hydrateAuthUser failed, returning minimal user:", hydrationError?.message || hydrationError);
+        const { password: _pw, ...rest } = user;
+        safeUser = { ...rest, rewardsBalance: Number(user.rewardsBalance || 0) };
+      }
       return res.json({ user: safeUser, accessToken: token });
     } catch (error) {
-      return res.status(500).json({ message: error.message });
+      console.error("[auth/login] error:", error?.message || error);
+      return res.status(500).json({ message: error.message || "Login failed" });
     }
   });
   app2.post("/api/auth/logout", async (_req, res) => {
@@ -3048,6 +3220,51 @@ async function registerRoutes(app2) {
       return res.status(201).json(created);
     } catch (error) {
       return res.status(500).json({ message: error.message || "Failed to submit cash-out request" });
+    }
+  });
+  app2.post("/api/rewards/transfer-to-wallet", requireAuth, async (req, res) => {
+    try {
+      const userId = req.auth.sub;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      const rewardsBalance = Math.round(Number(await getUserRewardsBalance(userId)) * 100) / 100;
+      if (rewardsBalance <= 0) {
+        return res.status(400).json({ message: "You have no referral balance to transfer." });
+      }
+      let amount = Number(req.body?.amount);
+      if (!Number.isFinite(amount) || amount <= 0) amount = rewardsBalance;
+      amount = Math.round(amount * 100) / 100;
+      if (amount > rewardsBalance) {
+        return res.status(400).json({ message: `You can transfer at most R${rewardsBalance.toFixed(2)}.` });
+      }
+      const walletBefore = Number(user.walletBalance || 0);
+      const walletAfter = Math.round((walletBefore + amount) * 100) / 100;
+      const rewardsAfter = Math.round((rewardsBalance - amount) * 100) / 100;
+      const reference = `rewards_to_wallet_${Date.now()}_${userId.slice(0, 6)}`;
+      await storage.updateUser(userId, { walletBalance: walletAfter, rewardsBalance: rewardsAfter });
+      await storage.createWalletTransaction({
+        userId,
+        type: "referral_transfer",
+        amount,
+        balanceBefore: walletBefore,
+        balanceAfter: walletAfter,
+        reference,
+        description: "Referral balance transferred to wallet",
+        status: "completed"
+      });
+      await storage.createRewardTransaction({
+        userId,
+        type: "wallet_transfer",
+        amount,
+        balanceBefore: rewardsBalance,
+        balanceAfter: rewardsAfter,
+        reference,
+        description: "Transferred to wallet",
+        status: "completed"
+      }).catch(() => void 0);
+      return res.json({ success: true, amount, walletBalance: walletAfter, rewardsBalance: rewardsAfter });
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Failed to transfer referral balance" });
     }
   });
   const GOOGLE_KEY = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_SERVER_API_KEY || process.env.GOOGLE_MAPS_WEB_SERVICE_API_KEY || process.env.GOOGLE_MAPS_API_KEY || "";
@@ -5155,6 +5372,144 @@ async function registerRoutes(app2) {
       return res.status(400).json({ message: error.message });
     }
   });
+  async function serializeFleetInvite(invite) {
+    const [driverProfile, managerProfile] = await Promise.all([
+      storage.getOperatorProfile(invite.driverOperatorProfileId).catch(() => void 0),
+      storage.getOperatorProfile(invite.invitedByOperatorProfileId).catch(() => void 0)
+    ]);
+    return {
+      ...invite,
+      driver: driverProfile ? await serializeOperatorProfile(driverProfile) : null,
+      manager: managerProfile ? await serializeOperatorProfile(managerProfile) : null
+    };
+  }
+  app2.get("/api/fleet/invites", requireAuth, async (req, res) => {
+    try {
+      const profile = await storage.getOperatorProfileByUserId(req.auth.sub);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      const [sent, received] = await Promise.all([
+        storage.getFleetDriverInvites({ invitedByOperatorProfileId: profile.id }),
+        storage.getFleetDriverInvites({ driverOperatorProfileId: profile.id })
+      ]);
+      const [sentInvites, receivedInvites] = await Promise.all([
+        Promise.all(sent.map(serializeFleetInvite)),
+        Promise.all(received.map(serializeFleetInvite))
+      ]);
+      return res.json({
+        sentInvites,
+        receivedInvites,
+        providers: { email: emailEnabled(), sms: smsEnabled() }
+      });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.post("/api/fleet/invites", requireAuth, async (req, res) => {
+    try {
+      const profile = await storage.getOperatorProfileByUserId(req.auth.sub);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      if (profile.status !== "approved") {
+        return res.status(403).json({ message: "Your operator profile must be approved first." });
+      }
+      const driverOperatorProfileId = requireStringField(req.body, "driverOperatorProfileId");
+      const message = typeof req.body?.message === "string" ? req.body.message.trim().slice(0, 500) : "";
+      if (driverOperatorProfileId === profile.id) {
+        return res.status(400).json({ message: "You cannot invite yourself." });
+      }
+      const driverProfile = await storage.getOperatorProfile(driverOperatorProfileId);
+      if (!driverProfile || driverProfile.type !== "driver" || driverProfile.status !== "approved") {
+        return res.status(400).json({ message: "Only approved A2B drivers can be invited." });
+      }
+      const existing = await storage.getActiveFleetDriverInvite(driverProfile.id, profile.id);
+      if (existing) {
+        return res.status(409).json({ message: "You already have a pending invite for this driver." });
+      }
+      let invite = await storage.createFleetDriverInvite({
+        driverOperatorProfileId: driverProfile.id,
+        invitedByOperatorProfileId: profile.id,
+        invitedByUserId: profile.userId,
+        status: "pending",
+        emailStatus: "queued",
+        message: message || null
+      });
+      const [driverUser, inviterUser, inviterPartner] = await Promise.all([
+        storage.getUser(driverProfile.userId).catch(() => void 0),
+        storage.getUser(profile.userId).catch(() => void 0),
+        profile.type === "partner" ? storage.getPartnerProfileByOperatorId(profile.id).catch(() => void 0) : Promise.resolve(null)
+      ]);
+      const driverChauffeur = await storage.getChauffeurByUserId(driverProfile.userId).catch(() => void 0);
+      const inviterName = inviterPartner?.companyName || inviterUser?.name || "An A2B LIFT operator";
+      const driverEmail = driverUser?.username && driverUser.username.includes("@") ? driverUser.username : "";
+      const driverPhone = driverUser?.phone || driverChauffeur?.phone || "";
+      const driverName = driverUser?.name || "there";
+      const emailBody = `<p>Hi ${driverName},</p>
+        <p><strong>${inviterName}</strong> wants you to become one of their drivers on A2B LIFT and drive one of their vehicles.</p>
+        ${message ? `<p style="padding:12px 14px;background:#f4f4f6;border-radius:10px;">"${message}"</p>` : ""}
+        <p>Open the A2B LIFT driver app and go to <strong>Fleet \u2192 Invitations</strong> to accept or decline.</p>`;
+      const smsText = `A2B LIFT: ${inviterName} wants you to drive their vehicle. Open the A2B LIFT app \u2192 Fleet \u2192 Invitations to accept.`;
+      const [emailResult, smsResult] = await Promise.all([
+        sendEmail({
+          to: driverEmail,
+          subject: `${inviterName} invited you to their A2B LIFT fleet`,
+          html: renderBrandedEmail({ heading: "Fleet invitation", bodyHtml: emailBody })
+        }),
+        sendSms({ to: driverPhone, message: smsText })
+      ]);
+      const emailStatus = emailResult.status === "sent" ? "sent" : emailResult.status === "pending_configuration" ? "pending_configuration" : emailResult.status === "skipped" ? "skipped" : "failed";
+      const emailError = emailResult.status === "sent" || emailResult.status === "skipped" ? smsResult.status === "sent" ? null : smsResult.error || null : emailResult.error || null;
+      invite = await storage.updateFleetDriverInvite(invite.id, {
+        emailStatus,
+        emailError,
+        resendId: emailResult.id || null,
+        sentAt: emailResult.status === "sent" ? /* @__PURE__ */ new Date() : null
+      }) || invite;
+      await notifyUserEvent({
+        userId: driverProfile.userId,
+        type: "fleet_invite",
+        title: "Fleet invitation",
+        body: `${inviterName} wants you to become one of their drivers. Open Fleet \u2192 Invitations to respond.`,
+        data: { inviteId: invite.id, invitedByOperatorProfileId: profile.id }
+      });
+      return res.status(201).json({ invite: await serializeFleetInvite(invite) });
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
+  });
+  app2.put("/api/fleet/invites/:id/respond", requireAuth, async (req, res) => {
+    try {
+      const profile = await storage.getOperatorProfileByUserId(req.auth.sub);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      const invite = await storage.getFleetDriverInvite(req.params.id);
+      if (!invite) return res.status(404).json({ message: "Invite not found" });
+      if (invite.driverOperatorProfileId !== profile.id) {
+        return res.status(403).json({ message: "This invite is not addressed to you." });
+      }
+      if (invite.status !== "pending") {
+        return res.status(400).json({ message: `This invite was already ${invite.status}.` });
+      }
+      const status = String(req.body?.status || "");
+      if (!["accepted", "declined"].includes(status)) {
+        return res.status(400).json({ message: "Status must be accepted or declined." });
+      }
+      const updated = await storage.updateFleetDriverInvite(invite.id, {
+        status,
+        acceptedAt: status === "accepted" ? /* @__PURE__ */ new Date() : null,
+        declinedAt: status === "declined" ? /* @__PURE__ */ new Date() : null
+      });
+      const driverUser = await storage.getUser(profile.userId).catch(() => void 0);
+      const driverName = driverUser?.name || "A driver";
+      await notifyUserEvent({
+        userId: invite.invitedByUserId,
+        type: "fleet_invite_response",
+        title: status === "accepted" ? "Fleet invite accepted" : "Fleet invite declined",
+        body: status === "accepted" ? `${driverName} accepted your fleet invite. You can now assign them to one of your vehicles.` : `${driverName} declined your fleet invite.`,
+        data: { inviteId: invite.id, driverOperatorProfileId: profile.id, status }
+      });
+      return res.json({ invite: await serializeFleetInvite(updated) });
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
+  });
   app2.get("/api/chauffeurs/user/:userId", async (req, res) => {
     try {
       const chauffeur = await storage.getChauffeurByUserId(req.params.userId);
@@ -5871,7 +6226,7 @@ async function registerRoutes(app2) {
       console.warn("[lift-club] PAYSTACK_SECRET_KEY is missing; accepting client callback reference without server verification.");
       return { ok: true, skipped: true };
     }
-    const response = await import_axios.default.get(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
+    const response = await import_axios2.default.get(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
       headers: { Authorization: `Bearer ${secretKey}` },
       timeout: 1e4
     });
@@ -7439,7 +7794,7 @@ async function registerRoutes(app2) {
           if (cardPayment?.paystackReference) {
             const secret = process.env.PAYSTACK_SECRET_KEY || "";
             if (refundableAmount > 0) {
-              await import_axios.default.post(
+              await import_axios2.default.post(
                 "https://api.paystack.co/refund",
                 {
                   transaction: cardPayment.paystackReference,
@@ -8526,7 +8881,7 @@ async function registerRoutes(app2) {
     }
   });
   const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY || "";
-  const paystackAPI = import_axios.default.create({
+  const paystackAPI = import_axios2.default.create({
     baseURL: "https://api.paystack.co",
     headers: {
       Authorization: `Bearer ${PAYSTACK_SECRET}`,
