@@ -82,6 +82,7 @@ const TX_LABELS: Record<string, string> = {
   ride_refund: "Ride refund",
   cashout_request: "Cash-out request",
   cashout_reversal: "Cash-out reversal",
+  wallet_transfer: "Transferred to wallet",
 };
 
 const REWARD_STEPS = [
@@ -115,14 +116,14 @@ function formatDate(value: string) {
 }
 
 function transactionTone(type: string) {
-  if (type === "ride_redemption" || type === "cashout_request") {
+  if (type === "ride_redemption" || type === "cashout_request" || type === "wallet_transfer") {
     return styles.rowAmountNegative;
   }
   return styles.rowAmountPositive;
 }
 
 function transactionPrefix(type: string) {
-  if (type === "ride_redemption" || type === "cashout_request") {
+  if (type === "ride_redemption" || type === "cashout_request" || type === "wallet_transfer") {
     return "-";
   }
   return "+";

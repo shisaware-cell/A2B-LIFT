@@ -46,6 +46,7 @@ export default function ChauffeurWalletScreen() {
   const [earnings, setEarnings] = useState<Earning[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [walletBalance, setWalletBalance] = useState(0);
+  const [walletTxs, setWalletTxs] = useState<any[]>([]);
   const [banks, setBanks] = useState<Bank[]>(SA_BANKS);
   const [loading, setLoading] = useState(true);
   const [showWithdraw, setShowWithdraw] = useState(false);
@@ -61,15 +62,22 @@ export default function ChauffeurWalletScreen() {
   const loadData = useCallback(async () => {
     if (!user) return;
     try {
-      const [chaufRes, banksRes, meRes] = await Promise.all([
+      const [chaufRes, banksRes, meRes, walletTxRes] = await Promise.all([
         apiRequest("GET", `/api/chauffeurs/user/${user.id}`).catch(() => null),
         apiRequest("GET", "/api/wallet/banks").catch(() => null),
         apiRequest("GET", "/api/auth/me").catch(() => null),
+        apiRequest("GET", "/api/wallet/transactions").catch(() => null),
       ]);
       if (meRes) {
         try {
           const meData = await meRes.json();
           setWalletBalance(Number((meData?.user || meData)?.walletBalance || 0));
+        } catch {}
+      }
+      if (walletTxRes) {
+        try {
+          const txData = await walletTxRes.json();
+          setWalletTxs(Array.isArray(txData) ? txData : (txData?.transactions || []));
         } catch {}
       }
       if (chaufRes) {
@@ -209,6 +217,27 @@ export default function ChauffeurWalletScreen() {
               </View>
               <Ionicons name="gift-outline" size={26} color={Colors.accent} />
             </View>
+            {walletTxs.filter(t => ["referral_transfer", "referral_reward"].includes(t.type)).length > 0 && (
+              <View style={styles.walletActivity}>
+                <Text style={styles.walletActivityTitle}>Wallet activity</Text>
+                {walletTxs
+                  .filter(t => ["referral_transfer", "referral_reward"].includes(t.type))
+                  .slice(0, 5)
+                  .map((t, i) => (
+                    <View key={t.id || i} style={styles.walletActivityRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.walletActivityDesc}>
+                          {t.type === "referral_transfer" ? "Transferred to wallet" : "Referral reward"}
+                        </Text>
+                        <Text style={styles.walletActivityDate}>
+                          {t.createdAt ? new Date(t.createdAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short" }) : ""}
+                        </Text>
+                      </View>
+                      <Text style={styles.walletActivityAmount}>+R {Number(t.amount || 0).toFixed(2)}</Text>
+                    </View>
+                  ))}
+              </View>
+            )}
           </View>
         )}
 
@@ -308,7 +337,7 @@ export default function ChauffeurWalletScreen() {
       {/* ── Withdrawal Modal (single modal with internal bank picker view) ── */}
       <Modal visible={showWithdraw} transparent animationType="slide" onRequestClose={() => { if (showBankPicker) setShowBankPicker(false); else setShowWithdraw(false); }}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
           style={styles.modalOverlay}
         >
           <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 24, maxHeight: "90%" }]}>
@@ -342,8 +371,8 @@ export default function ChauffeurWalletScreen() {
             ) : (
               /* ── Withdrawal form ── */
               <>
-                <Text style={styles.modalTitle}>Withdraw Earnings</Text>
-                <Text style={styles.modalSub}>Card earnings available: R {earnings_total.toFixed(2)}</Text>
+                <Text style={styles.modalTitle}>Withdraw</Text>
+                <Text style={styles.modalSub}>Available to withdraw: R {maxWithdrawable.toFixed(2)}{walletBalance > 0 ? ` · incl. R ${walletBalance.toFixed(2)} referral wallet` : ""}</Text>
 
                 <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                   <View style={styles.fieldGroup}>
@@ -446,6 +475,12 @@ const styles = StyleSheet.create({
   referralWalletLabel: { fontSize: 11, fontFamily: "Inter_500Medium", color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 1 },
   referralWalletAmount: { fontSize: 26, fontFamily: "Inter_700Bold", color: Colors.white, marginTop: 4 },
   referralWalletSub: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textSecondary, marginTop: 6, lineHeight: 17 },
+  walletActivity: { marginTop: 14, borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: 12 },
+  walletActivityTitle: { fontSize: 11, fontFamily: "Inter_600SemiBold", color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 },
+  walletActivityRow: { flexDirection: "row", alignItems: "center", paddingVertical: 7 },
+  walletActivityDesc: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: Colors.white },
+  walletActivityDate: { fontSize: 11, fontFamily: "Inter_400Regular", color: Colors.textMuted, marginTop: 2 },
+  walletActivityAmount: { fontSize: 13, fontFamily: "Inter_700Bold", color: Colors.success },
   statsRow: { flexDirection: "row", alignItems: "center", marginTop: 8, marginBottom: 4 },
   stat: { flex: 1, alignItems: "center", gap: 2 },
   statValue: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.white },
