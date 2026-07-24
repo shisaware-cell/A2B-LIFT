@@ -106,6 +106,11 @@ export default function FleetScreen() {
   }, []);
 
   const searchDrivers = useCallback(async () => {
+    // Marketplace stays empty until the user searches — no full driver list on load.
+    if (!query.trim()) {
+      setDrivers([]);
+      return;
+    }
     try {
       const res = await apiRequest("GET", `/api/fleet/drivers/search?q=${encodeURIComponent(query)}`);
       const data = await res.json();
@@ -269,14 +274,14 @@ export default function FleetScreen() {
               <View style={styles.panelHeader}>
                 <View>
                   <Text style={styles.sectionTitle}>Driver marketplace</Text>
-                  <Text style={styles.helperText}>Browse approved A2B drivers, view their details, and invite them to your fleet.</Text>
+                  <Text style={styles.helperText}>Search for an approved A2B driver by name, phone, or email, then invite them to your fleet.</Text>
                 </View>
                 <Ionicons name="people-circle-outline" size={28} color={Colors.white} />
               </View>
               <TextInput style={styles.input} value={query} onChangeText={setQuery} placeholder="Search by name, phone, or email" placeholderTextColor={Colors.textMuted} />
               <View style={styles.driverGrid}>
                 {drivers.length === 0 ? (
-                  <Text style={styles.emptyText}>{query.trim() ? "No approved drivers matched your search." : "Approved drivers will appear here."}</Text>
+                  <Text style={styles.emptyText}>{query.trim() ? "No approved drivers matched your search." : "Search by name, phone, or email to find approved drivers to add to your fleet."}</Text>
                 ) : drivers.map((driver) => {
                   const invite = getInviteStatus(driver);
                   return (

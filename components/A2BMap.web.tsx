@@ -75,6 +75,7 @@ interface A2BMapProps {
   loading?: boolean;
   etaText?: string;
   statusText?: string;
+  initialZoom?: "street" | "city";
 }
 
 export default function A2BMap({
@@ -88,6 +89,7 @@ export default function A2BMap({
   loading = false,
   etaText,
   statusText,
+  initialZoom = "street",
 }: A2BMapProps & { followDriver?: boolean }) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -164,7 +166,7 @@ export default function A2BMap({
     const day = isDaytimeNow();
     const map = new google.maps.Map(mapContainerRef.current, {
       center: { lat: pickupLocation.lat, lng: pickupLocation.lng },
-      zoom: 17,
+      zoom: initialZoom === "city" ? 12 : 17,
       styles: day ? LIGHT_MAP_JS_STYLE : darkStyle,
       disableDefaultUI: true,
       gestureHandling: "greedy",

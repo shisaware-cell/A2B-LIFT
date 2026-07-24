@@ -320,7 +320,7 @@ tbody tr:hover { background:#fafaf8; }
     <div class="topbar-right">
       <div class="search-wrap">
         <span class="search-icon">🔍</span>
-        <input class="search-input" placeholder="Search…" id="srch" oninput="doSearch(this.value)"/>
+        <input class="search-input" placeholder="Search name, email or phone…" id="srch" oninput="doSearch(this.value)"/>
       </div>
       <span class="timestamp" id="last-updated"></span>
       <button class="btn-refresh" onclick="loadView()">↻ Refresh</button>
@@ -2618,7 +2618,7 @@ async function adminDelete(type, id, label) {
 // ── SEARCH ──
 function doSearch(q) {
   if (curView === 'chauffeurs') {
-    const f = allChauf.filter(c => `${c.userName} ${c.carMake} ${c.vehicleModel} ${c.plateNumber} ${c.carColor}`.toLowerCase().includes(q.toLowerCase()));
+    const f = allChauf.filter(c => `${c.userName||''} ${c.userEmail||''} ${c.phone||''} ${c.userPhone||''} ${c.carMake||''} ${c.vehicleModel||''} ${c.plateNumber||''} ${c.carColor||''}`.toLowerCase().includes(q.toLowerCase()));
     renderChauffeurTable('chauf-table', f, true);
   }
   if (curView === 'selfies') {

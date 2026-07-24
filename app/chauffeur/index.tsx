@@ -1870,6 +1870,7 @@ export default function ChauffeurDashboard() {
           showDriver={true}
           followDriver={!!currentRide}
           loading={!myLocation && isOnline}
+          initialZoom={currentRide ? "street" : "city"}
         />
       </View>
 

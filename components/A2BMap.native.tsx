@@ -160,6 +160,8 @@ interface A2BMapProps {
   loading?: boolean;
   etaText?: string;
   statusText?: string;
+  /** Initial/idle zoom level. "city" shows the surrounding city; "street" is close-up. */
+  initialZoom?: "street" | "city";
 }
 
 export default function A2BMap({
@@ -173,7 +175,10 @@ export default function A2BMap({
   loading = false,
   etaText,
   statusText,
+  initialZoom = "street",
 }: A2BMapProps) {
+  // Idle/initial map span: city-wide view when requested, otherwise close-up.
+  const IDLE_DELTA = initialZoom === "city" ? 0.11 : 0.004;
   const mapRef = useRef<MapView>(null);
   const mapReadyRef = useRef(false);
   const lastCenteredPickupRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -215,8 +220,8 @@ export default function A2BMap({
   const initialRegionRef = useRef({
     latitude: center.lat,
     longitude: center.lng,
-    latitudeDelta: 0.004,
-    longitudeDelta: 0.004,
+    latitudeDelta: IDLE_DELTA,
+    longitudeDelta: IDLE_DELTA,
   });
 
   const routeCoords = useMemo(() => {
@@ -256,11 +261,11 @@ export default function A2BMap({
       mapRef.current.animateToRegion({
         latitude: center.lat,
         longitude: center.lng,
-        latitudeDelta: 0.004,
-        longitudeDelta: 0.004,
+        latitudeDelta: IDLE_DELTA,
+        longitudeDelta: IDLE_DELTA,
       }, 600);
     }
-  }, [pickupLocation, dropoffLocation, driverLocation, routeCoords, followDriver, zoomToCoords]);
+  }, [pickupLocation, dropoffLocation, driverLocation, routeCoords, followDriver, zoomToCoords, IDLE_DELTA]);
 
   function handleMapReady() {
     mapReadyRef.current = true;
@@ -312,10 +317,10 @@ export default function A2BMap({
     mapRef.current.animateToRegion({
       latitude: pickupLocation.lat,
       longitude: pickupLocation.lng,
-      latitudeDelta: 0.004,
-      longitudeDelta: 0.004,
+      latitudeDelta: IDLE_DELTA,
+      longitudeDelta: IDLE_DELTA,
     }, 400);
-  }, [pickupLocation?.lat, pickupLocation?.lng, dropoffLocation?.lat, dropoffLocation?.lng, routeCoords.length, followDriver]);
+  }, [pickupLocation?.lat, pickupLocation?.lng, dropoffLocation?.lat, dropoffLocation?.lng, routeCoords.length, followDriver, IDLE_DELTA]);
 
   useEffect(() => {
     if (!followDriver || !driverLocation || !mapRef.current) return;
