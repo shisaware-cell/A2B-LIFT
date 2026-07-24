@@ -458,8 +458,32 @@
         </div>
 
         <div class="driver-apply-card" style="margin-bottom:18px;">
+          <h3>Add a vehicle</h3>
+          <p>Register a car to your fleet. It goes to A2B for approval before you can assign a driver to it.</p>
+          <div class="ld-form-grid">
+            <div><label>Make</label><input type="text" id="vehMake" placeholder="e.g. Toyota" /></div>
+            <div><label>Model</label><input type="text" id="vehModel" placeholder="e.g. Quantum" /></div>
+            <div><label>Year</label><input type="number" id="vehYear" placeholder="e.g. 2020" /></div>
+            <div><label>Number plate</label><input type="text" id="vehPlate" placeholder="e.g. ABC123GP" /></div>
+            <div><label>Class</label>
+              <select id="vehType">
+                <option value="budget">Budget</option>
+                <option value="luxury">Luxury</option>
+                <option value="business">Business Class</option>
+                <option value="van">Van</option>
+                <option value="luxury_van">Luxury Van (V-Class)</option>
+              </select>
+            </div>
+            <div><label>Colour</label><input type="text" id="vehColor" placeholder="e.g. White" /></div>
+            <div><label>Passenger capacity</label><input type="number" id="vehPax" placeholder="4" /></div>
+            <div><label>Luggage capacity</label><input type="number" id="vehLuggage" placeholder="2" /></div>
+          </div>
+          <button class="btn btn-primary" id="addVehicleBtn" style="margin-top:14px;" onclick="addFleetVehicle()">Add vehicle for review</button>
+        </div>
+
+        <div class="driver-apply-card" style="margin-bottom:18px;">
           <h3>Your vehicles</h3>
-          <p>Select the approved car you want an accepted driver to drive.</p>
+          <p>Approved cars can be assigned to a driver. Pending cars are awaiting A2B review.</p>
           <div id="fleetVehicles"><div class="empty-state"><p>Loading your vehicles…</p></div></div>
         </div>
 
@@ -1357,10 +1381,10 @@
           fleetFetch('/api/fleet/assignments').catch(() => ({ assignments: [] })),
           fleetFetch('/api/fleet/invites').catch(() => ({ sentInvites: [], receivedInvites: [] })),
         ]);
-        const ownedApproved = (vehicleData.vehicles || []).filter(v =>
-          v.status === 'approved' && (!fleetState.profile?.id || v.ownerOperatorProfileId === fleetState.profile.id));
-        fleetState.vehicles = ownedApproved;
-        renderFleetVehicles(ownedApproved);
+        const owned = (vehicleData.vehicles || []).filter(v =>
+          !fleetState.profile?.id || v.ownerOperatorProfileId === fleetState.profile.id);
+        fleetState.vehicles = owned;
+        renderFleetVehicles(owned);
         renderFleetAssignments(assignmentData.assignments || []);
         renderFleetSentInvites(inviteData.sentInvites || []);
         renderFleetReceivedInvites(inviteData.receivedInvites || []);
@@ -1455,15 +1479,47 @@
 
     function renderFleetVehicles(vehicles) {
       const box = document.getElementById('fleetVehicles');
-      if (!vehicles.length) { box.innerHTML = '<div class="empty-state"><p>No approved vehicles yet. Add and get a vehicle approved first.</p></div>'; return; }
+      if (!vehicles.length) { box.innerHTML = '<div class="empty-state"><p>No vehicles yet. Add your first car above.</p></div>'; return; }
       box.innerHTML = vehicles.map(v => {
+        const approved = v.status === 'approved';
         const sel = fleetState.selectedVehicleId === v.id;
-        return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid ${sel ? 'var(--black,#111)' : 'var(--grey-100)'};border-radius:10px;margin-bottom:8px;cursor:pointer;background:${sel ? 'var(--grey-50,#f7f7f8)' : 'transparent'};">
-          <input type="radio" name="fleetVehicle" ${sel ? 'checked' : ''} onchange="selectFleetVehicle('${v.id}')" />
-          <div><div style="font-weight:600;font-size:14px;">${escapeHtml((v.carMake || '') + ' ' + (v.vehicleModel || ''))}</div>
-          <div style="font-size:12px;color:var(--grey-400);">${escapeHtml(v.plateNumber || '')}</div></div>
+        const statusColor = approved ? 'var(--green,#16a34a)' : (v.status === 'pending' ? 'var(--amber,#d97706)' : 'var(--grey-400,#9ca3af)');
+        const statusLabel = approved ? 'Approved' : (v.status === 'pending' ? 'Pending review' : (v.status || 'Draft'));
+        return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid ${sel ? 'var(--black,#111)' : 'var(--grey-100)'};border-radius:10px;margin-bottom:8px;cursor:${approved ? 'pointer' : 'default'};background:${sel ? 'var(--grey-50,#f7f7f8)' : 'transparent'};opacity:${approved ? '1' : '0.75'};">
+          ${approved ? `<input type="radio" name="fleetVehicle" ${sel ? 'checked' : ''} onchange="selectFleetVehicle('${v.id}')" />` : '<span style="width:14px;"></span>'}
+          <div style="flex:1;"><div style="font-weight:600;font-size:14px;">${escapeHtml((v.carMake || '') + ' ' + (v.vehicleModel || ''))}</div>
+          <div style="font-size:12px;color:var(--grey-400);">${escapeHtml(v.plateNumber || '')}${v.vehicleType ? ' · ' + escapeHtml(v.vehicleType) : ''}</div></div>
+          <span style="font-size:11px;font-weight:700;color:${statusColor};text-transform:capitalize;">${escapeHtml(statusLabel)}</span>
         </label>`;
       }).join('');
+    }
+
+    async function addFleetVehicle() {
+      const payload = {
+        carMake: document.getElementById('vehMake').value.trim(),
+        vehicleModel: document.getElementById('vehModel').value.trim(),
+        vehicleYear: document.getElementById('vehYear').value.trim(),
+        plateNumber: document.getElementById('vehPlate').value.trim(),
+        vehicleType: document.getElementById('vehType').value,
+        carColor: document.getElementById('vehColor').value.trim(),
+        passengerCapacity: document.getElementById('vehPax').value.trim() || '4',
+        luggageCapacity: document.getElementById('vehLuggage').value.trim() || '2',
+        submit: true,
+      };
+      const missing = ['carMake','vehicleModel','vehicleYear','plateNumber','carColor'].filter(k => !payload[k]);
+      if (missing.length) { showNotification('Please fill in make, model, year, plate and colour.', 'error'); return; }
+      const btn = document.getElementById('addVehicleBtn');
+      btn.disabled = true; btn.textContent = 'Adding…';
+      try {
+        await fleetFetch('/api/vehicles', { method: 'POST', body: JSON.stringify(payload) });
+        ['vehMake','vehModel','vehYear','vehPlate','vehColor','vehPax','vehLuggage'].forEach(id => { document.getElementById(id).value = ''; });
+        showNotification('Vehicle added and sent to A2B for approval.', 'success');
+        await loadFleet();
+      } catch (e) {
+        showNotification(e.message || 'Could not add vehicle.', 'error');
+      } finally {
+        btn.disabled = false; btn.textContent = 'Add vehicle for review';
+      }
     }
 
     function renderFleetSentInvites(invites) {
