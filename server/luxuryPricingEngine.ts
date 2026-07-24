@@ -11,7 +11,11 @@ const PRICING_CONFIG = {
   commissionRate: 0.25,
   platformFeeRate: 0.2,
   driverAnnualShareRate: 0.05,
-  maxSurgeMultiplier: 5,
+  maxSurgeMultiplier: 1.5,
+  // Surge only kicks in once there is genuine, sustained demand — not just
+  // because few drivers happen to be online on a quiet/new app.
+  minActiveRequestsForSurge: 4,
+  surgeDampingFactor: 0.5,
   perMinuteAdjustmentRate: 1,
   cancellationGracePeriodMin: 3,
 };
@@ -49,20 +53,29 @@ export function calculateSurgeMultiplier(input: SurgeInput): SurgeDetails {
   const activeRequests = Math.max(0, Math.floor(Number(input.activeRequests) || 0));
   const eligibleDrivers = Math.max(0, Math.floor(Number(input.eligibleDrivers) || 0));
 
-  if (activeRequests <= 0 || activeRequests <= eligibleDrivers) {
+  // No surge until there is a meaningful volume of concurrent requests. This
+  // prevents a quiet/new app (1 request, 0-1 drivers) from ever surging just
+  // because driver supply is thin.
+  if (
+    activeRequests < PRICING_CONFIG.minActiveRequestsForSurge ||
+    activeRequests <= eligibleDrivers
+  ) {
     return { multiplier: 1, reason: null, highDemand: false };
   }
 
+  // Scale gently with the *proportional* excess of demand over supply, damped
+  // so prices rise gradually and never past the (low) cap.
   const driverCount = Math.max(eligibleDrivers, 1);
-  const rawMultiplier = activeRequests / driverCount;
+  const excessRatio = (activeRequests - eligibleDrivers) / driverCount;
+  const rawMultiplier = 1 + excessRatio * PRICING_CONFIG.surgeDampingFactor;
   const multiplier = Math.min(
     PRICING_CONFIG.maxSurgeMultiplier,
-    Math.max(1, Math.ceil(rawMultiplier * 10) / 10),
+    Math.max(1, Math.round(rawMultiplier * 10) / 10),
   );
 
   return {
     multiplier,
-    reason: "High demand: more ride requests than nearby matching cars",
+    reason: multiplier > 1 ? "High demand: more ride requests than nearby matching cars" : null,
     highDemand: multiplier > 1,
   };
 }

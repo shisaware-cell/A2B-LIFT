@@ -2101,7 +2101,12 @@ export default function ChauffeurDashboard() {
               <View style={styles.offerTimerPill}>
                 <Text style={styles.offerTimerText}>{incomingOfferSeconds}s</Text>
               </View>
-              {getRideClientFare(incomingRide) ? <Text style={styles.incomingPrice}>R {getRideClientFare(incomingRide).toFixed(0)}</Text> : null}
+              {getRideFare(incomingRide) ? (
+                <View style={styles.incomingEarnBox}>
+                  <Text style={styles.incomingEarnLabel}>You earn</Text>
+                  <Text style={styles.incomingPrice}>R {getRideFare(incomingRide).toFixed(0)}</Text>
+                </View>
+              ) : null}
             </View>
             <View style={styles.addrRow}>
               <View style={styles.dotGreen} />
@@ -2454,6 +2459,8 @@ const styles = StyleSheet.create({
   incomingClientButton: { flex: 1, flexDirection: "row", alignItems: "center", gap: 4 },
   incomingTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.warning, flex: 1 },
   incomingPrice: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.white },
+  incomingEarnBox: { alignItems: "flex-end" },
+  incomingEarnLabel: { fontSize: 8, fontFamily: "Inter_500Medium", color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5 },
   offerTimerPill: { minWidth: 38, alignItems: "center", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: "rgba(255,183,77,0.16)", borderWidth: 1, borderColor: "rgba(255,183,77,0.32)" },
   offerTimerText: { fontSize: 11, fontFamily: "Inter_700Bold", color: Colors.warning },
   incomingActions: { flexDirection: "row", gap: 10, marginTop: 2 },

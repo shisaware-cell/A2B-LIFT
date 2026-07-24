@@ -211,6 +211,7 @@ export default function ReferralsScreen() {
   const [accountHolder, setAccountHolder] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [cashoutBusy, setCashoutBusy] = useState(false);
+  const [transferBusy, setTransferBusy] = useState(false);
 
   const isWide = width >= 900;
   const rewardsBalance = Number(summary?.rewardsBalance ?? user?.rewardsBalance ?? 0);
@@ -397,6 +398,28 @@ export default function ReferralsScreen() {
     }
   }
 
+  async function handleTransferToWallet() {
+    if (rewardsBalance <= 0) {
+      Alert.alert("Nothing to transfer", "You have no referral balance to move to your wallet yet.");
+      return;
+    }
+    setTransferBusy(true);
+    try {
+      const res = await apiRequest("POST", "/api/rewards/transfer-to-wallet");
+      const data = await res.json().catch(() => ({}));
+      await refreshUser();
+      await loadData({ showLoader: false });
+      Alert.alert(
+        "Transferred to wallet",
+        `R ${Number(data.amount || rewardsBalance).toFixed(2)} moved to your wallet. You can now withdraw it (admin-approved) or use it to pay for rides.`,
+      );
+    } catch (error: any) {
+      Alert.alert("Transfer failed", error.message || "Could not transfer your referral balance.");
+    } finally {
+      setTransferBusy(false);
+    }
+  }
+
   if (loading) {
     return (
       <View style={[styles.loadingWrap, { paddingTop: insets.top + 16 }]}> 
@@ -523,7 +546,16 @@ export default function ReferralsScreen() {
               <Text style={styles.balanceNoticeText}>Balances refresh after completed trips and reward programme earnings post automatically.</Text>
             </View>
 
-            <Text style={styles.minimumHint}>Minimum withdrawal request: R {MIN_CASHOUT_AMOUNT.toFixed(2)}</Text>
+            <Text style={styles.minimumHint}>Move your referral earnings to your wallet, then withdraw (admin-approved) or spend them on rides.</Text>
+
+            <Pressable
+              style={[styles.primaryAction, (rewardsBalance <= 0 || transferBusy) && styles.secondaryActionDisabled]}
+              onPress={handleTransferToWallet}
+              disabled={rewardsBalance <= 0 || transferBusy}
+            >
+              <Ionicons name="wallet-outline" size={16} color="#181818" />
+              <Text style={styles.primaryActionText}>{transferBusy ? "Transferring…" : "Transfer to Wallet"}</Text>
+            </Pressable>
 
             <View style={styles.balanceActionsRow}>
               <Pressable

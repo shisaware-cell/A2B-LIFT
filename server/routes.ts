@@ -1240,20 +1240,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
       const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ message: "Email and password are required." });
+      }
       const user = await storage.getUserByUsername(username);
       if (!user) {
+        console.warn(`[auth/login] no account for "${String(username).toLowerCase().trim()}"`);
         return res.status(401).json({ message: "Invalid credentials" });
+      }
+      if (!user.password) {
+        // Account was created via Google sign-in and has no password set.
+        console.warn(`[auth/login] account "${user.username}" has no password (Google sign-in only)`);
+        return res.status(401).json({ message: "This account has no password. Please sign in with Google, or reset your password." });
       }
       const valid = await bcrypt.compare(password, user.password);
       if (!valid) {
+        console.warn(`[auth/login] password mismatch for "${user.username}"`);
         return res.status(401).json({ message: "Invalid credentials" });
       }
       const token = signAccessToken({ sub: user.id, role: user.role as UserRole, email: user.username, name: user.name });
       setAuthCookie(res, token);
-      const safeUser = await hydrateAuthUser(user);
+      // Never let a hydration hiccup (referral code write, rewards/lift-club lookups)
+      // turn a valid login into a 500 / "unable to connect". Fall back to a minimal
+      // safe user so the person can always get in.
+      let safeUser: any;
+      try {
+        safeUser = await hydrateAuthUser(user);
+      } catch (hydrationError: any) {
+        console.error("[auth/login] hydrateAuthUser failed, returning minimal user:", hydrationError?.message || hydrationError);
+        const { password: _pw, ...rest } = user;
+        safeUser = { ...rest, rewardsBalance: Number((user as any).rewardsBalance || 0) };
+      }
       return res.json({ user: safeUser, accessToken: token });
     } catch (error: any) {
-      return res.status(500).json({ message: error.message });
+      console.error("[auth/login] error:", error?.message || error);
+      return res.status(500).json({ message: error.message || "Login failed" });
     }
   });
 
@@ -1546,6 +1567,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(201).json(created);
     } catch (error: any) {
       return res.status(500).json({ message: error.message || "Failed to submit cash-out request" });
+    }
+  });
+
+  // Transfer referral (rewards) balance into the spendable wallet. Once in the
+  // wallet it can be withdrawn (admin-approved) or used to pay for rides.
+  app.post("/api/rewards/transfer-to-wallet", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId = req.auth!.sub;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const rewardsBalance = Math.round(Number(await getUserRewardsBalance(userId)) * 100) / 100;
+      if (rewardsBalance <= 0) {
+        return res.status(400).json({ message: "You have no referral balance to transfer." });
+      }
+
+      // Default: transfer the whole referral balance. A specific amount may be passed.
+      let amount = Number(req.body?.amount);
+      if (!Number.isFinite(amount) || amount <= 0) amount = rewardsBalance;
+      amount = Math.round(amount * 100) / 100;
+      if (amount > rewardsBalance) {
+        return res.status(400).json({ message: `You can transfer at most R${rewardsBalance.toFixed(2)}.` });
+      }
+
+      const walletBefore = Number(user.walletBalance || 0);
+      const walletAfter = Math.round((walletBefore + amount) * 100) / 100;
+      const rewardsAfter = Math.round((rewardsBalance - amount) * 100) / 100;
+      const reference = `rewards_to_wallet_${Date.now()}_${userId.slice(0, 6)}`;
+
+      await storage.updateUser(userId, { walletBalance: walletAfter, rewardsBalance: rewardsAfter });
+      await storage.createWalletTransaction({
+        userId,
+        type: "referral_transfer",
+        amount,
+        balanceBefore: walletBefore,
+        balanceAfter: walletAfter,
+        reference,
+        description: "Referral balance transferred to wallet",
+        status: "completed",
+      });
+      await storage.createRewardTransaction({
+        userId,
+        type: "wallet_transfer",
+        amount,
+        balanceBefore: rewardsBalance,
+        balanceAfter: rewardsAfter,
+        reference,
+        description: "Transferred to wallet",
+        status: "completed",
+      }).catch(() => undefined);
+
+      return res.json({ success: true, amount, walletBalance: walletAfter, rewardsBalance: rewardsAfter });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || "Failed to transfer referral balance" });
     }
   });
 

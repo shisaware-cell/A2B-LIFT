@@ -34,7 +34,7 @@ interface WalletTx {
 
 const TX_ICONS: Record<string, string> = {
   topup: "⬆️", ride_charge: "🚗", earning: "💰",
-  withdrawal: "⬇️", refund: "↩️", referral_reward: "🎁",
+  withdrawal: "⬇️", refund: "↩️", referral_reward: "🎁", referral_transfer: "🎁",
 };
 
 function RandIcon({ size = 20, color = "#fff" }: { size?: number; color?: string }) {
@@ -496,9 +496,9 @@ export default function ClientWalletScreen() {
                 </View>
                 <Text style={[
                   styles.txAmount,
-                  { color: ["topup", "earning", "refund", "referral_reward"].includes(tx.type) ? Colors.success : Colors.error }
+                  { color: ["topup", "earning", "refund", "referral_reward", "referral_transfer"].includes(tx.type) ? Colors.success : Colors.error }
                 ]}>
-                  {["topup", "earning", "refund", "referral_reward"].includes(tx.type) ? "+" : "-"}R {tx.amount.toFixed(2)}
+                  {["topup", "earning", "refund", "referral_reward", "referral_transfer"].includes(tx.type) ? "+" : "-"}R {tx.amount.toFixed(2)}
                 </Text>
               </View>
             ))
