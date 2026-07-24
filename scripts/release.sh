@@ -74,13 +74,15 @@ echo " Target   : $VARIANT ($EXPECTED_BUNDLE_ID)"
 echo " Platform : $PLATFORM | Action: $ACTION"
 echo " $RESOLVED_VERSIONS"
 [[ "$PLATFORM" == "ios" ]] && echo " ASC app  : $EXPECTED_ASC_APP_ID"
-[[ "$PLATFORM" == "ota" ]] && echo " OTA chan : $UPDATE_CHANNEL"
+# Optional 4th arg overrides the OTA channel (e.g. "preview" for internal/maptest builds).
+OTA_CHANNEL="${4:-$UPDATE_CHANNEL}"
+[[ "$PLATFORM" == "ota" ]] && echo " OTA chan : $OTA_CHANNEL"
 echo "──────────────────────────────────────────────"
 
 # --- OTA: ship JS-only changes to installed apps via EAS Update ---
 if [[ "$PLATFORM" == "ota" || "$PLATFORM" == "update" ]]; then
-  echo "Publishing OTA update to channel '$UPDATE_CHANNEL'…"
-  npx eas-cli update --branch "$UPDATE_CHANNEL" --message "$ACTION" --non-interactive
+  echo "Publishing OTA update to channel '$OTA_CHANNEL'…"
+  npx eas-cli update --branch "$OTA_CHANNEL" --message "$ACTION" --non-interactive
   exit $?
 fi
 
