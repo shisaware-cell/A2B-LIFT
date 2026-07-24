@@ -2616,14 +2616,39 @@ async function adminDelete(type, id, label) {
 }
 
 // ── SEARCH ──
-function doSearch(q) {
-  if (curView === 'chauffeurs') {
-    const f = allChauf.filter(c => `${c.userName||''} ${c.userEmail||''} ${c.phone||''} ${c.userPhone||''} ${c.carMake||''} ${c.vehicleModel||''} ${c.plateNumber||''} ${c.carColor||''}`.toLowerCase().includes(q.toLowerCase()));
-    renderChauffeurTable('chauf-table', f, true);
-  }
+// Switch to the Chauffeurs view WITHOUT clearing the search box (unlike go()).
+function switchToChauffeursView() {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const navChauf = document.querySelector('.nav-item[onclick*="chauffeurs"]');
+  if (navChauf) navChauf.classList.add('active');
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-chauffeurs').classList.add('active');
+  document.getElementById('page-title').textContent = VIEW_TITLES['chauffeurs'] || 'Chauffeurs';
+  curView = 'chauffeurs';
+}
+
+async function doSearch(q) {
+  const query = (q || '').trim();
+
+  // The selfies view keeps its own dedicated search.
   if (curView === 'selfies') {
-    const f = allSelfies.filter(item => `${item.riderName} ${item.riderEmail} ${item.pickupAddress} ${item.dropoffAddress} ${item.rideId}`.toLowerCase().includes(q.toLowerCase()));
+    const f = allSelfies.filter(item => `${item.riderName} ${item.riderEmail} ${item.pickupAddress} ${item.dropoffAddress} ${item.rideId}`.toLowerCase().includes(query.toLowerCase()));
     renderSelfiesTable(f);
+    return;
+  }
+
+  // From ANY other view (dashboard, rides, withdrawals, etc.) a search looks up
+  // drivers by name, email, or phone — jumping to the Chauffeurs list.
+  if (query) {
+    if (curView !== 'chauffeurs') {
+      switchToChauffeursView();
+      if (!allChauf.length) { await loadChauf(); }
+    }
+    const f = allChauf.filter(c => `${c.userName||''} ${c.userEmail||''} ${c.phone||''} ${c.userPhone||''} ${c.carMake||''} ${c.vehicleModel||''} ${c.plateNumber||''} ${c.carColor||''}`.toLowerCase().includes(query.toLowerCase()));
+    renderChauffeurTable('chauf-table', f, true);
+  } else if (curView === 'chauffeurs') {
+    // Cleared search — restore the current filter tab.
+    renderFilteredChauf();
   }
 }
 
