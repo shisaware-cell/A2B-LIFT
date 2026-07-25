@@ -2301,6 +2301,7 @@ export default function ClientHomeScreen() {
           showDriver={rideStatus === "assigned" || rideStatus === "arriving" || rideStatus === "in_trip"}
           followDriver={rideStatus === "arriving" || rideStatus === "in_trip"}
           loading={locationLoading}
+          initialZoom={currentRide ? "street" : "city"}
           etaText={etaText || undefined}
           statusText={
             rideStatus === "in_trip" ? "Trip In Progress" : undefined

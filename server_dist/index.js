@@ -621,7 +621,7 @@ var DatabaseStorage = class {
   }
   async getUserByUsername(username) {
     const normalised = username.toLowerCase().trim();
-    const [user] = await db.select().from(users).where((0, import_drizzle_orm2.eq)(users.username, normalised));
+    const [user] = await db.select().from(users).where(import_drizzle_orm2.sql`lower(${users.username}) = ${normalised}`);
     return user;
   }
   async getUserByReferralCode(referralCode) {
@@ -2933,13 +2933,14 @@ async function registerRoutes(app2) {
   });
   app2.post("/api/auth/login", async (req, res) => {
     try {
-      const { username, password } = req.body;
-      if (!username || !password) {
+      const { username, email, password } = req.body;
+      const loginIdentifier = username || email;
+      if (!loginIdentifier || !password) {
         return res.status(400).json({ message: "Email and password are required." });
       }
-      const user = await storage.getUserByUsername(username);
+      const user = await storage.getUserByUsername(loginIdentifier);
       if (!user) {
-        console.warn(`[auth/login] no account for "${String(username).toLowerCase().trim()}"`);
+        console.warn(`[auth/login] no account for "${String(loginIdentifier).toLowerCase().trim()}"`);
         return res.status(401).json({ message: "Invalid credentials" });
       }
       if (!user.password) {
