@@ -15,16 +15,14 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
-
-const DRIVER_SHARE = 0.75;
+import { getDriverNetFare } from "@shared/fare-policy";
 
 function getGrossFare(ride: any) {
-  return Number(ride?.actualFare || ride?.price || 0);
+  return Number(ride?.finalFare || ride?.price || ride?.actualFare || ride?.quotedFare || 0);
 }
 
 function getDriverFare(ride: any) {
-  const grossFare = getGrossFare(ride);
-  return grossFare > 0 ? grossFare * DRIVER_SHARE : 0;
+  return getDriverNetFare(getGrossFare(ride));
 }
 
 function formatDate(dateStr: string | null | undefined) {

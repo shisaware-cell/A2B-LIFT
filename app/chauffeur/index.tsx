@@ -42,9 +42,9 @@ import {
 } from "@/lib/google-navigation";
 import Colors from "@/constants/colors";
 import A2BMap from "@/components/A2BMap";
+import { getDriverNetFare } from "@shared/fare-policy";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const DRIVER_SHARE = 0.75;
 const ROUTE_REFRESH_MIN_DISTANCE_KM = 0.2;
 const ROUTE_REFRESH_MAX_AGE_MS = 5 * 60 * 1000;
 const RIDE_ALERT_SUPPRESSION_MS = 30 * 60 * 1000;
@@ -335,11 +335,11 @@ export default function ChauffeurDashboard() {
     return reorderRoutesForClientSelection(uniqueRoutes, currentRide);
   }
 
-  /** Estimate the full trip fare for a route distance — matches the rider's app. */
+  /** Estimate the driver's net earnings for a route distance. */
   function calcRoutePrice(distanceKm: number | undefined): string {
     if (!distanceKm || !currentRide) return "";
     if (currentRide?.status === "trip_started" && getRideClientFare(currentRide) > 0 && Math.abs(Number(currentRide.selectedRouteDistanceKm || 0) - Number(distanceKm || 0)) < 0.35) {
-      return `R ${getRideClientFare(currentRide).toFixed(0)}`;
+      return `R ${getRideFare(currentRide).toFixed(0)}`;
     }
     const rates: Record<string, { pricePerKm: number; baseFare: number }> = {
       budget:      { pricePerKm: 7,  baseFare: 50  },
@@ -349,8 +349,8 @@ export default function ChauffeurDashboard() {
       luxury_van:  { pricePerKm: 35, baseFare: 200 },
     };
     const cat = rates[currentRide.vehicleType || "budget"] || rates.budget;
-    const total = Math.round(cat.baseFare + distanceKm * cat.pricePerKm);
-    return `R ${total}`;
+    const grossFare = Math.round(cat.baseFare + distanceKm * cat.pricePerKm);
+    return `R ${getDriverNetFare(grossFare).toFixed(0)}`;
   }
 
   function getRideRouteLabel(routeId?: string | null) {
@@ -378,12 +378,11 @@ export default function ChauffeurDashboard() {
   }
 
   function getRideClientFare(ride: any) {
-    return Number(ride?.actualFare || ride?.price || 0);
+    return Number(ride?.finalFare || ride?.price || ride?.actualFare || ride?.quotedFare || 0);
   }
 
   function getRideFare(ride: any) {
-    const grossFare = getRideClientFare(ride);
-    return grossFare > 0 ? Math.round(grossFare * DRIVER_SHARE) : 0;
+    return getDriverNetFare(getRideClientFare(ride));
   }
 
   async function getClientSummary(clientId?: string): Promise<ClientSummary | null> {
@@ -1953,7 +1952,7 @@ export default function ChauffeurDashboard() {
                       <Text style={styles.tripClientName}>{trip.clientFirstName || (trip.clientName ? String(trip.clientName).split(" ")[0] : "Client")}</Text>
                       <Ionicons name="chevron-forward" size={12} color={Colors.textMuted} />
                     </Pressable>
-                    {getRideClientFare(trip) ? <Text style={styles.tripPrice}>R {getRideClientFare(trip).toFixed(0)}</Text> : null}
+                    {getRideFare(trip) ? <Text style={styles.tripPrice}>R {getRideFare(trip).toFixed(0)}</Text> : null}
                   </View>
                   <View style={styles.tripAddrRow}>
                     <View style={styles.dotGreen} />
@@ -2058,7 +2057,7 @@ export default function ChauffeurDashboard() {
               </ScrollView>
             </View>
           )}
-          {getRideClientFare(currentRide) ? <Text style={styles.priceText}>R {getRideClientFare(currentRide).toFixed(0)}</Text> : null}
+          {getRideFare(currentRide) ? <Text style={styles.priceText}>R {getRideFare(currentRide).toFixed(0)}</Text> : null}
           <View style={styles.rideActions}>
             <Pressable style={styles.rideSecBtn} onPress={() => router.push({ pathname: "/chauffeur/chat", params: { rideId: currentRide.id, riderName: currentRide.clientFirstName || currentRide.clientName || "Client" } })}>
               <Ionicons name="chatbubble-outline" size={15} color={Colors.white} />
@@ -2265,10 +2264,10 @@ export default function ChauffeurDashboard() {
                 <View style={styles.payPopupIconWrap}>
                   <Ionicons name="cash-outline" size={40} color={Colors.success} />
                 </View>
-                <Text style={styles.payPopupTitle}>Collect Cash Payment</Text>
-                <Text style={styles.payPopupAmount}>R {getRideClientFare(completedTrip).toFixed(0)}</Text>
+                <Text style={styles.payPopupTitle}>Your Trip Earnings</Text>
+                <Text style={styles.payPopupAmount}>R {getRideFare(completedTrip).toFixed(0)}</Text>
                 <Text style={styles.payPopupBody}>
-                  Please collect R {getRideClientFare(completedTrip).toFixed(0)} from {completedTrip?.clientFirstName || (completedTrip?.clientName ? String(completedTrip.clientName).split(" ")[0] : "the client")} before they exit the vehicle. Your net after 25% commission is R {getRideFare(completedTrip).toFixed(0)}.
+                  Collect R {getRideClientFare(completedTrip).toFixed(0)} cash from {completedTrip?.clientFirstName || (completedTrip?.clientName ? String(completedTrip.clientName).split(" ")[0] : "the client")} before they exit. After the 25% platform commission, R {getRideFare(completedTrip).toFixed(0)} is due to you.
                 </Text>
               </>
             ) : (

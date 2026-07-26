@@ -1,3 +1,8 @@
+import {
+  getDriverNetFare,
+  getPlatformCommission,
+} from "../shared/fare-policy";
+
 export const VEHICLE_CATEGORIES: Record<string, { name: string; pricePerKm: number; baseFare: number; examples: string }> = {
   budget: { name: "Budget", pricePerKm: 7, baseFare: 50, examples: "Toyota Corolla, Toyota Quest" },
   luxury: { name: "Luxury", pricePerKm: 13, baseFare: 100, examples: "BMW 3 Series, Mercedes C Class" },
@@ -8,7 +13,6 @@ export const VEHICLE_CATEGORIES: Record<string, { name: string; pricePerKm: numb
 
 const PRICING_CONFIG = {
   lateNightPremiumMultiplier: 1.3,
-  commissionRate: 0.25,
   platformFeeRate: 0.2,
   driverAnnualShareRate: 0.05,
   maxSurgeMultiplier: 1.5,
@@ -177,16 +181,16 @@ export function calculateCancellationFee(
 }
 
 export function calculateChauffeurEarnings(totalPrice: number) {
-  const commission = totalPrice * PRICING_CONFIG.commissionRate;
+  const commission = getPlatformCommission(totalPrice);
   const platformFee = totalPrice * PRICING_CONFIG.platformFeeRate;
   const driverAnnualShare = totalPrice * PRICING_CONFIG.driverAnnualShareRate;
-  const chauffeurEarnings = totalPrice - commission;
+  const chauffeurEarnings = getDriverNetFare(totalPrice);
   return {
     totalPrice,
-    commission: Math.round(commission),
+    commission,
     platformFee: Math.round(platformFee),
     driverAnnualShare: Math.round(driverAnnualShare),
-    chauffeurEarnings: Math.round(chauffeurEarnings),
+    chauffeurEarnings,
   };
 }
 
