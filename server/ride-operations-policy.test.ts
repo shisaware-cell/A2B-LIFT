@@ -34,6 +34,15 @@ test("charges the selected vehicle base fare only after three driving minutes", 
   assert.equal(calculateRiderCancellationFee({ minutesDrivingToPickup: 3, baseFareCents: 4500, waitingFeeCents: 1200 }), 5700);
 });
 
+test("applies the ride's locked smart-pricing multiplier to cancellation fees", () => {
+  assert.equal(calculateRiderCancellationFee({
+    minutesDrivingToPickup: 3,
+    baseFareCents: 5000,
+    waitingFeeCents: 0,
+    pricingMultiplier: 1.5,
+  }), 7500);
+});
+
 test("reconciles only an approved driver's stale operator profile", () => {
   assert.equal(reconcileDriverProfileStatus({ profileType: "driver", profileStatus: "pending", chauffeurApproved: true }), "approved");
   assert.equal(reconcileDriverProfileStatus({ profileType: "partner", profileStatus: "pending", chauffeurApproved: true }), "pending");
@@ -52,6 +61,17 @@ test("charges a rider but never a driver for an eligible cancellation", () => {
 
 test("includes waiting time when a rider cancels after driver arrival", () => {
   assert.deepEqual(resolveCancellation({ actor: "rider", baseFareCents: 4500, minutesDrivingToPickup: 0, waitingFeeCents: 1200, arrived: true }), { feeCents: 5700, cashDebtCents: 5700 });
+});
+
+test("combines locked smart pricing and waiting time after driver arrival", () => {
+  assert.deepEqual(resolveCancellation({
+    actor: "rider",
+    baseFareCents: 5000,
+    minutesDrivingToPickup: 0,
+    waitingFeeCents: 1200,
+    pricingMultiplier: 1.5,
+    arrived: true,
+  }), { feeCents: 8700, cashDebtCents: 8700 });
 });
 
 test("accepts only finite latitude and longitude samples", () => {

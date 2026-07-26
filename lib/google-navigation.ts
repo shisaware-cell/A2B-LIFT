@@ -23,8 +23,13 @@ function isValidCoordinate(coordinate: NavigationCoordinate) {
 export function buildGoogleMapsNavigationUrl(
   coordinate: NavigationCoordinate,
   platform: NavigationPlatform,
+  waypoints: NavigationCoordinate[] = [],
 ) {
   if (!isValidCoordinate(coordinate)) return null;
+  const validWaypoints = waypoints.filter(isValidCoordinate);
+  if (validWaypoints.length > 0) {
+    return buildGoogleMapsWebNavigationUrl(coordinate, validWaypoints);
+  }
 
   const destination = `${formatCoordinate(coordinate.lat)},${formatCoordinate(coordinate.lng)}`;
 
@@ -39,9 +44,16 @@ export function buildGoogleMapsNavigationUrl(
   return buildGoogleMapsWebNavigationUrl(coordinate);
 }
 
-export function buildGoogleMapsWebNavigationUrl(coordinate: NavigationCoordinate) {
+export function buildGoogleMapsWebNavigationUrl(
+  coordinate: NavigationCoordinate,
+  waypoints: NavigationCoordinate[] = [],
+) {
   if (!isValidCoordinate(coordinate)) return null;
 
   const destination = `${formatCoordinate(coordinate.lat)},${formatCoordinate(coordinate.lng)}`;
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`;
+  const validWaypoints = waypoints.filter(isValidCoordinate);
+  const waypointParam = validWaypoints.length
+    ? `&waypoints=${encodeURIComponent(validWaypoints.map((point) => `${formatCoordinate(point.lat)},${formatCoordinate(point.lng)}`).join("|"))}`
+    : "";
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}${waypointParam}&travelmode=driving`;
 }

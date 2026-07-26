@@ -43,6 +43,7 @@ import {
 import Colors from "@/constants/colors";
 import A2BMap from "@/components/A2BMap";
 import { getDriverNetFare } from "@shared/fare-policy";
+import { normalizeRideStops } from "@shared/ride-stops";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const ROUTE_REFRESH_MIN_DISTANCE_KM = 0.2;
@@ -219,8 +220,11 @@ export default function ChauffeurDashboard() {
       ? { lat: Number(currentRide.dropoffLat), lng: Number(currentRide.dropoffLng) }
       : { lat: Number(currentRide.pickupLat), lng: Number(currentRide.pickupLng) };
     const platform = Platform.OS === "android" ? "android" : Platform.OS === "ios" ? "ios" : "web";
-    const appUrl = buildGoogleMapsNavigationUrl(coordinate, platform);
-    const webUrl = buildGoogleMapsWebNavigationUrl(coordinate);
+    const waypoints = currentRide.status === "trip_started"
+      ? normalizeRideStops(currentRide.stops).map(({ lat, lng }) => ({ lat, lng }))
+      : [];
+    const appUrl = buildGoogleMapsNavigationUrl(coordinate, platform, waypoints);
+    const webUrl = buildGoogleMapsWebNavigationUrl(coordinate, waypoints);
 
     if (!appUrl || !webUrl) {
       Alert.alert("Navigation unavailable", "This trip does not have a valid destination yet.");
@@ -1334,11 +1338,18 @@ export default function ChauffeurDashboard() {
     void stopBackgroundLocationTask();
   }
 
-  async function fetchDriverRoute(destLat: number, destLng: number, options?: { routeKey?: string }): Promise<boolean> {
+  async function fetchDriverRoute(
+    destLat: number,
+    destLng: number,
+    options?: { routeKey?: string; stops?: { lat: number; lng: number }[] },
+  ): Promise<boolean> {
     if (!myLocation) return false;
     try {
+      const stopQuery = options?.stops?.length
+        ? `&stops=${encodeURIComponent(options.stops.map((stop) => `${stop.lat},${stop.lng}`).join("|"))}`
+        : "";
       const res = await apiRequest("GET",
-        `/api/directions?originLat=${myLocation.lat}&originLng=${myLocation.lng}&destLat=${destLat}&destLng=${destLng}`
+        `/api/directions?originLat=${myLocation.lat}&originLng=${myLocation.lng}&destLat=${destLat}&destLng=${destLng}${stopQuery}`
       );
       const data = await res.json();
       const fallbackRoute = data?.polyline
@@ -1617,6 +1628,7 @@ export default function ChauffeurDashboard() {
               Number(ride.dropoffLat).toFixed(5),
               Number(ride.dropoffLng).toFixed(5),
             ].join(":"),
+            stops: normalizeRideStops(ride.stops),
           });
           setShowNavModal(true);
         }
@@ -1803,6 +1815,7 @@ export default function ChauffeurDashboard() {
             <A2BMap
               pickupLocation={currentRide ? { lat: parseFloat(currentRide.pickupLat), lng: parseFloat(currentRide.pickupLng) } : myLocation}
               dropoffLocation={currentRide ? { lat: parseFloat(currentRide.dropoffLat), lng: parseFloat(currentRide.dropoffLng) } : undefined}
+              stopLocations={normalizeRideStops(currentRide?.stops)}
               driverLocation={myLocation}
               routePolyline={routePolyline}
               showDriver={true}
@@ -1864,6 +1877,7 @@ export default function ChauffeurDashboard() {
         <A2BMap
           pickupLocation={myLocation || (currentRide ? { lat: parseFloat(currentRide.pickupLat), lng: parseFloat(currentRide.pickupLng) } : null)}
           dropoffLocation={currentRide ? { lat: parseFloat(currentRide.dropoffLat), lng: parseFloat(currentRide.dropoffLng) } : undefined}
+          stopLocations={normalizeRideStops(currentRide?.stops)}
           driverLocation={myLocation}
           routePolyline={routePolyline}
           showDriver={true}
@@ -1958,6 +1972,12 @@ export default function ChauffeurDashboard() {
                     <View style={styles.dotGreen} />
                     <Text style={styles.tripAddrText} numberOfLines={1}>{trip.pickupAddress || "Pickup"}</Text>
                   </View>
+                  {normalizeRideStops(trip.stops).map((stop, index) => (
+                    <View key={stop.id} style={styles.tripAddrRow}>
+                      <Text style={styles.stopIndexText}>{index + 1}</Text>
+                      <Text style={styles.tripAddrText} numberOfLines={1}>{stop.address}</Text>
+                    </View>
+                  ))}
                   <View style={styles.tripAddrRow}>
                     <View style={styles.dotRed} />
                     <Text style={styles.tripAddrText} numberOfLines={1}>{trip.dropoffAddress || "Dropoff"}</Text>
@@ -2111,6 +2131,12 @@ export default function ChauffeurDashboard() {
               <View style={styles.dotGreen} />
               <Text style={styles.addrText} numberOfLines={1}>{incomingRide.pickupAddress || "Pickup"}</Text>
             </View>
+            {normalizeRideStops(incomingRide.stops).map((stop, index) => (
+              <View key={stop.id} style={styles.addrRow}>
+                <Text style={styles.stopIndexText}>{index + 1}</Text>
+                <Text style={styles.addrText} numberOfLines={1}>{stop.address}</Text>
+              </View>
+            ))}
             <View style={styles.addrRow}>
               <View style={styles.dotRed} />
               <Text style={styles.addrText} numberOfLines={1}>{incomingRide.dropoffAddress || "Dropoff"}</Text>
@@ -2470,6 +2496,7 @@ const styles = StyleSheet.create({
   // Shared
   addrRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   addrText: { flex: 1, fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textSecondary },
+  stopIndexText: { width: 14, fontSize: 11, fontFamily: "Inter_700Bold", color: Colors.accent, textAlign: "center" },
   dotGreen: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.success },
   dotRed: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.error },
   actionBtn: { backgroundColor: Colors.white, paddingVertical: 14, borderRadius: 14, alignItems: "center" },

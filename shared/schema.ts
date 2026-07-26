@@ -7,6 +7,7 @@ import {
   boolean,
   real,
   timestamp,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -81,6 +82,7 @@ export const rides = pgTable("rides", {
   dropoffLat: real("dropoff_lat").notNull(),
   dropoffLng: real("dropoff_lng").notNull(),
   dropoffAddress: text("dropoff_address"),
+  stops: jsonb("stops").$type<import("./ride-stops").RideStop[]>().notNull().default([]),
   status: text("status").notNull().default("requested"),
   price: real("price"),
   pricePerKm: real("price_per_km"),
@@ -564,6 +566,7 @@ export const insertRideSchema = createInsertSchema(rides).pick({
   dropoffLat: true,
   dropoffLng: true,
   dropoffAddress: true,
+  stops: true,
   vehicleType: true,
   paymentMethod: true,
   cashSelfieUrl: true,

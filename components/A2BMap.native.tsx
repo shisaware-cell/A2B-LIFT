@@ -152,6 +152,7 @@ interface NearbyDriver {
 interface A2BMapProps {
   pickupLocation: { lat: number; lng: number } | null;
   dropoffLocation?: { lat: number; lng: number } | null;
+  stopLocations?: { id?: string; lat: number; lng: number }[];
   driverLocation?: { lat: number; lng: number } | null;
   nearbyDrivers?: NearbyDriver[];
   routePolyline?: string | null;
@@ -167,6 +168,7 @@ interface A2BMapProps {
 export default function A2BMap({
   pickupLocation,
   dropoffLocation,
+  stopLocations = [],
   driverLocation,
   nearbyDrivers = [],
   routePolyline,
@@ -416,6 +418,17 @@ export default function A2BMap({
             </View>
           </Marker>
         )}
+        {stopLocations.map((stop, index) => (
+          <Marker
+            key={stop.id || `stop-${index}`}
+            coordinate={{ latitude: stop.lat, longitude: stop.lng }}
+            title={`Stop ${index + 1}`}
+          >
+            <View style={styles.stopMarker}>
+              <Text style={styles.stopMarkerText}>{index + 1}</Text>
+            </View>
+          </Marker>
+        ))}
 
         {/* Nearby idle drivers shown when not in an active ride */}
         {!showDriver && nearbyDrivers.map((driver) => (
@@ -509,6 +522,21 @@ const styles = StyleSheet.create({
   },
   dropoffMarker: {
     alignItems: "center",
+  },
+  stopMarker: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.accent,
+    borderWidth: 2,
+    borderColor: Colors.white,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stopMarkerText: {
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+    color: Colors.primary,
   },
   nearbyDriverMarker: {
     width: 30,

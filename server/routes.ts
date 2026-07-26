@@ -10,7 +10,6 @@ import { users, livenessSessions, rides as ridesTable } from "../shared/schema";
 import { desc, eq, sql } from "drizzle-orm";
 import { uploadLivenessPhoto, getAdminSignedUrl } from "./livenessPhotoService";
 import {
-  calculateCancellationFee,
   calculatePrice,
   calculateChauffeurEarnings,
   calculatePerMinuteAdjustment,
@@ -29,6 +28,12 @@ import { authOptional, requireAuth, requireRole, type AuthedRequest } from "./au
 import { signAccessToken, type UserRole } from "./auth";
 import { externalApiService } from "./external-api-service";
 import { sendEmail, sendSms, renderBrandedEmail, emailEnabled, smsEnabled } from "./notification-service";
+import { normalizeRideStops } from "../shared/ride-stops";
+import {
+  calculateWaitingFee,
+  resolveCancellation,
+} from "./ride-operations-policy";
+import { combineDirectionSegments } from "./multi-stop-routing";
 
 const RIDE_MATCH_RADIUS_KM = 25;
 const CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
@@ -48,6 +53,15 @@ function calculateHaversineDistanceKm(lat1: number, lng1: number, lat2: number, 
     Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function isSouthAfricaLateNight(now = new Date()) {
+  const hour = Number(new Intl.DateTimeFormat("en-ZA", {
+    hour: "2-digit",
+    hour12: false,
+    timeZone: "Africa/Johannesburg",
+  }).format(now));
+  return hour >= 22 || hour < 5;
 }
 
 function getAnnualShareGrossFromEarning(earning: any): number {
@@ -482,11 +496,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS trip_started_at timestamp");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancelled_by text");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancellation_fee real DEFAULT 0");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS stops jsonb NOT NULL DEFAULT '[]'::jsonb");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS surge_multiplier real DEFAULT 1");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS surge_reason text");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS estimated_duration_min real");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS actual_duration_min real");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS per_minute_adjustment real DEFAULT 0");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS demand_multiplier real NOT NULL DEFAULT 1");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS quoted_fare real");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS final_fare real");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS actual_distance_km real");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS waiting_fee real NOT NULL DEFAULT 0");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS settlement_status text NOT NULL DEFAULT 'quoted'");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS pickup_travel_started_at timestamp");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS arrived_at timestamp");
     await pool.query("CREATE INDEX IF NOT EXISTS idx_rides_current_offer ON rides(current_offered_chauffeur_id, current_offer_expires_at)");
     await pool.query(`
       CREATE TABLE IF NOT EXISTS lift_club_memberships (
@@ -1839,10 +1862,88 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return Number(value.toFixed(4));
   }
 
-  function buildDirectionsCacheKey(originLat: string, originLng: string, destLat: string, destLng: string) {
-    const normalized = [originLat, originLng, destLat, destLng].map(normalizeCoordinate);
+  function buildDirectionsCacheKey(originLat: string, originLng: string, destLat: string, destLng: string, stops = "") {
+    const normalized = [originLat, originLng, destLat, destLng, ...stops.split("|").flatMap((stop) => stop.split(","))]
+      .filter((value) => value !== "")
+      .map(normalizeCoordinate);
     if (normalized.some((value) => value == null)) return null;
     return normalized.join(":");
+  }
+
+  function parseStopsParam(raw: unknown) {
+    if (typeof raw !== "string" || !raw.trim()) return [];
+    return normalizeRideStops(raw.split("|").map((point, index) => {
+      const [lat, lng] = point.split(",");
+      return { id: `stop-${index + 1}`, address: `Stop ${index + 1}`, lat, lng };
+    }));
+  }
+
+  function parseGoogleDirectionsRoute(route: any, idx = 0) {
+    const legs = Array.isArray(route?.legs) ? route.legs : [];
+    const distanceMeters = legs.reduce((sum: number, leg: any) => sum + Number(leg?.distance?.value || 0), 0);
+    const durationSeconds = legs.reduce((sum: number, leg: any) => sum + Number(leg?.duration?.value || 0), 0);
+    const steps = legs.flatMap((leg: any) => (leg.steps || []).map((step: any) => ({
+      instruction: String(step.html_instructions || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(),
+      distance: step.distance?.text || "",
+      duration: step.duration?.text || "",
+      endLat: step.end_location?.lat,
+      endLng: step.end_location?.lng,
+      maneuver: step.maneuver || "straight",
+    })));
+    const distanceKm = distanceMeters / 1000;
+    const durationMin = Math.ceil(durationSeconds / 60);
+    return {
+      polyline: route?.overview_polyline?.points || "",
+      distanceKm,
+      distanceText: `${distanceKm.toFixed(distanceKm >= 10 ? 0 : 1)} km`,
+      durationMin,
+      durationText: `${durationMin} min`,
+      summary: route?.summary || `Route ${idx + 1}`,
+      steps,
+    };
+  }
+
+  async function fetchVerifiedDirections(
+    origin: { lat: number; lng: number },
+    destination: { lat: number; lng: number },
+    stops: { lat: number; lng: number }[] = [],
+    alternatives = false,
+  ) {
+    if (stops.length > 20) {
+      const points = [origin, ...stops, destination];
+      const segments: any[] = [];
+      let start = 0;
+      while (start < points.length - 1) {
+        const end = Math.min(start + 21, points.length - 1);
+        const [segment] = await fetchVerifiedDirections(
+          points[start],
+          points[end],
+          points.slice(start + 1, end),
+          false,
+        );
+        segments.push(segment);
+        start = end;
+      }
+      return [combineDirectionSegments(segments)];
+    }
+    const apiKey =
+      process.env.GOOGLE_MAPS_SERVER_API_KEY ||
+      process.env.GOOGLE_MAPS_API_KEY ||
+      process.env.GOOGLE_API_KEY;
+    if (!apiKey) throw new Error("Google Maps API key not configured");
+    const waypointParam = stops.length
+      ? `&waypoints=${encodeURIComponent(stops.map((stop) => `${stop.lat},${stop.lng}`).join("|"))}`
+      : "";
+    const url =
+      `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.lat},${origin.lng}` +
+      `&destination=${destination.lat},${destination.lng}${waypointParam}` +
+      `&alternatives=${alternatives ? "true" : "false"}&key=${apiKey}`;
+    const response = await fetch(url);
+    const data = (await response.json()) as any;
+    if (data.status !== "OK" || !data.routes?.length) {
+      throw new Error(data.error_message || data.status || "No route found");
+    }
+    return data.routes.map((route: any, index: number) => parseGoogleDirectionsRoute(route, index));
   }
 
   function getDirectionsCacheEntry(cacheKey: string) {
@@ -3096,60 +3197,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const originLng = typeof req.query.originLng === "string" ? req.query.originLng : "";
       const destLat = typeof req.query.destLat === "string" ? req.query.destLat : "";
       const destLng = typeof req.query.destLng === "string" ? req.query.destLng : "";
+      const stopsParam = typeof req.query.stops === "string" ? req.query.stops : "";
+      const stops = parseStopsParam(stopsParam);
       if (!originLat || !originLng || !destLat || !destLng) {
         return res
           .status(400)
           .json({ message: "Origin and destination coordinates are required" });
       }
-      const apiKey =
-        process.env.GOOGLE_MAPS_SERVER_API_KEY ||
-        process.env.GOOGLE_MAPS_API_KEY ||
-        process.env.GOOGLE_API_KEY;
-      if (!apiKey) {
-        return res
-          .status(500)
-          .json({ message: "Google Maps API key not configured" });
-      }
-      const cacheKey = buildDirectionsCacheKey(originLat, originLng, destLat, destLng);
+      const cacheKey = buildDirectionsCacheKey(originLat, originLng, destLat, destLng, stopsParam);
       if (cacheKey) {
         const cached = getDirectionsCacheEntry(cacheKey);
         if (cached) {
           return res.json(cached);
         }
       }
-      const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${originLat},${originLng}&destination=${destLat},${destLng}&alternatives=true&key=${apiKey}`;
-      const response = await fetch(url);
-      const data = (await response.json()) as any;
-      if (data.status === "OK" && data.routes?.length > 0) {
-        const parseRoute = (route: any, idx: number) => {
-          const leg = route.legs[0];
-          const steps = (leg.steps || []).map((step: any) => ({
-            instruction: step.html_instructions.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(),
-            distance: step.distance?.text || "",
-            duration: step.duration?.text || "",
-            endLat: step.end_location?.lat,
-            endLng: step.end_location?.lng,
-            maneuver: step.maneuver || "straight",
-          }));
-          return {
-            polyline: route.overview_polyline.points,
-            distanceKm: leg.distance.value / 1000,
-            distanceText: leg.distance.text,
-            durationMin: Math.ceil(leg.duration.value / 60),
-            durationText: leg.duration.text,
-            summary: route.summary || `Route ${idx + 1}`,
-            steps,
-          };
-        };
-        const primary = parseRoute(data.routes[0], 0);
-        const alternatives = data.routes.map((r: any, i: number) => parseRoute(r, i));
-        const payload = { ...primary, alternatives };
-        if (cacheKey) {
-          setDirectionsCacheEntry(cacheKey, payload);
-        }
-        return res.json(payload);
+      const routes = await fetchVerifiedDirections(
+        { lat: Number(originLat), lng: Number(originLng) },
+        { lat: Number(destLat), lng: Number(destLng) },
+        stops,
+        stops.length === 0,
+      );
+      const primary = routes[0];
+      const payload = { ...primary, alternatives: routes };
+      if (cacheKey) {
+        setDirectionsCacheEntry(cacheKey, payload);
       }
-      return res.status(404).json({ message: "No route found" });
+      return res.json(payload);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -6322,7 +6395,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // -----------------------------
   app.post("/api/pricing/estimate", async (req: Request, res: Response) => {
     try {
-      const { distanceKm, categoryId, isLateNight, pickupLat, pickupLng, durationMin } = req.body;
+      const { distanceKm, categoryId, pickupLat, pickupLng, durationMin } = req.body;
       const rideForDemand = {
         id: `estimate_${Date.now()}`,
         vehicleType: categoryId || "budget",
@@ -6338,7 +6411,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         eligibleDrivers: eligibleDrivers.length,
       });
       const estimate = calculatePrice(distanceKm, categoryId || "budget", {
-        isLateNight,
+        isLateNight: isSouthAfricaLateNight(),
         surgeMultiplier: surge.multiplier,
         surgeReason: surge.reason,
         estimatedDurationMin: durationMin,
@@ -6522,7 +6595,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // -----------------------------
   app.post("/api/rides", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
-      const { distanceKm, isLateNight, ...rideData } = req.body;
+      const { distanceKm, ...rideData } = req.body;
 
       // Always use the verified JWT subject as the clientId (ignore untrusted body value)
       const clientId = req.auth!.sub;
@@ -6572,9 +6645,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const categoryId = rideData.vehicleType || "budget";
       const normalizedDistanceKm = Number(rideData.selectedRouteDistanceKm ?? distanceKm ?? 10);
-      const safeDistanceKm = Number.isFinite(normalizedDistanceKm) && normalizedDistanceKm > 0 ? normalizedDistanceKm : 10;
+      let safeDistanceKm = Number.isFinite(normalizedDistanceKm) && normalizedDistanceKm > 0 ? normalizedDistanceKm : 10;
       const normalizedDurationMin = Number(rideData.durationMin ?? 0);
-      const safeDurationMin = Number.isFinite(normalizedDurationMin) && normalizedDurationMin > 0 ? normalizedDurationMin : null;
+      let safeDurationMin = Number.isFinite(normalizedDurationMin) && normalizedDurationMin > 0 ? normalizedDurationMin : null;
+      const stops = normalizeRideStops(rideData.stops);
+      const pickup = { lat: Number(rideData.pickupLat), lng: Number(rideData.pickupLng) };
+      const destination = { lat: Number(rideData.dropoffLat), lng: Number(rideData.dropoffLng) };
+      if (
+        !isValidLocationSample(pickup.lat, pickup.lng) ||
+        !isValidLocationSample(destination.lat, destination.lng)
+      ) {
+        return res.status(400).json({ success: false, message: "Valid pickup and destination coordinates are required." });
+      }
+      try {
+        const [verifiedRoute] = await fetchVerifiedDirections(pickup, destination, stops);
+        safeDistanceKm = verifiedRoute.distanceKm;
+        safeDurationMin = verifiedRoute.durationMin;
+      } catch (routeError: any) {
+        return res.status(400).json({
+          success: false,
+          message: routeError?.message || "The complete route could not be verified.",
+        });
+      }
       const selectedRouteId = typeof rideData.selectedRouteId === "string" && rideData.selectedRouteId.trim()
         ? rideData.selectedRouteId.trim()
         : null;
@@ -6593,7 +6685,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         eligibleDrivers: eligibleDrivers.length,
       });
       const priceEstimate = calculatePrice(safeDistanceKm, categoryId, {
-        isLateNight,
+        isLateNight: isSouthAfricaLateNight(),
         surgeMultiplier: surge.multiplier,
         surgeReason: surge.reason,
         estimatedDurationMin: safeDurationMin,
@@ -6638,6 +6730,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dropoffLat: rideData.dropoffLat,
         dropoffLng: rideData.dropoffLng,
         dropoffAddress: rideData.dropoffAddress || null,
+        stops,
         vehicleType: rideData.vehicleType || "budget",
         paymentMethod: rideData.paymentMethod || "cash",
         price: safeFare,
@@ -6647,6 +6740,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pricePerKm: priceEstimate.pricePerKm,
         baseFare: priceEstimate.baseFare,
         surgeMultiplier: priceEstimate.surgeMultiplier,
+        demandMultiplier: priceEstimate.demandMultiplier,
         surgeReason: priceEstimate.surgeReason,
         status: scheduledFor ? "reserved" : "searching",
         ...(scheduledFor ? { scheduledFor } : {}),
@@ -6659,6 +6753,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         selectedRouteId,
         selectedRouteDistanceKm: selectedRouteId ? safeDistanceKm : null,
         actualFare: selectedRouteId ? safeFare : null,
+        quotedFare: safeFare,
+        finalFare: safeFare,
+        settlementStatus: "quoted",
         routeCurrency,
         routeSelectedAt: selectedRouteId ? new Date() : null,
         ...(livenessVerifiedAt ? { livenessVerifiedAt } : {}),
@@ -7021,6 +7118,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Verify caller is a party to this ride (chauffeur or rider)
       const existingRide = await storage.getRide(req.params.id);
       if (!existingRide) return res.status(404).json({ message: "Ride not found" });
+      if (status === "cancelled" && existingRide.status === "cancelled") {
+        return res.json(existingRide);
+      }
+      if (status === "cancelled" && existingRide.status === "trip_completed") {
+        return res.status(409).json({ message: "A completed ride cannot be cancelled." });
+      }
 
       const callerUser = await storage.getUser(req.auth!.sub);
       if (!callerUser) return res.status(403).json({ message: "Forbidden" });
@@ -7050,6 +7153,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (status === "trip_started") {
         updateData.tripStartedAt = (existingRide as any).tripStartedAt || now;
       }
+      if (status === "chauffeur_arriving") {
+        updateData.pickupTravelStartedAt = (existingRide as any).pickupTravelStartedAt || now;
+      }
+      if (status === "chauffeur_arrived") {
+        updateData.arrivedAt = (existingRide as any).arrivedAt || now;
+      }
       if (status === "trip_completed") {
         const actualDurationFromBody = Number(req.body?.actualDurationMin);
         const actualDurationMin = Number.isFinite(actualDurationFromBody) && actualDurationFromBody > 0
@@ -7069,6 +7178,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         updateData.actualDurationMin = Math.round(actualDurationMin * 10) / 10;
         updateData.perMinuteAdjustment = minuteAdjustment.adjustmentAmount;
         updateData.price = Math.round((Number(existingRide.price || 0) + additionalAdjustment) * 100) / 100;
+        updateData.finalFare = updateData.price;
+        updateData.settlementStatus = "completed";
       }
       if (status === "cancelled") {
         // Reserved (pre-booked, card-paid) rides cancelled by the rider forfeit
@@ -7079,13 +7190,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else if (isReservation) {
           updateData.cancellationFee = 0; // driver/admin cancelled, or unpaid → full refund
         } else {
-          const cancellation = calculateCancellationFee(
-            existingRide.vehicleType || "budget",
-            (existingRide as any).acceptedAt,
-            now,
-            cancelledBy,
+          const acceptedAt = (existingRide as any).pickupTravelStartedAt || (existingRide as any).acceptedAt;
+          const elapsedMinutes = acceptedAt
+            ? Math.max(0, (now.getTime() - new Date(acceptedAt).getTime()) / 60000)
+            : 0;
+          const arrivedAt = (existingRide as any).arrivedAt;
+          const waitingFeeCents = arrivedAt
+            ? calculateWaitingFee(Math.max(0, (now.getTime() - new Date(arrivedAt).getTime()) / 60000))
+            : 0;
+          const baseFare = Math.max(0, Number(existingRide.baseFare || 0));
+          const unadjustedFare =
+            baseFare +
+            Math.max(0, Number(existingRide.distanceKm || 0)) *
+              Math.max(0, Number(existingRide.pricePerKm || 0));
+          const lockedFare = Math.max(
+            0,
+            Number((existingRide as any).quotedFare || existingRide.price || 0),
           );
-          updateData.cancellationFee = cancellation.fee;
+          const pricingMultiplier = unadjustedFare > 0
+            ? Math.max(1, lockedFare / unadjustedFare)
+            : Math.max(1, Number((existingRide as any).demandMultiplier || existingRide.surgeMultiplier || 1));
+          const cancellation = resolveCancellation({
+            actor: cancelledBy === "client" ? "rider" : "driver",
+            baseFareCents: Math.round(baseFare * 100),
+            minutesDrivingToPickup: elapsedMinutes,
+            waitingFeeCents,
+            pricingMultiplier,
+            arrived: Boolean(arrivedAt),
+          });
+          updateData.waitingFee = waitingFeeCents / 100;
+          updateData.cancellationFee = cancellation.feeCents / 100;
+          updateData.settlementStatus = cancellation.feeCents > 0 ? "cancelled_charged" : "cancelled_free";
         }
         updateData.cancelledBy = cancelledBy;
         updateData.currentOfferedChauffeurId = null;
@@ -7227,6 +7362,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
 
+          if (rideBeforeUpdate.chauffeurId && cancelledBy === "client" && cancellationFee > 0) {
+            const existingEarnings = await storage.getEarningsByChauffeur(rideBeforeUpdate.chauffeurId);
+            const alreadyCredited = existingEarnings.some((earning: any) =>
+              earning.rideId === ride.id && earning.type === "cancellation"
+            );
+            if (!alreadyCredited) {
+              const cancellationEarnings = calculateChauffeurEarnings(cancellationFee);
+              await storage.createEarning({
+                chauffeurId: rideBeforeUpdate.chauffeurId,
+                rideId: ride.id,
+                amount: cancellationEarnings.chauffeurEarnings,
+                commission: cancellationEarnings.commission,
+                type: "cancellation",
+              });
+              const chauffeur = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
+              if (chauffeur) {
+                await storage.updateChauffeur(chauffeur.id, {
+                  earningsTotal: Number(chauffeur.earningsTotal || 0) + cancellationEarnings.chauffeurEarnings,
+                });
+              }
+            }
+          }
+
           // ── Notify the assigned chauffeur (if any) ──
           if (rideBeforeUpdate.chauffeurId) {
             const chauffeur = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
@@ -7234,7 +7392,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
               await storage.createNotification({
                 userId: chauffeur.userId,
                 title: "Ride Cancelled",
-                body: "The client has cancelled this trip.",
+                body: cancellationFee > 0
+                  ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee).chauffeurEarnings.toFixed(2)} was added to your earnings.`
+                  : "The client has cancelled this trip.",
                 type: "ride",
               });
             }
@@ -7242,7 +7402,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
               sendExpoPushNotification(
                 [(chauffeur as any).pushToken],
                 "Ride Cancelled",
-                "The client has cancelled this trip."
+                cancellationFee > 0
+                  ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee).chauffeurEarnings.toFixed(2)} was added to your earnings.`
+                  : "The client has cancelled this trip."
               );
             }
           }

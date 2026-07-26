@@ -39,6 +39,7 @@ import { uploadDocument } from "@/lib/supabase-storage";
 import Colors from "@/constants/colors";
 import A2BMap from "@/components/A2BMap";
 import LivenessCamera, { type LivenessChallenge, type LivenessCaptureResult } from "@/components/LivenessCamera";
+import { encodeStopsQuery, normalizeRideStops, type RideStop } from "@shared/ride-stops";
 
 const VEHICLE_TYPES = [
   { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", icon: "car" as const, pricePerKm: 35, baseFare: 200, badge: "recommended" },
@@ -51,6 +52,7 @@ const VEHICLE_TYPES = [
 type RideStatus = "idle" | "selecting" | "confirming" | "requested" | "assigned" | "arriving" | "in_trip" | "completed" | "no_drivers";
 
 type NearbyDriverState = { id: string; lat: number; lng: number };
+type LocationPickerTarget = "pickup" | "dropoff" | number;
 
 interface ChauffeurDetails {
   id?: string;
@@ -863,6 +865,7 @@ export default function ClientHomeScreen() {
   const [pickupAddress, setPickupAddress] = useState("Current Location");
   const [dropoffAddress, setDropoffAddress] = useState("");
   const [dropoffCoords, setDropoffCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [stops, setStops] = useState<RideStop[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState(VEHICLE_TYPES[0]);
   const [rideStatus, setRideStatus] = useState<RideStatus>("idle");
   const [estimatedPrice, setEstimatedPrice] = useState<number | null>(null);
@@ -914,7 +917,7 @@ export default function ClientHomeScreen() {
 
   // Location picker modal
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
-  const [locationPickerTarget, setLocationPickerTarget] = useState<"pickup" | "dropoff">("dropoff");
+  const [locationPickerTarget, setLocationPickerTarget] = useState<LocationPickerTarget>("dropoff");
   const [locationPickerQuery, setLocationPickerQuery] = useState("");
   const [locationSuggestions, setLocationSuggestions] = useState<{ placeId: string; description: string; mainText: string; secondaryText: string; lat: number | null; lng: number | null }[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
@@ -1160,8 +1163,12 @@ export default function ClientHomeScreen() {
     }
   }
 
-  function openLocationPicker(target: "pickup" | "dropoff") {
-    const current = target === "pickup" ? pickupAddress : dropoffAddress;
+  function openLocationPicker(target: LocationPickerTarget) {
+    const current = target === "pickup"
+      ? pickupAddress
+      : target === "dropoff"
+        ? dropoffAddress
+        : stops[target]?.address || "";
     setLocationPickerTarget(target);
     setLocationPickerQuery(current === CURRENT_LOCATION_LABEL ? "" : current);
     setLocationSuggestions([]);
@@ -1171,6 +1178,19 @@ export default function ClientHomeScreen() {
     setLocationPickerVisible(true);
   }
 
+  function addStop() {
+    const index = stops.length;
+    setStops((current) => [
+      ...current,
+      { id: `stop-${Date.now()}-${index}`, address: "", lat: Number.NaN, lng: Number.NaN },
+    ]);
+    setTimeout(() => openLocationPicker(index), 0);
+  }
+
+  function removeStop(index: number) {
+    setStops((current) => current.filter((_, stopIndex) => stopIndex !== index));
+  }
+
   function isActiveAutocompleteRequest(requestId: number, query: string) {
     return autocompleteRequestIdRef.current === requestId && latestAutocompleteQueryRef.current === query;
   }
@@ -1178,7 +1198,7 @@ export default function ClientHomeScreen() {
   function applyLocationSuggestions(
     requestId: number,
     query: string,
-    target: "pickup" | "dropoff",
+    target: LocationPickerTarget,
     source: string,
     suggestions: { placeId: string; description: string; mainText: string; secondaryText: string; lat: number | null; lng: number | null }[],
   ) {
@@ -1208,6 +1228,11 @@ export default function ClientHomeScreen() {
     setLocationPickerQuery(text);
     // Clear previously resolved coords when user edits the query
     if (locationPickerTarget === "dropoff") setDropoffCoords(null);
+    if (typeof locationPickerTarget === "number") {
+      setStops((current) => current.map((stop, index) =>
+        index === locationPickerTarget ? { ...stop, lat: Number.NaN, lng: Number.NaN } : stop
+      ));
+    }
     if (autocompleteTimerRef.current) clearTimeout(autocompleteTimerRef.current);
     const query = text.trim();
     latestAutocompleteQueryRef.current = query;
@@ -1472,9 +1497,14 @@ export default function ClientHomeScreen() {
         locationWatchRef.current = null;
         setLocation(coords);
         setPickupAddress(address);
-      } else {
+      } else if (locationPickerTarget === "dropoff") {
         setDropoffCoords(coords);
         setDropoffAddress(address);
+      } else {
+        const stopIndex = locationPickerTarget;
+        setStops((current) => current.map((stop, index) =>
+          index === stopIndex ? { ...stop, address, ...coords } : stop
+        ));
       }
       setLocationPickerVisible(false);
       setLocationSuggestions([]);
@@ -1714,8 +1744,9 @@ export default function ClientHomeScreen() {
 
   async function fetchRoute(origin: { lat: number; lng: number }, dest: { lat: number; lng: number }) {
     try {
+      const stopsQuery = encodeStopsQuery(normalizeRideStops(stops));
       const res = await apiRequest("GET",
-        `/api/directions?originLat=${origin.lat}&originLng=${origin.lng}&destLat=${dest.lat}&destLng=${dest.lng}`
+        `/api/directions?originLat=${origin.lat}&originLng=${origin.lng}&destLat=${dest.lat}&destLng=${dest.lng}${stopsQuery ? `&stops=${encodeURIComponent(stopsQuery)}` : ""}`
       );
       const data = await res.json();
       if (data.polyline) {
@@ -1748,9 +1779,10 @@ export default function ClientHomeScreen() {
     let data: any = null;
 
     try {
+      const stopsQuery = encodeStopsQuery(normalizeRideStops(stops));
       const res = await apiRequest(
         "GET",
-        `/api/directions?originLat=${origin.lat}&originLng=${origin.lng}&destLat=${dest.lat}&destLng=${dest.lng}`
+        `/api/directions?originLat=${origin.lat}&originLng=${origin.lng}&destLat=${dest.lat}&destLng=${dest.lng}${stopsQuery ? `&stops=${encodeURIComponent(stopsQuery)}` : ""}`
       );
       data = await res.json();
     } catch {
@@ -1774,6 +1806,10 @@ export default function ClientHomeScreen() {
       : fallbackRoute;
     const choiceDescriptors = buildRouteChoiceDescriptors(sourceRoutes);
     if (choiceDescriptors.length === 0) {
+      if (stops.length > 0) {
+        setRouteChoices([]);
+        return [];
+      }
       const approximateChoice = buildApproximateRouteChoice(origin, dest, selectedVehicle, isLateNightWindow());
       setRouteChoices([approximateChoice]);
       applyRouteChoice(approximateChoice);
@@ -1915,6 +1951,10 @@ export default function ClientHomeScreen() {
       Alert.alert("Location Error", "Unable to determine your location");
       return;
     }
+    if (normalizeRideStops(stops).length !== stops.length) {
+      Alert.alert("Complete every stop", "Choose an address for each stop or remove the empty stop.");
+      return;
+    }
     try {
       // Use already-resolved coords from autocomplete selection, or geocode the typed address
       const dest = dropoffCoords ?? await geocodeDestination();
@@ -1977,6 +2017,7 @@ export default function ClientHomeScreen() {
       selectedRouteDistanceKm: activeRouteChoice?.distanceKm || undefined,
       actualFare: activeRouteChoice?.fare || estimatedPrice || undefined,
       routeCurrency: activeRouteChoice?.currency || "ZAR",
+      stops: normalizeRideStops(stops),
       isLateNight: new Date().getHours() >= 22 || new Date().getHours() < 5,
       ...extras,
     });
@@ -2145,6 +2186,7 @@ export default function ClientHomeScreen() {
       setRideStatus("idle");
       setDropoffAddress("");
       setDropoffCoords(null);
+      setStops([]);
       setRouteChoices([]);
       setSelectedRouteId(null);
       setRoutePolyline(null);
@@ -2192,9 +2234,17 @@ export default function ClientHomeScreen() {
     }
   }
 
-  function cancelRide() {
+  async function cancelRide() {
+    let appliedFee = 0;
     if (currentRide) {
-      apiRequest("PUT", `/api/rides/${currentRide.id}/status`, { status: "cancelled" }).catch(() => {});
+      try {
+        const response = await apiRequest("PUT", `/api/rides/${currentRide.id}/status`, { status: "cancelled" });
+        const cancelledRide = await response.json();
+        appliedFee = Math.max(0, Number(cancelledRide?.cancellationFee || 0));
+      } catch (error: any) {
+        Alert.alert("Cancellation failed", error?.message || "The trip could not be cancelled. Please try again.");
+        return;
+      }
     }
     if (user?.id) queryClient.invalidateQueries({ queryKey: ["/api/rides/client", user.id] });
     setRideStatus("idle");
@@ -2206,11 +2256,15 @@ export default function ClientHomeScreen() {
     setPaymentMethod("cash");
     setDropoffAddress("");
     setDropoffCoords(null);
+    setStops([]);
     setRoutePolyline(null);
     setTripDurationText(null);
     setTripDurationMin(null);
     setDriverLocation(null);
     setEtaText(null);
+    if (appliedFee > 0) {
+      Alert.alert("Ride cancelled", `A smart-pricing cancellation fee of R${appliedFee.toFixed(2)} was charged.`);
+    }
   }
 
   function getCancellationWarningText() {
@@ -2218,7 +2272,13 @@ export default function ClientHomeScreen() {
     const elapsedMin = acceptedAt ? (Date.now() - acceptedAt) / 60000 : 0;
     const baseFare = Number(currentRide?.baseFare || selectedRouteChoice?.baseFare || selectedVehicle.baseFare || 0);
     if (acceptedAt && elapsedMin >= 3 && baseFare > 0) {
-      return `The driver has already been assigned for more than 3 minutes. Cancelling now may charge the base fare of R ${baseFare}.`;
+      const unadjustedFare =
+        baseFare +
+        Number(currentRide?.distanceKm || 0) * Number(currentRide?.pricePerKm || selectedVehicle.pricePerKm || 0);
+      const lockedFare = Number(currentRide?.quotedFare || currentRide?.price || 0);
+      const pricingMultiplier = unadjustedFare > 0 ? Math.max(1, lockedFare / unadjustedFare) : 1;
+      const estimatedFee = baseFare * pricingMultiplier;
+      return `The driver has been assigned for more than 3 minutes. Cancelling now will charge approximately R${estimatedFee.toFixed(2)} using this ride's locked smart pricing. Waiting fees may also apply after arrival.`;
     }
     return "Are you sure you want to cancel this ride?";
   }
@@ -2254,6 +2314,7 @@ export default function ClientHomeScreen() {
     setPaymentMethod("cash");
     setDropoffAddress("");
     setDropoffCoords(null);
+    setStops([]);
     setChauffeurDetails(null);
     setRoutePolyline(null);
     setDriverLocation(null);
@@ -2289,6 +2350,7 @@ export default function ClientHomeScreen() {
       : null;
   const mapPickupLocation = location || validRidePickup || JHB_FALLBACK;
   const mapDropoffLocation = dropoffCoords || validRideDropoff;
+  const mapStops = normalizeRideStops(currentRide?.stops || stops);
   const mapHasLiveRideFocus =
     rideStatus === "assigned" ||
     rideStatus === "arriving" ||
@@ -2327,6 +2389,7 @@ export default function ClientHomeScreen() {
         <A2BMap
           pickupLocation={mapPickupLocation}
           dropoffLocation={mapDropoffLocation}
+          stopLocations={mapStops}
           driverLocation={driverLocation}
           nearbyDrivers={onlineDrivers}
           routePolyline={routePolyline}
@@ -2480,6 +2543,28 @@ export default function ClientHomeScreen() {
 
               <View style={styles.locationDivider} />
 
+              {stops.map((stop, index) => (
+                <React.Fragment key={stop.id}>
+                  <View style={styles.stopInputRow}>
+                    <Pressable style={styles.stopInputMain} onPress={() => openLocationPicker(index)}>
+                      <View style={styles.stopNumber}>
+                        <Text style={styles.stopNumberText}>{index + 1}</Text>
+                      </View>
+                      <View style={styles.locationInputInner}>
+                        <Text style={styles.locationInputLabel}>Stop {index + 1}</Text>
+                        <Text style={[styles.locationInputValue, !stop.address && { color: Colors.textMuted }]} numberOfLines={1}>
+                          {stop.address || "Choose stop location"}
+                        </Text>
+                      </View>
+                    </Pressable>
+                    <Pressable style={styles.removeStopBtn} onPress={() => removeStop(index)} hitSlop={8}>
+                      <Ionicons name="close-circle" size={20} color={Colors.textMuted} />
+                    </Pressable>
+                  </View>
+                  <View style={styles.locationDivider} />
+                </React.Fragment>
+              ))}
+
               <Pressable style={styles.locationInputRow} onPress={() => openLocationPicker("dropoff")}>
                 <View style={styles.dotRed} />
                 <View style={styles.locationInputInner}>
@@ -2494,6 +2579,11 @@ export default function ClientHomeScreen() {
                 <Ionicons name="pencil-outline" size={15} color={Colors.textMuted} />
               </Pressable>
             </View>
+
+            <Pressable style={styles.addStopBtn} onPress={addStop}>
+              <Ionicons name="add-circle-outline" size={18} color={Colors.white} />
+              <Text style={styles.addStopText}>Add stop</Text>
+            </Pressable>
 
             <Pressable
               style={styles.vehicleSelector}
@@ -2644,6 +2734,17 @@ export default function ClientHomeScreen() {
                 <Text style={styles.routeText} numberOfLines={2}>{pickupAddress}</Text>
               </View>
               <View style={styles.routeLine} />
+              {normalizeRideStops(stops).map((stop, index) => (
+                <React.Fragment key={stop.id}>
+                  <View style={styles.routeRow}>
+                    <View style={styles.stopNumber}>
+                      <Text style={styles.stopNumberText}>{index + 1}</Text>
+                    </View>
+                    <Text style={styles.routeText} numberOfLines={2}>{stop.address}</Text>
+                  </View>
+                  <View style={styles.routeLine} />
+                </React.Fragment>
+              ))}
               <View style={styles.routeRow}>
                 <View style={styles.dotRed} />
                 <Text style={styles.routeText} numberOfLines={2}>{dropoffAddress}</Text>
@@ -3393,7 +3494,11 @@ export default function ClientHomeScreen() {
               <Ionicons name="arrow-back" size={24} color={Colors.white} />
             </Pressable>
             <Text style={styles.locationPickerTitle}>
-              {locationPickerTarget === "pickup" ? "Set Pickup" : "Set Destination"}
+              {locationPickerTarget === "pickup"
+                ? "Set Pickup"
+                : locationPickerTarget === "dropoff"
+                  ? "Set Destination"
+                  : `Set Stop ${locationPickerTarget + 1}`}
             </Text>
             {__DEV__ ? (
               <Pressable onPress={() => setShowDebugLogModal(true)} hitSlop={12}>
@@ -3406,10 +3511,10 @@ export default function ClientHomeScreen() {
 
           {/* Search input */}
           <View style={styles.locationPickerInputRow}>
-            <View style={locationPickerTarget === "pickup" ? styles.dotGreen : styles.dotRed} />
+            <View style={locationPickerTarget === "pickup" ? styles.dotGreen : locationPickerTarget === "dropoff" ? styles.dotRed : styles.dotStop} />
             <TextInput
               style={styles.locationPickerInput}
-              placeholder={locationPickerTarget === "pickup" ? "Search pickup location..." : "Search destination..."}
+              placeholder={locationPickerTarget === "pickup" ? "Search pickup location..." : locationPickerTarget === "dropoff" ? "Search destination..." : "Search stop location..."}
               placeholderTextColor={Colors.textMuted}
               value={locationPickerQuery}
               onChangeText={onLocationQueryChange}
@@ -3762,6 +3867,12 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: Colors.error,
   },
+  dotStop: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.accent,
+  },
   locationText: {
     flex: 1,
     fontSize: 15,
@@ -3790,6 +3901,50 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 14,
     paddingHorizontal: 16,
+  },
+  stopInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingRight: 12,
+  },
+  stopInputMain: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 12,
+    paddingLeft: 14,
+  },
+  stopNumber: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: Colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stopNumberText: {
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+    color: Colors.primary,
+  },
+  removeStopBtn: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  addStopBtn: {
+    minHeight: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  addStopText: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.white,
   },
   locationInputInner: {
     flex: 1,

@@ -23,9 +23,13 @@ export function calculateRiderCancellationFee(options: {
   minutesDrivingToPickup: number;
   baseFareCents: number;
   waitingFeeCents: number;
+  pricingMultiplier?: number;
 }): number {
   if (options.minutesDrivingToPickup < RIDER_CANCELLATION_TRAVEL_MINUTES) return 0;
-  return Math.max(0, options.baseFareCents) + Math.max(0, options.waitingFeeCents);
+  const multiplier = Number.isFinite(options.pricingMultiplier)
+    ? Math.max(1, Number(options.pricingMultiplier))
+    : 1;
+  return Math.round(Math.max(0, options.baseFareCents) * multiplier) + Math.max(0, options.waitingFeeCents);
 }
 
 export function resolveCancellation(options: {
@@ -33,11 +37,15 @@ export function resolveCancellation(options: {
   baseFareCents: number;
   minutesDrivingToPickup: number;
   waitingFeeCents: number;
+  pricingMultiplier?: number;
   arrived?: boolean;
 }): { feeCents: number; cashDebtCents: number } {
   if (options.actor === "driver") return { feeCents: 0, cashDebtCents: 0 };
   const feeCents = options.arrived
-    ? Math.max(0, options.baseFareCents) + Math.max(0, options.waitingFeeCents)
+    ? calculateRiderCancellationFee({
+        ...options,
+        minutesDrivingToPickup: RIDER_CANCELLATION_TRAVEL_MINUTES,
+      })
     : calculateRiderCancellationFee(options);
   return { feeCents, cashDebtCents: feeCents };
 }

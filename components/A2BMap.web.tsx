@@ -67,6 +67,7 @@ interface NearbyDriver {
 interface A2BMapProps {
   pickupLocation: { lat: number; lng: number } | null;
   dropoffLocation?: { lat: number; lng: number } | null;
+  stopLocations?: { id?: string; lat: number; lng: number }[];
   driverLocation?: { lat: number; lng: number } | null;
   nearbyDrivers?: NearbyDriver[];
   routePolyline?: string | null;
@@ -81,6 +82,7 @@ interface A2BMapProps {
 export default function A2BMap({
   pickupLocation,
   dropoffLocation,
+  stopLocations = [],
   driverLocation,
   nearbyDrivers = [],
   routePolyline,
@@ -138,7 +140,7 @@ export default function A2BMap({
     // Small delay so Google Maps finishes rendering before we fit bounds
     const t = setTimeout(() => updateMarkers(), 200);
     return () => clearTimeout(t);
-  }, [pickupLocation, dropoffLocation, driverLocation, showDriver, nearbyDrivers]);
+  }, [pickupLocation, dropoffLocation, stopLocations, driverLocation, showDriver, nearbyDrivers]);
 
   useEffect(() => {
     if (!mapInstanceRef.current) return;
@@ -218,6 +220,16 @@ export default function A2BMap({
       markersRef.current.push(dropoffMarker);
     }
 
+    stopLocations.forEach((stop, index) => {
+      const stopMarker = new google.maps.Marker({
+        position: { lat: stop.lat, lng: stop.lng },
+        map: mapInstanceRef.current,
+        label: { text: String(index + 1), color: "#000000", fontWeight: "700" },
+        title: `Stop ${index + 1}`,
+      });
+      markersRef.current.push(stopMarker);
+    });
+
     if (!showDriver && nearbyDrivers.length > 0) {
       nearbyDrivers.forEach((driver) => {
         const m = new google.maps.Marker({
@@ -271,6 +283,10 @@ export default function A2BMap({
       let hasMultiple = false;
       if (pickupLocation) bounds.extend({ lat: pickupLocation.lat, lng: pickupLocation.lng });
       if (dropoffLocation) { bounds.extend({ lat: dropoffLocation.lat, lng: dropoffLocation.lng }); hasMultiple = true; }
+      stopLocations.forEach((stop) => {
+        bounds.extend({ lat: stop.lat, lng: stop.lng });
+        hasMultiple = true;
+      });
       if (showDriver && driverLocation) { bounds.extend({ lat: driverLocation.lat, lng: driverLocation.lng }); hasMultiple = true; }
       if (hasMultiple) {
         mapInstanceRef.current.fitBounds(bounds, { top: 60, right: 40, bottom: 160, left: 40 });

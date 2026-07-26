@@ -142,6 +142,7 @@ var rides = (0, import_pg_core.pgTable)("rides", {
   dropoffLat: (0, import_pg_core.real)("dropoff_lat").notNull(),
   dropoffLng: (0, import_pg_core.real)("dropoff_lng").notNull(),
   dropoffAddress: (0, import_pg_core.text)("dropoff_address"),
+  stops: (0, import_pg_core.jsonb)("stops").$type().notNull().default([]),
   status: (0, import_pg_core.text)("status").notNull().default("requested"),
   price: (0, import_pg_core.real)("price"),
   pricePerKm: (0, import_pg_core.real)("price_per_km"),
@@ -501,6 +502,7 @@ var insertRideSchema = (0, import_drizzle_zod.createInsertSchema)(rides).pick({
   dropoffLat: true,
   dropoffLng: true,
   dropoffAddress: true,
+  stops: true,
   vehicleType: true,
   paymentMethod: true,
   cashSelfieUrl: true,
@@ -1568,6 +1570,23 @@ async function getAdminSignedUrl(bucket, storagePath, expiresInSeconds = 3600) {
   }
 }
 
+// shared/fare-policy.ts
+var PLATFORM_COMMISSION_RATE = 0.25;
+var DRIVER_SHARE_RATE = 1 - PLATFORM_COMMISSION_RATE;
+function roundCurrency(amount) {
+  return Math.round(amount * 100) / 100;
+}
+function getDriverNetFare(grossFare) {
+  const gross = Number(grossFare);
+  if (!Number.isFinite(gross) || gross <= 0) return 0;
+  return roundCurrency(gross * DRIVER_SHARE_RATE);
+}
+function getPlatformCommission(grossFare) {
+  const gross = Number(grossFare);
+  if (!Number.isFinite(gross) || gross <= 0) return 0;
+  return roundCurrency(gross - getDriverNetFare(gross));
+}
+
 // server/luxuryPricingEngine.ts
 var VEHICLE_CATEGORIES = {
   budget: { name: "Budget", pricePerKm: 7, baseFare: 50, examples: "Toyota Corolla, Toyota Quest" },
@@ -1578,7 +1597,6 @@ var VEHICLE_CATEGORIES = {
 };
 var PRICING_CONFIG = {
   lateNightPremiumMultiplier: 1.3,
-  commissionRate: 0.25,
   platformFeeRate: 0.2,
   driverAnnualShareRate: 0.05,
   maxSurgeMultiplier: 1.5,
@@ -1653,30 +1671,17 @@ function calculatePerMinuteAdjustment(estimatedDurationMin, actualDurationMin, r
     ratePerMinute: Math.max(0, ratePerMinute)
   };
 }
-function calculateCancellationFee(categoryId, acceptedAt, cancelledAt = /* @__PURE__ */ new Date(), cancelledBy = "client") {
-  if (cancelledBy !== "client" || !acceptedAt) {
-    return { fee: 0, eligible: false, elapsedMinutes: 0 };
-  }
-  const accepted = new Date(acceptedAt).getTime();
-  const cancelled = new Date(cancelledAt).getTime();
-  const elapsedMinutes = Number.isFinite(accepted) && Number.isFinite(cancelled) ? Math.max(0, (cancelled - accepted) / 6e4) : 0;
-  if (elapsedMinutes < PRICING_CONFIG.cancellationGracePeriodMin) {
-    return { fee: 0, eligible: false, elapsedMinutes };
-  }
-  const category = VEHICLE_CATEGORIES[categoryId] || VEHICLE_CATEGORIES.budget;
-  return { fee: Math.round(category.baseFare), eligible: true, elapsedMinutes };
-}
 function calculateChauffeurEarnings(totalPrice) {
-  const commission = totalPrice * PRICING_CONFIG.commissionRate;
+  const commission = getPlatformCommission(totalPrice);
   const platformFee = totalPrice * PRICING_CONFIG.platformFeeRate;
   const driverAnnualShare = totalPrice * PRICING_CONFIG.driverAnnualShareRate;
-  const chauffeurEarnings = totalPrice - commission;
+  const chauffeurEarnings = getDriverNetFare(totalPrice);
   return {
     totalPrice,
-    commission: Math.round(commission),
+    commission,
     platformFee: Math.round(platformFee),
     driverAnnualShare: Math.round(driverAnnualShare),
-    chauffeurEarnings: Math.round(chauffeurEarnings)
+    chauffeurEarnings
   };
 }
 function getVehicleCategories() {
@@ -2000,6 +2005,114 @@ function renderBrandedEmail(opts) {
   </div></body></html>`;
 }
 
+// shared/ride-stops.ts
+function normalizeRideStops(value) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    const lat = Number(item?.lat);
+    const lng = Number(item?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return [];
+    }
+    return [{
+      id: String(item?.id || `stop-${index + 1}`),
+      address: String(item?.address || `Stop ${index + 1}`).trim(),
+      lat,
+      lng
+    }];
+  });
+}
+
+// server/ride-operations-policy.ts
+var WAITING_GRACE_MINUTES = 5;
+var WAITING_RATE_CENTS_PER_MINUTE = 100;
+var WAITING_CAP_CENTS = 3e3;
+var RIDER_CANCELLATION_TRAVEL_MINUTES = 3;
+function calculateWaitingFee(minutesSinceArrival) {
+  const chargeableMinutes = Math.max(0, Math.ceil(minutesSinceArrival - WAITING_GRACE_MINUTES));
+  return Math.min(chargeableMinutes * WAITING_RATE_CENTS_PER_MINUTE, WAITING_CAP_CENTS);
+}
+function calculateRiderCancellationFee(options) {
+  if (options.minutesDrivingToPickup < RIDER_CANCELLATION_TRAVEL_MINUTES) return 0;
+  const multiplier = Number.isFinite(options.pricingMultiplier) ? Math.max(1, Number(options.pricingMultiplier)) : 1;
+  return Math.round(Math.max(0, options.baseFareCents) * multiplier) + Math.max(0, options.waitingFeeCents);
+}
+function resolveCancellation(options) {
+  if (options.actor === "driver") return { feeCents: 0, cashDebtCents: 0 };
+  const feeCents = options.arrived ? calculateRiderCancellationFee({
+    ...options,
+    minutesDrivingToPickup: RIDER_CANCELLATION_TRAVEL_MINUTES
+  }) : calculateRiderCancellationFee(options);
+  return { feeCents, cashDebtCents: feeCents };
+}
+
+// server/multi-stop-routing.ts
+function decodePolyline(encoded) {
+  const points = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  while (index < encoded.length) {
+    let result = 0;
+    let shift = 0;
+    let byte = 0;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 31) << shift;
+      shift += 5;
+    } while (byte >= 32);
+    lat += result & 1 ? ~(result >> 1) : result >> 1;
+    result = 0;
+    shift = 0;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 31) << shift;
+      shift += 5;
+    } while (byte >= 32);
+    lng += result & 1 ? ~(result >> 1) : result >> 1;
+    points.push({ lat: lat / 1e5, lng: lng / 1e5 });
+  }
+  return points;
+}
+function encodeSigned(value) {
+  let encoded = value < 0 ? ~(value << 1) : value << 1;
+  let output = "";
+  while (encoded >= 32) {
+    output += String.fromCharCode((32 | encoded & 31) + 63);
+    encoded >>= 5;
+  }
+  return output + String.fromCharCode(encoded + 63);
+}
+function encodePolyline(points) {
+  let previousLat = 0;
+  let previousLng = 0;
+  return points.map((point) => {
+    const lat = Math.round(point.lat * 1e5);
+    const lng = Math.round(point.lng * 1e5);
+    const encoded = encodeSigned(lat - previousLat) + encodeSigned(lng - previousLng);
+    previousLat = lat;
+    previousLng = lng;
+    return encoded;
+  }).join("");
+}
+function combineDirectionSegments(segments) {
+  const coordinates = segments.flatMap((segment, index) => {
+    const decoded = decodePolyline(String(segment.polyline || ""));
+    return index > 0 ? decoded.slice(1) : decoded;
+  });
+  const distanceKm = segments.reduce((sum, segment) => sum + Number(segment.distanceKm || 0), 0);
+  const durationMin = segments.reduce((sum, segment) => sum + Number(segment.durationMin || 0), 0);
+  return {
+    polyline: encodePolyline(coordinates),
+    distanceKm,
+    distanceText: `${distanceKm.toFixed(distanceKm >= 10 ? 0 : 1)} km`,
+    durationMin,
+    durationText: `${Math.ceil(durationMin)} min`,
+    summary: "Multi-stop route",
+    steps: segments.flatMap((segment) => segment.steps || [])
+  };
+}
+
 // server/routes.ts
 var RIDE_MATCH_RADIUS_KM = 25;
 var CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1e3;
@@ -2014,6 +2127,14 @@ function calculateHaversineDistanceKm(lat1, lng1, lat2, lng2) {
   const dLng = (lng2 - lng1) * Math.PI / 180;
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+function isSouthAfricaLateNight(now = /* @__PURE__ */ new Date()) {
+  const hour = Number(new Intl.DateTimeFormat("en-ZA", {
+    hour: "2-digit",
+    hour12: false,
+    timeZone: "Africa/Johannesburg"
+  }).format(now));
+  return hour >= 22 || hour < 5;
 }
 function getAnnualShareGrossFromEarning(earning) {
   const amount = Math.abs(Number(earning?.amount || 0));
@@ -2323,11 +2444,20 @@ async function registerRoutes(app2) {
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS trip_started_at timestamp");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancelled_by text");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancellation_fee real DEFAULT 0");
+    await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS stops jsonb NOT NULL DEFAULT '[]'::jsonb");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS surge_multiplier real DEFAULT 1");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS surge_reason text");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS estimated_duration_min real");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS actual_duration_min real");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS per_minute_adjustment real DEFAULT 0");
+    await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS demand_multiplier real NOT NULL DEFAULT 1");
+    await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS quoted_fare real");
+    await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS final_fare real");
+    await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS actual_distance_km real");
+    await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS waiting_fee real NOT NULL DEFAULT 0");
+    await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS settlement_status text NOT NULL DEFAULT 'quoted'");
+    await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS pickup_travel_started_at timestamp");
+    await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS arrived_at timestamp");
     await pool2.query("CREATE INDEX IF NOT EXISTS idx_rides_current_offer ON rides(current_offered_chauffeur_id, current_offer_expires_at)");
     await pool2.query(`
       CREATE TABLE IF NOT EXISTS lift_club_memberships (
@@ -3452,10 +3582,70 @@ async function registerRoutes(app2) {
     if (!Number.isFinite(value)) return null;
     return Number(value.toFixed(4));
   }
-  function buildDirectionsCacheKey(originLat, originLng, destLat, destLng) {
-    const normalized = [originLat, originLng, destLat, destLng].map(normalizeCoordinate);
+  function buildDirectionsCacheKey(originLat, originLng, destLat, destLng, stops = "") {
+    const normalized = [originLat, originLng, destLat, destLng, ...stops.split("|").flatMap((stop) => stop.split(","))].filter((value) => value !== "").map(normalizeCoordinate);
     if (normalized.some((value) => value == null)) return null;
     return normalized.join(":");
+  }
+  function parseStopsParam(raw) {
+    if (typeof raw !== "string" || !raw.trim()) return [];
+    return normalizeRideStops(raw.split("|").map((point, index) => {
+      const [lat, lng] = point.split(",");
+      return { id: `stop-${index + 1}`, address: `Stop ${index + 1}`, lat, lng };
+    }));
+  }
+  function parseGoogleDirectionsRoute(route, idx = 0) {
+    const legs = Array.isArray(route?.legs) ? route.legs : [];
+    const distanceMeters = legs.reduce((sum, leg) => sum + Number(leg?.distance?.value || 0), 0);
+    const durationSeconds = legs.reduce((sum, leg) => sum + Number(leg?.duration?.value || 0), 0);
+    const steps = legs.flatMap((leg) => (leg.steps || []).map((step) => ({
+      instruction: String(step.html_instructions || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(),
+      distance: step.distance?.text || "",
+      duration: step.duration?.text || "",
+      endLat: step.end_location?.lat,
+      endLng: step.end_location?.lng,
+      maneuver: step.maneuver || "straight"
+    })));
+    const distanceKm = distanceMeters / 1e3;
+    const durationMin = Math.ceil(durationSeconds / 60);
+    return {
+      polyline: route?.overview_polyline?.points || "",
+      distanceKm,
+      distanceText: `${distanceKm.toFixed(distanceKm >= 10 ? 0 : 1)} km`,
+      durationMin,
+      durationText: `${durationMin} min`,
+      summary: route?.summary || `Route ${idx + 1}`,
+      steps
+    };
+  }
+  async function fetchVerifiedDirections(origin, destination, stops = [], alternatives = false) {
+    if (stops.length > 20) {
+      const points = [origin, ...stops, destination];
+      const segments = [];
+      let start = 0;
+      while (start < points.length - 1) {
+        const end = Math.min(start + 21, points.length - 1);
+        const [segment] = await fetchVerifiedDirections(
+          points[start],
+          points[end],
+          points.slice(start + 1, end),
+          false
+        );
+        segments.push(segment);
+        start = end;
+      }
+      return [combineDirectionSegments(segments)];
+    }
+    const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY || process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_API_KEY;
+    if (!apiKey) throw new Error("Google Maps API key not configured");
+    const waypointParam = stops.length ? `&waypoints=${encodeURIComponent(stops.map((stop) => `${stop.lat},${stop.lng}`).join("|"))}` : "";
+    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.lat},${origin.lng}&destination=${destination.lat},${destination.lng}${waypointParam}&alternatives=${alternatives ? "true" : "false"}&key=${apiKey}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    if (data.status !== "OK" || !data.routes?.length) {
+      throw new Error(data.error_message || data.status || "No route found");
+    }
+    return data.routes.map((route, index) => parseGoogleDirectionsRoute(route, index));
   }
   function getDirectionsCacheEntry(cacheKey) {
     const cached = directionsCache.get(cacheKey);
@@ -4405,53 +4595,30 @@ async function registerRoutes(app2) {
       const originLng = typeof req.query.originLng === "string" ? req.query.originLng : "";
       const destLat = typeof req.query.destLat === "string" ? req.query.destLat : "";
       const destLng = typeof req.query.destLng === "string" ? req.query.destLng : "";
+      const stopsParam = typeof req.query.stops === "string" ? req.query.stops : "";
+      const stops = parseStopsParam(stopsParam);
       if (!originLat || !originLng || !destLat || !destLng) {
         return res.status(400).json({ message: "Origin and destination coordinates are required" });
       }
-      const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY || process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_API_KEY;
-      if (!apiKey) {
-        return res.status(500).json({ message: "Google Maps API key not configured" });
-      }
-      const cacheKey = buildDirectionsCacheKey(originLat, originLng, destLat, destLng);
+      const cacheKey = buildDirectionsCacheKey(originLat, originLng, destLat, destLng, stopsParam);
       if (cacheKey) {
         const cached = getDirectionsCacheEntry(cacheKey);
         if (cached) {
           return res.json(cached);
         }
       }
-      const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${originLat},${originLng}&destination=${destLat},${destLng}&alternatives=true&key=${apiKey}`;
-      const response = await fetch(url);
-      const data = await response.json();
-      if (data.status === "OK" && data.routes?.length > 0) {
-        const parseRoute = (route, idx) => {
-          const leg = route.legs[0];
-          const steps = (leg.steps || []).map((step) => ({
-            instruction: step.html_instructions.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(),
-            distance: step.distance?.text || "",
-            duration: step.duration?.text || "",
-            endLat: step.end_location?.lat,
-            endLng: step.end_location?.lng,
-            maneuver: step.maneuver || "straight"
-          }));
-          return {
-            polyline: route.overview_polyline.points,
-            distanceKm: leg.distance.value / 1e3,
-            distanceText: leg.distance.text,
-            durationMin: Math.ceil(leg.duration.value / 60),
-            durationText: leg.duration.text,
-            summary: route.summary || `Route ${idx + 1}`,
-            steps
-          };
-        };
-        const primary = parseRoute(data.routes[0], 0);
-        const alternatives = data.routes.map((r, i) => parseRoute(r, i));
-        const payload = { ...primary, alternatives };
-        if (cacheKey) {
-          setDirectionsCacheEntry(cacheKey, payload);
-        }
-        return res.json(payload);
+      const routes = await fetchVerifiedDirections(
+        { lat: Number(originLat), lng: Number(originLng) },
+        { lat: Number(destLat), lng: Number(destLng) },
+        stops,
+        stops.length === 0
+      );
+      const primary = routes[0];
+      const payload = { ...primary, alternatives: routes };
+      if (cacheKey) {
+        setDirectionsCacheEntry(cacheKey, payload);
       }
-      return res.status(404).json({ message: "No route found" });
+      return res.json(payload);
     } catch (error) {
       return res.status(500).json({ message: error.message });
     }
@@ -7180,7 +7347,7 @@ async function registerRoutes(app2) {
   );
   app2.post("/api/pricing/estimate", async (req, res) => {
     try {
-      const { distanceKm, categoryId, isLateNight, pickupLat, pickupLng, durationMin } = req.body;
+      const { distanceKm, categoryId, pickupLat, pickupLng, durationMin } = req.body;
       const rideForDemand = {
         id: `estimate_${Date.now()}`,
         vehicleType: categoryId || "budget",
@@ -7196,7 +7363,7 @@ async function registerRoutes(app2) {
         eligibleDrivers: eligibleDrivers.length
       });
       const estimate = calculatePrice(distanceKm, categoryId || "budget", {
-        isLateNight,
+        isLateNight: isSouthAfricaLateNight(),
         surgeMultiplier: surge.multiplier,
         surgeReason: surge.reason,
         estimatedDurationMin: durationMin
@@ -7352,7 +7519,7 @@ async function registerRoutes(app2) {
   });
   app2.post("/api/rides", requireAuth, async (req, res) => {
     try {
-      const { distanceKm, isLateNight, ...rideData } = req.body;
+      const { distanceKm, ...rideData } = req.body;
       const clientId = req.auth.sub;
       rideData.clientId = clientId;
       let clientUser = await storage.getUser(clientId);
@@ -7393,9 +7560,25 @@ async function registerRoutes(app2) {
       }
       const categoryId = rideData.vehicleType || "budget";
       const normalizedDistanceKm = Number(rideData.selectedRouteDistanceKm ?? distanceKm ?? 10);
-      const safeDistanceKm = Number.isFinite(normalizedDistanceKm) && normalizedDistanceKm > 0 ? normalizedDistanceKm : 10;
+      let safeDistanceKm = Number.isFinite(normalizedDistanceKm) && normalizedDistanceKm > 0 ? normalizedDistanceKm : 10;
       const normalizedDurationMin = Number(rideData.durationMin ?? 0);
-      const safeDurationMin = Number.isFinite(normalizedDurationMin) && normalizedDurationMin > 0 ? normalizedDurationMin : null;
+      let safeDurationMin = Number.isFinite(normalizedDurationMin) && normalizedDurationMin > 0 ? normalizedDurationMin : null;
+      const stops = normalizeRideStops(rideData.stops);
+      const pickup = { lat: Number(rideData.pickupLat), lng: Number(rideData.pickupLng) };
+      const destination = { lat: Number(rideData.dropoffLat), lng: Number(rideData.dropoffLng) };
+      if (!isValidLocationSample(pickup.lat, pickup.lng) || !isValidLocationSample(destination.lat, destination.lng)) {
+        return res.status(400).json({ success: false, message: "Valid pickup and destination coordinates are required." });
+      }
+      try {
+        const [verifiedRoute] = await fetchVerifiedDirections(pickup, destination, stops);
+        safeDistanceKm = verifiedRoute.distanceKm;
+        safeDurationMin = verifiedRoute.durationMin;
+      } catch (routeError) {
+        return res.status(400).json({
+          success: false,
+          message: routeError?.message || "The complete route could not be verified."
+        });
+      }
       const selectedRouteId = typeof rideData.selectedRouteId === "string" && rideData.selectedRouteId.trim() ? rideData.selectedRouteId.trim() : null;
       const rideForDemand = {
         id: `new_${Date.now()}`,
@@ -7412,7 +7595,7 @@ async function registerRoutes(app2) {
         eligibleDrivers: eligibleDrivers.length
       });
       const priceEstimate = calculatePrice(safeDistanceKm, categoryId, {
-        isLateNight,
+        isLateNight: isSouthAfricaLateNight(),
         surgeMultiplier: surge.multiplier,
         surgeReason: surge.reason,
         estimatedDurationMin: safeDurationMin
@@ -7448,6 +7631,7 @@ async function registerRoutes(app2) {
         dropoffLat: rideData.dropoffLat,
         dropoffLng: rideData.dropoffLng,
         dropoffAddress: rideData.dropoffAddress || null,
+        stops,
         vehicleType: rideData.vehicleType || "budget",
         paymentMethod: rideData.paymentMethod || "cash",
         price: safeFare,
@@ -7457,6 +7641,7 @@ async function registerRoutes(app2) {
         pricePerKm: priceEstimate.pricePerKm,
         baseFare: priceEstimate.baseFare,
         surgeMultiplier: priceEstimate.surgeMultiplier,
+        demandMultiplier: priceEstimate.demandMultiplier,
         surgeReason: priceEstimate.surgeReason,
         status: scheduledFor ? "reserved" : "searching",
         ...scheduledFor ? { scheduledFor } : {},
@@ -7469,6 +7654,9 @@ async function registerRoutes(app2) {
         selectedRouteId,
         selectedRouteDistanceKm: selectedRouteId ? safeDistanceKm : null,
         actualFare: selectedRouteId ? safeFare : null,
+        quotedFare: safeFare,
+        finalFare: safeFare,
+        settlementStatus: "quoted",
         routeCurrency,
         routeSelectedAt: selectedRouteId ? /* @__PURE__ */ new Date() : null,
         ...livenessVerifiedAt ? { livenessVerifiedAt } : {}
@@ -7763,6 +7951,12 @@ async function registerRoutes(app2) {
       const { status } = req.body;
       const existingRide = await storage.getRide(req.params.id);
       if (!existingRide) return res.status(404).json({ message: "Ride not found" });
+      if (status === "cancelled" && existingRide.status === "cancelled") {
+        return res.json(existingRide);
+      }
+      if (status === "cancelled" && existingRide.status === "trip_completed") {
+        return res.status(409).json({ message: "A completed ride cannot be cancelled." });
+      }
       const callerUser = await storage.getUser(req.auth.sub);
       if (!callerUser) return res.status(403).json({ message: "Forbidden" });
       const isRider = existingRide.clientId === callerUser.id;
@@ -7784,6 +7978,12 @@ async function registerRoutes(app2) {
       if (status === "trip_started") {
         updateData.tripStartedAt = existingRide.tripStartedAt || now;
       }
+      if (status === "chauffeur_arriving") {
+        updateData.pickupTravelStartedAt = existingRide.pickupTravelStartedAt || now;
+      }
+      if (status === "chauffeur_arrived") {
+        updateData.arrivedAt = existingRide.arrivedAt || now;
+      }
       if (status === "trip_completed") {
         const actualDurationFromBody = Number(req.body?.actualDurationMin);
         const actualDurationMin = Number.isFinite(actualDurationFromBody) && actualDurationFromBody > 0 ? actualDurationFromBody : existingRide.tripStartedAt ? Math.max(0, (now.getTime() - new Date(existingRide.tripStartedAt).getTime()) / 6e4) : existingRide.acceptedAt ? Math.max(0, (now.getTime() - new Date(existingRide.acceptedAt).getTime()) / 6e4) : Number(existingRide.durationMin || 0);
@@ -7797,6 +7997,8 @@ async function registerRoutes(app2) {
         updateData.actualDurationMin = Math.round(actualDurationMin * 10) / 10;
         updateData.perMinuteAdjustment = minuteAdjustment.adjustmentAmount;
         updateData.price = Math.round((Number(existingRide.price || 0) + additionalAdjustment) * 100) / 100;
+        updateData.finalFare = updateData.price;
+        updateData.settlementStatus = "completed";
       }
       if (status === "cancelled") {
         const isReservation = existingRide.scheduledFor && existingRide.status === "reserved";
@@ -7805,13 +8007,28 @@ async function registerRoutes(app2) {
         } else if (isReservation) {
           updateData.cancellationFee = 0;
         } else {
-          const cancellation = calculateCancellationFee(
-            existingRide.vehicleType || "budget",
-            existingRide.acceptedAt,
-            now,
-            cancelledBy
+          const acceptedAt = existingRide.pickupTravelStartedAt || existingRide.acceptedAt;
+          const elapsedMinutes = acceptedAt ? Math.max(0, (now.getTime() - new Date(acceptedAt).getTime()) / 6e4) : 0;
+          const arrivedAt = existingRide.arrivedAt;
+          const waitingFeeCents = arrivedAt ? calculateWaitingFee(Math.max(0, (now.getTime() - new Date(arrivedAt).getTime()) / 6e4)) : 0;
+          const baseFare = Math.max(0, Number(existingRide.baseFare || 0));
+          const unadjustedFare = baseFare + Math.max(0, Number(existingRide.distanceKm || 0)) * Math.max(0, Number(existingRide.pricePerKm || 0));
+          const lockedFare = Math.max(
+            0,
+            Number(existingRide.quotedFare || existingRide.price || 0)
           );
-          updateData.cancellationFee = cancellation.fee;
+          const pricingMultiplier = unadjustedFare > 0 ? Math.max(1, lockedFare / unadjustedFare) : Math.max(1, Number(existingRide.demandMultiplier || existingRide.surgeMultiplier || 1));
+          const cancellation = resolveCancellation({
+            actor: cancelledBy === "client" ? "rider" : "driver",
+            baseFareCents: Math.round(baseFare * 100),
+            minutesDrivingToPickup: elapsedMinutes,
+            waitingFeeCents,
+            pricingMultiplier,
+            arrived: Boolean(arrivedAt)
+          });
+          updateData.waitingFee = waitingFeeCents / 100;
+          updateData.cancellationFee = cancellation.feeCents / 100;
+          updateData.settlementStatus = cancellation.feeCents > 0 ? "cancelled_charged" : "cancelled_free";
         }
         updateData.cancelledBy = cancelledBy;
         updateData.currentOfferedChauffeurId = null;
@@ -7941,13 +8158,35 @@ async function registerRoutes(app2) {
               );
             }
           }
+          if (rideBeforeUpdate.chauffeurId && cancelledBy === "client" && cancellationFee > 0) {
+            const existingEarnings = await storage.getEarningsByChauffeur(rideBeforeUpdate.chauffeurId);
+            const alreadyCredited = existingEarnings.some(
+              (earning) => earning.rideId === ride.id && earning.type === "cancellation"
+            );
+            if (!alreadyCredited) {
+              const cancellationEarnings = calculateChauffeurEarnings(cancellationFee);
+              await storage.createEarning({
+                chauffeurId: rideBeforeUpdate.chauffeurId,
+                rideId: ride.id,
+                amount: cancellationEarnings.chauffeurEarnings,
+                commission: cancellationEarnings.commission,
+                type: "cancellation"
+              });
+              const chauffeur = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
+              if (chauffeur) {
+                await storage.updateChauffeur(chauffeur.id, {
+                  earningsTotal: Number(chauffeur.earningsTotal || 0) + cancellationEarnings.chauffeurEarnings
+                });
+              }
+            }
+          }
           if (rideBeforeUpdate.chauffeurId) {
             const chauffeur = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
             if (chauffeur?.userId) {
               await storage.createNotification({
                 userId: chauffeur.userId,
                 title: "Ride Cancelled",
-                body: "The client has cancelled this trip.",
+                body: cancellationFee > 0 ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee).chauffeurEarnings.toFixed(2)} was added to your earnings.` : "The client has cancelled this trip.",
                 type: "ride"
               });
             }
@@ -7955,7 +8194,7 @@ async function registerRoutes(app2) {
               sendExpoPushNotification(
                 [chauffeur.pushToken],
                 "Ride Cancelled",
-                "The client has cancelled this trip."
+                cancellationFee > 0 ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee).chauffeurEarnings.toFixed(2)} was added to your earnings.` : "The client has cancelled this trip."
               );
             }
           }

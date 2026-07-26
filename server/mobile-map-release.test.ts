@@ -147,3 +147,13 @@ test("rejects invalid navigation coordinates", () => {
   assert.equal(buildGoogleMapsNavigationUrl({ lat: 999, lng: 28 }, "ios"), null);
   assert.equal(buildGoogleMapsWebNavigationUrl({ lat: -26, lng: Number.NaN }), null);
 });
+
+test("includes ordered ride stops in Google Maps navigation", () => {
+  const url = buildGoogleMapsNavigationUrl(
+    { lat: -26.3, lng: 28.2 },
+    "ios",
+    [{ lat: -26.2, lng: 28.1 }, { lat: -26.25, lng: 28.15 }],
+  );
+  assert.match(String(url), /waypoints=/);
+  assert.ok(String(url).indexOf("-26.200000") < String(url).indexOf("-26.250000"));
+});
