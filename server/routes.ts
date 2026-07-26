@@ -7916,6 +7916,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const completedStop = stops[completedStopCount];
       io.emit("ride:statusUpdate", updatedRide);
+      res.json(updatedRide);
+
       try {
         await storage.createNotification({
           userId: existingRide.clientId,
@@ -7928,9 +7930,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (notificationError: any) {
         console.error("stop notification failed (non-fatal):", notificationError.message);
       }
-
-      return res.json(updatedRide);
+      return;
     } catch (error: any) {
+      if (res.headersSent) return;
       return res.status(500).json({ message: error.message || "Failed to confirm stop." });
     }
   });

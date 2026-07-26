@@ -80,6 +80,24 @@ test("requires drivers to confirm every requested stop before ending a trip", ()
   assert.match(driverSource, /Confirm Arrival at Stop \$\{completedStopCount \+ 1\}/);
   assert.match(driverSource, /"End Trip"/);
   assert.match(driverSource, /styles\.stopProgressIndexComplete/);
+  assert.match(driverSource, /stopConfirmationInFlightRef/);
+  assert.match(driverSource, /completedStopCount: getCompletedStopCount\(previousRide\) \+ 1/);
+  const confirmStopStart = driverSource.indexOf("function confirmCurrentStop");
+  const confirmStopEnd = driverSource.indexOf("function confirmCancelRide", confirmStopStart);
+  const confirmStopSource = driverSource.slice(confirmStopStart, confirmStopEnd);
+  assert.doesNotMatch(confirmStopSource, /await fetchDriverRoute/);
+});
+
+test("acknowledges stop confirmation before notification bookkeeping", () => {
+  const routesSource = readProjectFile("server/routes.ts");
+  const endpointStart = routesSource.indexOf('"/api/rides/:id/stops/complete"');
+  const endpointEnd = routesSource.indexOf('app.post("/api/rides/:id/pay"', endpointStart);
+  const endpointSource = routesSource.slice(endpointStart, endpointEnd);
+
+  assert.ok(endpointStart >= 0);
+  assert.match(endpointSource, /io\.emit\("ride:statusUpdate", updatedRide\);[\s\S]*?res\.json\(updatedRide\);/);
+  assert.ok(endpointSource.indexOf("res.json(updatedRide)") < endpointSource.indexOf("storage.createNotification"));
+  assert.match(endpointSource, /if \(res\.headersSent\) return/);
 });
 
 test("acknowledges trip completion before background settlement work", () => {
