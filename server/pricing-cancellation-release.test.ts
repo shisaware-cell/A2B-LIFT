@@ -43,7 +43,7 @@ test("driver closes cancelled trips and shows any earnings due", () => {
   assert.match(driverSource, /setInterval\(checkRideStatus, 4000\)/);
 });
 
-test("driver trip screens reveal earnings without the rider's total fare", () => {
+test("driver fare screens show full cash fares and net digital payouts", () => {
   const driverSource = readProjectFile("app/chauffeur/index.tsx");
   const completedPopupStart = driverSource.indexOf("Post-trip payment popup");
   const completedPopupEnd = driverSource.indexOf(
@@ -53,10 +53,14 @@ test("driver trip screens reveal earnings without the rider's total fare", () =>
   const completedPopup = driverSource.slice(completedPopupStart, completedPopupEnd);
   const rideHistorySource = readProjectFile("app/chauffeur/rides.tsx");
 
+  assert.match(completedPopup, /Cash Fare/);
+  assert.match(completedPopup, /The full cash fare is/);
   assert.match(completedPopup, /Your Trip Earnings/);
-  assert.doesNotMatch(completedPopup, /getRideClientFare\(completedTrip\)/);
+  assert.match(driverSource, /getDriverDisplayFare/);
+  assert.match(driverSource, /incomingRide\.paymentMethod[\s\S]*?"Cash fare" : "You earn"/);
   assert.doesNotMatch(completedPopup, /platform commission/i);
-  assert.match(rideHistorySource, /Your Earnings/);
+  assert.match(rideHistorySource, /"Cash Collected" : "Your Earnings"/);
+  assert.match(rideHistorySource, /getDriverDisplayFare/);
   assert.doesNotMatch(rideHistorySource, />Total Fare</);
   assert.doesNotMatch(rideHistorySource, />Commission</);
 });

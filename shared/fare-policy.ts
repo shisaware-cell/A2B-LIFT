@@ -27,6 +27,18 @@ export function getDriverNetFare(grossFare: unknown, commissionRate: unknown = P
   return roundCurrency(gross * (1 - normalizeCommissionRate(commissionRate)));
 }
 
+export function getDriverDisplayFare(
+  grossFare: unknown,
+  paymentMethod: unknown,
+  commissionRate: unknown = PLATFORM_COMMISSION_RATE,
+) {
+  const gross = Number(grossFare);
+  if (!Number.isFinite(gross) || gross <= 0) return 0;
+  return String(paymentMethod || "cash").toLowerCase() === "cash"
+    ? roundCurrency(gross)
+    : getDriverNetFare(gross, commissionRate);
+}
+
 export function getPlatformCommission(grossFare: unknown, commissionRate: unknown = PLATFORM_COMMISSION_RATE) {
   const gross = Number(grossFare);
   if (!Number.isFinite(gross) || gross <= 0) return 0;

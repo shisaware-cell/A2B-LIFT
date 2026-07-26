@@ -4,6 +4,7 @@ import {
   PLATFORM_COMMISSION_RATE,
   REFERRAL_REWARD_RATE,
   VEHICLE_CATEGORY_PRICING,
+  getDriverDisplayFare,
   getDriverNetFare,
   getPlatformCommission,
 } from "../shared/fare-policy";
@@ -24,6 +25,14 @@ test("driver earnings and commission always add back to the gross fare", () => {
 test("preserves the commission locked on an existing ride", () => {
   assert.equal(getDriverNetFare(100, 0.25), 75);
   assert.equal(getPlatformCommission(100, 0.25), 25);
+});
+
+test("shows cash fare in full and deducts commission from digital payment displays", () => {
+  assert.equal(getDriverDisplayFare(100, "cash"), 100);
+  assert.equal(getDriverDisplayFare(100, undefined), 100);
+  assert.equal(getDriverDisplayFare(100, "card"), 70);
+  assert.equal(getDriverDisplayFare(100, "wallet"), 70);
+  assert.equal(getDriverDisplayFare(100, "card", 0.25), 75);
 });
 
 test("rejects invalid and negative fare values", () => {

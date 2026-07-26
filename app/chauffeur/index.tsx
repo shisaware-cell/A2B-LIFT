@@ -42,7 +42,7 @@ import {
 } from "@/lib/google-navigation";
 import Colors from "@/constants/colors";
 import A2BMap from "@/components/A2BMap";
-import { VEHICLE_CATEGORY_PRICING, getDriverNetFare } from "@shared/fare-policy";
+import { VEHICLE_CATEGORY_PRICING, getDriverDisplayFare } from "@shared/fare-policy";
 import { normalizeRideStops } from "@shared/ride-stops";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -381,7 +381,7 @@ export default function ChauffeurDashboard() {
     };
     const cat = rates[currentRide.vehicleType || "budget"] || rates.budget;
     const grossFare = Math.round(cat.baseFare + distanceKm * cat.pricePerKm);
-    return `R ${getDriverNetFare(grossFare, currentRide?.commissionRate).toFixed(0)}`;
+    return `R ${getDriverDisplayFare(grossFare, currentRide?.paymentMethod, currentRide?.commissionRate).toFixed(0)}`;
   }
 
   function getRideRouteLabel(routeId?: string | null) {
@@ -413,7 +413,11 @@ export default function ChauffeurDashboard() {
   }
 
   function getRideFare(ride: any) {
-    return getDriverNetFare(getRideClientFare(ride), ride?.commissionRate);
+    return getDriverDisplayFare(
+      getRideClientFare(ride),
+      ride?.paymentMethod,
+      ride?.commissionRate,
+    );
   }
 
   async function getClientSummary(clientId?: string): Promise<ClientSummary | null> {
@@ -2410,7 +2414,9 @@ export default function ChauffeurDashboard() {
               </View>
               {getRideFare(incomingRide) ? (
                 <View style={styles.incomingEarnBox}>
-                  <Text style={styles.incomingEarnLabel}>You earn</Text>
+                  <Text style={styles.incomingEarnLabel}>
+                    {(incomingRide.paymentMethod || "cash") === "cash" ? "Cash fare" : "You earn"}
+                  </Text>
                   <Text style={styles.incomingPrice}>R {getRideFare(incomingRide).toFixed(0)}</Text>
                 </View>
               ) : null}
@@ -2586,10 +2592,10 @@ export default function ChauffeurDashboard() {
                 <View style={styles.payPopupIconWrap}>
                   <Ionicons name="cash-outline" size={40} color={Colors.success} />
                 </View>
-                <Text style={styles.payPopupTitle}>Your Trip Earnings</Text>
+                <Text style={styles.payPopupTitle}>Cash Fare</Text>
                 <Text style={styles.payPopupAmount}>R {getRideFare(completedTrip).toFixed(0)}</Text>
                 <Text style={styles.payPopupBody}>
-                  Your earnings for this cash trip are R {getRideFare(completedTrip).toFixed(0)}. The rider can confirm the cash amount in their A2B app.
+                  The full cash fare is R {getRideFare(completedTrip).toFixed(0)}. The rider can confirm the cash amount in their A2B app.
                 </Text>
               </>
             ) : (

@@ -15,14 +15,14 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
-import { getDriverNetFare } from "@shared/fare-policy";
+import { getDriverDisplayFare } from "@shared/fare-policy";
 
 function getGrossFare(ride: any) {
   return Number(ride?.finalFare || ride?.price || ride?.actualFare || ride?.quotedFare || 0);
 }
 
 function getDriverFare(ride: any) {
-  return getDriverNetFare(getGrossFare(ride), ride?.commissionRate);
+  return getDriverDisplayFare(getGrossFare(ride), ride?.paymentMethod, ride?.commissionRate);
 }
 
 function formatDate(dateStr: string | null | undefined) {
@@ -135,13 +135,17 @@ function RideDetail({ ride, onBack }: { ride: any; onBack: () => void }) {
 
         {/* Earnings */}
         <View style={styles.detailCard}>
-          <Text style={styles.detailCardTitle}>Earnings</Text>
+          <Text style={styles.detailCardTitle}>
+            {(ride.paymentMethod || "cash") === "cash" ? "Cash Fare" : "Earnings"}
+          </Text>
           <View style={styles.earningsRow}>
             <View style={styles.earningsItem}>
               <Text style={[styles.earningsAmount, { color: Colors.success }]}>
                 R {grossFare ? driverFare.toFixed(2) : "—"}
               </Text>
-              <Text style={styles.earningsLabel}>Your Earnings</Text>
+              <Text style={styles.earningsLabel}>
+                {(ride.paymentMethod || "cash") === "cash" ? "Cash Collected" : "Your Earnings"}
+              </Text>
             </View>
           </View>
           <DetailRow icon="cash-outline" label="Payment Method" value={(ride.paymentMethod || "cash").toUpperCase()} />
