@@ -11,8 +11,13 @@ const API_REQUEST_TIMEOUT_MS = 12000;
  */
 export function getApiUrl(): string {
   const domain = process.env.EXPO_PUBLIC_DOMAIN;
+  const normalizedDomain = String(domain || "").trim().toLowerCase().replace(/\/+$/, "");
 
-  if (!domain) {
+  if (
+    !normalizedDomain ||
+    normalizedDomain === "https://api.a2blift.com" ||
+    normalizedDomain === "https://api-production-0783.up.railway.app"
+  ) {
     return "https://a2blift.com/";
   }
 

@@ -113,6 +113,11 @@ test("uses a2blift.com as the app and website API host", () => {
   for (const file of activeFiles) {
     assert.doesNotMatch(readProjectFile(file), /https:\/\/api\.a2blift\.com/, file);
   }
+
+  const apiClientSource = readProjectFile("lib/query-client.ts");
+  assert.match(apiClientSource, /normalizedDomain === "https:\/\/api\.a2blift\.com"/);
+  assert.match(apiClientSource, /normalizedDomain === "https:\/\/api-production-0783\.up\.railway\.app"/);
+  assert.match(apiClientSource, /return "https:\/\/a2blift\.com\/"/);
 });
 
 test("keeps the QR code inside a padded card with room for its copy", () => {
