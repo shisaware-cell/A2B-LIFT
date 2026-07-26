@@ -2045,6 +2045,9 @@ function resolveCancellation(options) {
   }) : calculateRiderCancellationFee(options);
   return { feeCents, cashDebtCents: feeCents };
 }
+function isValidLocationSample(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
 
 // server/multi-stop-routing.ts
 function decodePolyline(encoded) {

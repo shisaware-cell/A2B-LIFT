@@ -31,6 +31,7 @@ import { sendEmail, sendSms, renderBrandedEmail, emailEnabled, smsEnabled } from
 import { normalizeRideStops } from "../shared/ride-stops";
 import {
   calculateWaitingFee,
+  isValidLocationSample,
   resolveCancellation,
 } from "./ride-operations-policy";
 import { combineDirectionSegments } from "./multi-stop-routing";
