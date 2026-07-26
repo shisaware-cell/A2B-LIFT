@@ -42,12 +42,15 @@ import LivenessCamera, { type LivenessChallenge, type LivenessCaptureResult } fr
 import { VEHICLE_CATEGORY_PRICING } from "@shared/fare-policy";
 import { encodeStopsQuery, normalizeRideStops, type RideStop } from "@shared/ride-stops";
 
+const CATEGORY_SEDAN_ART = require("../../assets/images/nearby-car-marker.png");
+const CATEGORY_VAN_ART = require("../../assets/images/category-van.png");
+
 const VEHICLE_TYPES = [
-  { id: "budget", name: "Budget", desc: "Toyota Corolla, Toyota Quest", icon: "car-outline" as const, ...VEHICLE_CATEGORY_PRICING.budget },
-  { id: "luxury", name: "Luxury", desc: "BMW 3 Series, Mercedes C Class", icon: "car-sport" as const, ...VEHICLE_CATEGORY_PRICING.luxury },
-  { id: "business", name: "Business Class", desc: "BMW 5 Series, Mercedes E Class", icon: "briefcase" as const, ...VEHICLE_CATEGORY_PRICING.business },
-  { id: "van", name: "Van", desc: "Hyundai H1, Mercedes Vito, Staria", icon: "bus" as const, ...VEHICLE_CATEGORY_PRICING.van },
-  { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", icon: "car" as const, ...VEHICLE_CATEGORY_PRICING.luxury_van, badge: "recommended" },
+  { id: "budget", name: "Budget", desc: "Toyota Corolla, Toyota Quest", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.budget },
+  { id: "luxury", name: "Luxury", desc: "BMW 3 Series, Mercedes C Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury },
+  { id: "business", name: "Business Class", desc: "BMW 5 Series, Mercedes E Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.business },
+  { id: "van", name: "Van", desc: "Hyundai H1, Mercedes Vito, Staria", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.van },
+  { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury_van, badge: "recommended" },
 ];
 
 type RideStatus = "idle" | "selecting" | "confirming" | "requested" | "assigned" | "arriving" | "in_trip" | "completed" | "no_drivers";
@@ -2786,8 +2789,12 @@ export default function ClientHomeScreen() {
                     ]}
                     onPress={() => selectEstimatedVehicle(vehicle)}
                   >
-                    <View style={[styles.categoryFareIcon, isSelected && styles.categoryFareIconSelected]}>
-                      <Ionicons name={vehicle.icon} size={22} color={isSelected ? Colors.primary : Colors.white} />
+                    <View style={styles.categoryFareIcon}>
+                      <Image
+                        source={vehicle.artwork}
+                        style={styles.categoryFareArtwork}
+                        resizeMode="contain"
+                      />
                     </View>
                     <View style={styles.categoryFareInfo}>
                       <View style={styles.categoryFareNameRow}>
@@ -3748,7 +3755,11 @@ export default function ClientHomeScreen() {
                   setShowVehicleSheet(false);
                 }}
               >
-                <Ionicons name={vt.icon} size={22} color={Colors.white} />
+                <Image
+                  source={vt.artwork}
+                  style={styles.vehicleOptionArtwork}
+                  resizeMode="contain"
+                />
                 <View style={styles.vehicleOptionInfo}>
                   <View style={styles.vehicleOptionNameRow}>
                     <Text style={styles.vehicleOptionName}>{vt.name}</Text>
@@ -4373,15 +4384,14 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.08)",
   },
   categoryFareIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 10,
+    width: 68,
+    height: 48,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: Colors.card,
   },
-  categoryFareIconSelected: {
-    backgroundColor: Colors.white,
+  categoryFareArtwork: {
+    width: 66,
+    height: 46,
   },
   categoryFareInfo: {
     flex: 1,
@@ -5428,6 +5438,10 @@ const styles = StyleSheet.create({
   },
   vehicleOptionSelected: {
     borderColor: Colors.white,
+  },
+  vehicleOptionArtwork: {
+    width: 72,
+    height: 50,
   },
   vehicleOptionInfo: {
     flex: 1,

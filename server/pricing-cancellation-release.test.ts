@@ -61,6 +61,34 @@ test("driver trip screens reveal earnings without the rider's total fare", () =>
   assert.doesNotMatch(rideHistorySource, />Commission</);
 });
 
+test("requires drivers to confirm every requested stop before ending a trip", () => {
+  const driverSource = readProjectFile("app/chauffeur/index.tsx");
+  const routesSource = readProjectFile("server/routes.ts");
+  const storageSource = readProjectFile("server/storage.ts");
+  const schemaSource = readProjectFile("shared/schema.ts");
+
+  assert.match(schemaSource, /completedStopCount: integer\("completed_stop_count"\)/);
+  assert.match(storageSource, /completeNextRideStop/);
+  assert.match(storageSource, /eq\(rides\.completedStopCount, expectedCompletedCount\)/);
+  assert.match(routesSource, /"\/api\/rides\/:id\/stops\/complete"/);
+  assert.match(routesSource, /Confirm every requested stop before ending this trip/);
+  assert.match(driverSource, /getActiveTripTarget/);
+  assert.match(driverSource, /Confirm Stop \$\{completedStopCount \+ 1\} of \$\{currentRideStops\.length\}/);
+  assert.match(driverSource, /"End Trip"/);
+  assert.match(driverSource, /styles\.stopProgressIndexComplete/);
+});
+
+test("uses realistic vehicle artwork throughout the rider category selectors", () => {
+  const clientSource = readProjectFile("app/client/index.tsx");
+
+  assert.match(clientSource, /nearby-car-marker\.png/);
+  assert.match(clientSource, /category-van\.png/);
+  assert.match(clientSource, /source=\{vehicle\.artwork\}/);
+  assert.match(clientSource, /source=\{vt\.artwork\}/);
+  assert.doesNotMatch(clientSource, /name=\{vehicle\.icon\}/);
+  assert.doesNotMatch(clientSource, /name=\{vt\.icon\}/);
+});
+
 test("locks the commission rate onto each new ride", () => {
   const schemaSource = readProjectFile("shared/schema.ts");
   const routesSource = readProjectFile("server/routes.ts");

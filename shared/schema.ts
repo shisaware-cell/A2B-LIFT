@@ -83,6 +83,7 @@ export const rides = pgTable("rides", {
   dropoffLng: real("dropoff_lng").notNull(),
   dropoffAddress: text("dropoff_address"),
   stops: jsonb("stops").$type<import("./ride-stops").RideStop[]>().notNull().default([]),
+  completedStopCount: integer("completed_stop_count").notNull().default(0),
   status: text("status").notNull().default("requested"),
   price: real("price"),
   pricePerKm: real("price_per_km"),

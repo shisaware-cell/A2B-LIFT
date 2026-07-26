@@ -145,6 +145,35 @@ function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: numbe
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function getCompletedStopCount(ride: any) {
+  const stops = normalizeRideStops(ride?.stops);
+  return Math.max(0, Math.min(stops.length, Number(ride?.completedStopCount || 0)));
+}
+
+function getActiveTripTarget(ride: any) {
+  const stops = normalizeRideStops(ride?.stops);
+  const completedStopCount = getCompletedStopCount(ride);
+  const nextStop = stops[completedStopCount];
+  if (nextStop) {
+    return {
+      type: "stop" as const,
+      index: completedStopCount,
+      totalStops: stops.length,
+      address: nextStop.address || `Stop ${completedStopCount + 1}`,
+      lat: Number(nextStop.lat),
+      lng: Number(nextStop.lng),
+    };
+  }
+  return {
+    type: "dropoff" as const,
+    index: completedStopCount,
+    totalStops: stops.length,
+    address: ride?.dropoffAddress || "Final destination",
+    lat: Number(ride?.dropoffLat),
+    lng: Number(ride?.dropoffLng),
+  };
+}
+
 export default function ChauffeurDashboard() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -186,6 +215,7 @@ export default function ChauffeurDashboard() {
   const [clientRating, setClientRating] = useState(0);
   const [clientRatingComment, setClientRatingComment] = useState("");
   const [submittingClientRating, setSubmittingClientRating] = useState(false);
+  const [stopProgressLoading, setStopProgressLoading] = useState(false);
 
   const soundRef = useRef<TripAlertSound | null>(null);
   const tripAlertTokenRef = useRef(0);
@@ -217,13 +247,12 @@ export default function ChauffeurDashboard() {
   async function openAcceptedRideNavigation() {
     if (!currentRide) return;
 
+    const activeTripTarget = getActiveTripTarget(currentRide);
     const coordinate = currentRide.status === "trip_started"
-      ? { lat: Number(currentRide.dropoffLat), lng: Number(currentRide.dropoffLng) }
+      ? { lat: activeTripTarget.lat, lng: activeTripTarget.lng }
       : { lat: Number(currentRide.pickupLat), lng: Number(currentRide.pickupLng) };
     const platform = Platform.OS === "android" ? "android" : Platform.OS === "ios" ? "ios" : "web";
-    const waypoints = currentRide.status === "trip_started"
-      ? normalizeRideStops(currentRide.stops).map(({ lat, lng }) => ({ lat, lng }))
-      : [];
+    const waypoints: { lat: number; lng: number }[] = [];
     const appUrl = buildGoogleMapsNavigationUrl(coordinate, platform, waypoints);
     const webUrl = buildGoogleMapsWebNavigationUrl(coordinate, waypoints);
 
@@ -1050,8 +1079,9 @@ export default function ChauffeurDashboard() {
 
   useEffect(() => {
     if (!currentRide || !myLocation) return;
+    const activeTripTarget = getActiveTripTarget(currentRide);
     const destination = currentRide.status === "trip_started"
-      ? { lat: currentRide.dropoffLat, lng: currentRide.dropoffLng }
+      ? { lat: activeTripTarget.lat, lng: activeTripTarget.lng }
       : { lat: currentRide.pickupLat, lng: currentRide.pickupLng };
 
     if (!destination.lat || !destination.lng) return;
@@ -1061,6 +1091,8 @@ export default function ChauffeurDashboard() {
     const routeKey = [
       currentRide.id || "route",
       currentRide.status || "pickup",
+      currentRide.status === "trip_started" ? activeTripTarget.type : "pickup",
+      currentRide.status === "trip_started" ? activeTripTarget.index : 0,
       parsedDestLat.toFixed(5),
       parsedDestLng.toFixed(5),
     ].join(":");
@@ -1078,7 +1110,14 @@ export default function ChauffeurDashboard() {
     if (!shouldRefresh) return;
 
     fetchDriverRoute(parsedDestLat, parsedDestLng, { routeKey });
-  }, [currentRide?.id, currentRide?.status, myLocation?.lat, myLocation?.lng]);
+  }, [
+    currentRide?.id,
+    currentRide?.status,
+    currentRide?.completedStopCount,
+    currentRide?.stops,
+    myLocation?.lat,
+    myLocation?.lng,
+  ]);
 
   // ─── Data ─────────────────────────────────────────────────────────────────
   async function restoreActiveRide() {
@@ -1667,20 +1706,77 @@ export default function ChauffeurDashboard() {
         if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } else {
         setCurrentRide(rideWithName);
-        if (status === "trip_started" && ride.dropoffLat && ride.dropoffLng) {
-          await fetchDriverRoute(parseFloat(ride.dropoffLat), parseFloat(ride.dropoffLng), {
+        if (status === "trip_started") {
+          const activeTripTarget = getActiveTripTarget(rideWithName);
+          await fetchDriverRoute(activeTripTarget.lat, activeTripTarget.lng, {
             routeKey: [
               rideWithName.id || "route",
               rideWithName.status || status,
-              Number(ride.dropoffLat).toFixed(5),
-              Number(ride.dropoffLng).toFixed(5),
+              activeTripTarget.type,
+              activeTripTarget.index,
+              activeTripTarget.lat.toFixed(5),
+              activeTripTarget.lng.toFixed(5),
             ].join(":"),
-            stops: normalizeRideStops(ride.stops),
           });
           setShowNavModal(true);
         }
       }
-    } catch { Alert.alert("Error", "Failed to update ride status"); }
+    } catch (error: any) {
+      Alert.alert("Could not update trip", error?.message || "Failed to update ride status");
+    }
+  }
+
+  function confirmCurrentStop() {
+    if (!currentRide || stopProgressLoading) return;
+    const activeTripTarget = getActiveTripTarget(currentRide);
+    if (activeTripTarget.type !== "stop") return;
+
+    Alert.alert(
+      `Confirm Stop ${activeTripTarget.index + 1} of ${activeTripTarget.totalStops}`,
+      `Confirm that you have reached ${activeTripTarget.address}. Navigation will continue to the next destination.`,
+      [
+        { text: "Not Yet", style: "cancel" },
+        {
+          text: "Confirm Stop",
+          onPress: async () => {
+            try {
+              setStopProgressLoading(true);
+              const res = await apiRequest(
+                "PUT",
+                `/api/rides/${currentRide.id}/stops/complete`,
+              );
+              const updatedRide = await res.json();
+              const rideWithName = {
+                ...currentRide,
+                ...updatedRide,
+                clientFirstName: updatedRide.clientFirstName || currentRide.clientFirstName,
+                clientName: updatedRide.clientName || currentRide.clientName,
+                clientPhone: updatedRide.clientPhone || currentRide.clientPhone,
+              };
+              setCurrentRide(rideWithName);
+              const nextTarget = getActiveTripTarget(rideWithName);
+              await fetchDriverRoute(nextTarget.lat, nextTarget.lng, {
+                routeKey: [
+                  rideWithName.id,
+                  rideWithName.status,
+                  nextTarget.type,
+                  nextTarget.index,
+                  nextTarget.lat.toFixed(5),
+                  nextTarget.lng.toFixed(5),
+                ].join(":"),
+              });
+              if (Platform.OS !== "web") {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+              }
+            } catch (error: any) {
+              Alert.alert("Could not confirm stop", error?.message || "Please try again.");
+            } finally {
+              setStopProgressLoading(false);
+            }
+          },
+        },
+      ],
+    );
   }
 
   function confirmCancelRide() {
@@ -1810,11 +1906,22 @@ export default function ChauffeurDashboard() {
     currentRide?.clientFirstName ||
     (currentRide?.clientName ? String(currentRide.clientName).split(" ")[0] : null) ||
     "Client";
+  const currentRideStops = normalizeRideStops(currentRide?.stops);
+  const completedStopCount = getCompletedStopCount(currentRide);
+  const activeTripTarget = currentRide ? getActiveTripTarget(currentRide) : null;
+  const hasPendingStop =
+    currentRide?.status === "trip_started" && activeTripTarget?.type === "stop";
   const rideStatusLabel =
     currentRide?.status === "chauffeur_assigned" ? `On the way to pick up ${clientDisplayName}` :
     currentRide?.status === "chauffeur_arriving" ? `Arriving at ${clientDisplayName}'s pickup` :
-    currentRide?.status === "trip_started" ? `Trip in progress — ${clientDisplayName}` : "Active Ride";
-  const routeOptionsHeading = currentRide?.status === "trip_started" ? "Destination routes" : "Pickup routes";
+    hasPendingStop ? `Driving to stop ${completedStopCount + 1} of ${currentRideStops.length}` :
+    currentRide?.status === "trip_started" ? `Driving to final destination` : "Active Ride";
+  const routeOptionsHeading =
+    hasPendingStop
+      ? `Stop ${completedStopCount + 1} routes`
+      : currentRide?.status === "trip_started"
+        ? "Final destination routes"
+        : "Pickup routes";
   const clientRouteLabel = getRideRouteLabel(currentRide?.selectedRouteId);
   const clientPaymentLabel = getRidePaymentLabel(currentRide?.paymentMethod);
 
@@ -1826,8 +1933,17 @@ export default function ChauffeurDashboard() {
           <View style={[styles.navModalHeader, { paddingTop: insets.top + 16 }]}>
             <View>
               <Text style={styles.navModalTitle}>
-                {currentRide?.status === "trip_started" ? `Dropping off ${clientDisplayName}` : `Picking up ${clientDisplayName}`}
+                {hasPendingStop
+                  ? `Stop ${completedStopCount + 1} of ${currentRideStops.length}`
+                  : currentRide?.status === "trip_started"
+                    ? `Final destination`
+                    : `Picking up ${clientDisplayName}`}
               </Text>
+              {currentRide?.status === "trip_started" && activeTripTarget ? (
+                <Text style={styles.navModalDestination} numberOfLines={1}>
+                  {activeTripTarget.address}
+                </Text>
+              ) : null}
               {rideEta && <Text style={styles.navModalEta}>{rideEta.durationText} · {rideEta.distanceText}</Text>}
               {currentRide && (
                 <Text style={styles.navModalRouteHint}>{clientRouteLabel} · {clientPaymentLabel}</Text>
@@ -1911,8 +2027,24 @@ export default function ChauffeurDashboard() {
               </Pressable>
             )}
             {currentRide?.status === "trip_started" && (
-              <Pressable style={[styles.actionBtn, styles.completeBtnStyle]} onPress={() => updateRideStatus("trip_completed")}>
-                <Text style={styles.actionBtnText}>Complete Trip</Text>
+              <Pressable
+                style={[
+                  styles.actionBtn,
+                  styles.completeBtnStyle,
+                  stopProgressLoading && { opacity: 0.65 },
+                ]}
+                onPress={hasPendingStop ? confirmCurrentStop : () => updateRideStatus("trip_completed")}
+                disabled={stopProgressLoading}
+              >
+                {stopProgressLoading ? (
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                ) : (
+                  <Text style={styles.actionBtnText}>
+                    {hasPendingStop
+                      ? `Confirm Stop ${completedStopCount + 1} of ${currentRideStops.length}`
+                      : "End Trip"}
+                  </Text>
+                )}
               </Pressable>
             )}
           </View>
@@ -2078,6 +2210,48 @@ export default function ChauffeurDashboard() {
             <View style={styles.dotGreen} />
             <Text style={styles.addrText} numberOfLines={1}>{currentRide.pickupAddress || "Pickup"}</Text>
           </View>
+          {currentRideStops.map((stop, index) => {
+            const isComplete = index < completedStopCount;
+            const isCurrent = currentRide.status === "trip_started" && index === completedStopCount;
+            return (
+              <View
+                key={stop.id}
+                style={[styles.addrRow, isCurrent && styles.activeStopRow]}
+              >
+                <View
+                  style={[
+                    styles.stopProgressIndex,
+                    isComplete && styles.stopProgressIndexComplete,
+                    isCurrent && styles.stopProgressIndexCurrent,
+                  ]}
+                >
+                  {isComplete ? (
+                    <Ionicons name="checkmark" size={12} color={Colors.primary} />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.stopProgressIndexText,
+                        isCurrent && styles.stopProgressIndexTextCurrent,
+                      ]}
+                    >
+                      {index + 1}
+                    </Text>
+                  )}
+                </View>
+                <Text
+                  style={[
+                    styles.addrText,
+                    isComplete && styles.completedStopText,
+                    isCurrent && styles.currentStopText,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {stop.address || `Stop ${index + 1}`}
+                </Text>
+                {isCurrent ? <Text style={styles.nextStopBadge}>NEXT</Text> : null}
+              </View>
+            );
+          })}
           <View style={styles.addrRow}>
             <View style={styles.dotRed} />
             <Text style={styles.addrText} numberOfLines={1}>{currentRide.dropoffAddress || "Dropoff"}</Text>
@@ -2145,8 +2319,24 @@ export default function ChauffeurDashboard() {
             </Pressable>
           )}
           {currentRide.status === "trip_started" && (
-            <Pressable style={[styles.actionBtn, styles.completeBtnStyle]} onPress={() => updateRideStatus("trip_completed")}>
-              <Text style={styles.actionBtnText}>Complete Trip</Text>
+            <Pressable
+              style={[
+                styles.actionBtn,
+                styles.completeBtnStyle,
+                stopProgressLoading && { opacity: 0.65 },
+              ]}
+              onPress={hasPendingStop ? confirmCurrentStop : () => updateRideStatus("trip_completed")}
+              disabled={stopProgressLoading}
+            >
+              {stopProgressLoading ? (
+                <ActivityIndicator size="small" color={Colors.primary} />
+              ) : (
+                <Text style={styles.actionBtnText}>
+                  {hasPendingStop
+                    ? `Confirm Stop ${completedStopCount + 1} of ${currentRideStops.length}`
+                    : "End Trip"}
+                </Text>
+              )}
             </Pressable>
           )}
         </View>
@@ -2544,6 +2734,15 @@ const styles = StyleSheet.create({
   addrRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   addrText: { flex: 1, fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textSecondary },
   stopIndexText: { width: 14, fontSize: 11, fontFamily: "Inter_700Bold", color: Colors.accent, textAlign: "center" },
+  activeStopRow: { marginHorizontal: -6, paddingHorizontal: 6, paddingVertical: 6, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.08)" },
+  stopProgressIndex: { width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border },
+  stopProgressIndexComplete: { backgroundColor: Colors.success, borderColor: Colors.success },
+  stopProgressIndexCurrent: { backgroundColor: Colors.white, borderColor: Colors.white },
+  stopProgressIndexText: { fontSize: 10, fontFamily: "Inter_700Bold", color: Colors.textMuted },
+  stopProgressIndexTextCurrent: { color: Colors.primary },
+  completedStopText: { color: Colors.textMuted, textDecorationLine: "line-through" },
+  currentStopText: { color: Colors.white, fontFamily: "Inter_600SemiBold" },
+  nextStopBadge: { fontSize: 9, fontFamily: "Inter_700Bold", color: Colors.primary, backgroundColor: Colors.white, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 },
   dotGreen: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.success },
   dotRed: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.error },
   actionBtn: { backgroundColor: Colors.white, paddingVertical: 14, borderRadius: 14, alignItems: "center" },
@@ -2561,6 +2760,7 @@ const styles = StyleSheet.create({
   navModal: { flex: 1, backgroundColor: Colors.primary },
   navModalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", paddingHorizontal: 20, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: Colors.border },
   navModalTitle: { fontSize: 18, fontFamily: "Inter_700Bold", color: Colors.white },
+  navModalDestination: { maxWidth: SCREEN_WIDTH - 100, fontSize: 12, fontFamily: "Inter_500Medium", color: Colors.textSecondary, marginTop: 3 },
   navModalEta: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textMuted, marginTop: 2 },
   navModalRouteHint: { fontSize: 12, fontFamily: "Inter_500Medium", color: Colors.accent, marginTop: 4 },
   navModalClose: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.surface, alignItems: "center", justifyContent: "center" },

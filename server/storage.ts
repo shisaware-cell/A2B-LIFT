@@ -170,6 +170,7 @@ export interface IStorage {
   createRide(data: any): Promise<Ride>;
   getRide(id: string): Promise<Ride | undefined>;
   updateRide(id: string, data: Partial<Ride>): Promise<Ride | undefined>;
+  completeNextRideStop(rideId: string, expectedCompletedCount: number): Promise<Ride | undefined>;
   /** Atomically accepts a ride only if it is still in "requested" or "searching" status.
    *  Returns the updated ride, or undefined if the ride was already taken (race condition guard). */
   acceptRideAtomic(rideId: string, chauffeurId: string, vehicleId?: string | null): Promise<Ride | undefined>;
@@ -1076,6 +1077,26 @@ export class DatabaseStorage implements IStorage {
       .update(rides)
       .set(data)
       .where(eq(rides.id, id))
+      .returning();
+    return ride;
+  }
+
+  async completeNextRideStop(
+    rideId: string,
+    expectedCompletedCount: number,
+  ): Promise<Ride | undefined> {
+    const [ride] = await db
+      .update(rides)
+      .set({
+        completedStopCount: sql`${rides.completedStopCount} + 1`,
+      })
+      .where(
+        and(
+          eq(rides.id, rideId),
+          eq(rides.status, "trip_started"),
+          eq(rides.completedStopCount, expectedCompletedCount),
+        ),
+      )
       .returning();
     return ride;
   }

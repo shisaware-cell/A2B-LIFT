@@ -518,6 +518,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancellation_fee real DEFAULT 0");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS commission_rate real NOT NULL DEFAULT 0.25");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS stops jsonb NOT NULL DEFAULT '[]'::jsonb");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS completed_stop_count integer NOT NULL DEFAULT 0");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS surge_multiplier real DEFAULT 1");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS surge_reason text");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS estimated_duration_min real");
@@ -7240,6 +7241,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!isRider && !isChauffeur && !isAdmin) {
         return res.status(403).json({ message: "Forbidden: not a party to this ride" });
       }
+      if (
+        status === "trip_completed" &&
+        Number((existingRide as any).completedStopCount || 0) <
+          normalizeRideStops(existingRide.stops).length
+      ) {
+        return res.status(409).json({
+          message: "Confirm every requested stop before ending this trip.",
+        });
+      }
 
       const now = new Date();
       const cancelledBy = status === "cancelled"
@@ -7720,6 +7730,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("ride status update error:", error.message, error.stack);
       return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.put("/api/rides/:id/stops/complete", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const existingRide = await storage.getRide(req.params.id);
+      if (!existingRide) return res.status(404).json({ message: "Ride not found" });
+      if (existingRide.status !== "trip_started") {
+        return res.status(409).json({ message: "Stops can only be confirmed during an active trip." });
+      }
+
+      const callerUser = await storage.getUser(req.auth!.sub);
+      if (!callerUser) return res.status(403).json({ message: "Forbidden" });
+      const chauffeur = existingRide.chauffeurId
+        ? await storage.getChauffeur(existingRide.chauffeurId)
+        : null;
+      const isAssignedChauffeur = chauffeur?.userId === callerUser.id;
+      const isAdmin = callerUser.role === "admin";
+      if (!isAssignedChauffeur && !isAdmin) {
+        return res.status(403).json({ message: "Only the assigned driver can confirm a stop." });
+      }
+
+      const stops = normalizeRideStops(existingRide.stops);
+      const completedStopCount = Math.max(
+        0,
+        Math.min(stops.length, Number((existingRide as any).completedStopCount || 0)),
+      );
+      if (completedStopCount >= stops.length) {
+        return res.status(409).json({ message: "All requested stops are already complete." });
+      }
+
+      const updatedRide = await storage.completeNextRideStop(
+        existingRide.id,
+        completedStopCount,
+      );
+      if (!updatedRide) {
+        return res.status(409).json({
+          message: "Stop progress changed. Refresh the trip and try again.",
+        });
+      }
+
+      const completedStop = stops[completedStopCount];
+      io.emit("ride:statusUpdate", updatedRide);
+      try {
+        await storage.createNotification({
+          userId: existingRide.clientId,
+          title: `Stop ${completedStopCount + 1} reached`,
+          body: completedStop.address
+            ? `Your driver confirmed the stop at ${completedStop.address}.`
+            : "Your driver confirmed the requested stop.",
+          type: "ride",
+        });
+      } catch (notificationError: any) {
+        console.error("stop notification failed (non-fatal):", notificationError.message);
+      }
+
+      return res.json(updatedRide);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || "Failed to confirm stop." });
     }
   });
 
