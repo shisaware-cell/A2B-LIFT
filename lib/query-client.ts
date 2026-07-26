@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
 const API_REQUEST_TIMEOUT_MS = 12000;
+const inFlightGetRequests = new Map<string, Promise<Response>>();
 
 /**
  * Gets the base URL for the Express API server.
@@ -108,15 +109,36 @@ export async function apiRequest(
     ...authHeader,
   };
 
-  const res = await fetchWithTimeout(url.toString(), {
-    method,
-    headers,
-    body: data ? JSON.stringify(data) : undefined,
-    // credentials: "include" is not supported by expo/fetch on native — JWT via Authorization header is used instead
-  });
+  const normalizedMethod = method.toUpperCase();
+  const requestKey = `${normalizedMethod}:${url}:${authHeader.Authorization || ""}`;
+  const executeRequest = async () => {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: normalizedMethod,
+      headers,
+      body: data ? JSON.stringify(data) : undefined,
+      // credentials: "include" is not supported by expo/fetch on native — JWT via Authorization header is used instead
+    });
+    await throwIfResNotOk(res);
+    return res;
+  };
 
-  await throwIfResNotOk(res);
-  return res;
+  if (normalizedMethod !== "GET") {
+    return executeRequest();
+  }
+
+  let request = inFlightGetRequests.get(requestKey);
+  if (!request) {
+    request = executeRequest();
+    inFlightGetRequests.set(requestKey, request);
+  }
+
+  try {
+    return (await request).clone();
+  } finally {
+    if (inFlightGetRequests.get(requestKey) === request) {
+      inFlightGetRequests.delete(requestKey);
+    }
+  }
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw";

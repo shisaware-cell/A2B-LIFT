@@ -44,7 +44,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     }
 
     const socket = io(baseUrl, {
-      transports: ["polling", "websocket"],
+      transports: ["websocket", "polling"],
+      upgrade: true,
+      rememberUpgrade: true,
       auth: { token: accessToken },
       reconnectionAttempts: 5,
       reconnectionDelay: 2000,
@@ -52,13 +54,12 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     });
 
     socketRef.current = socket;
+    listenersRef.current.forEach((callbacks, event) => {
+      callbacks.forEach((callback) => socket.on(event, callback));
+    });
 
     socket.on("connect", () => {
       console.log("[Socket] connected:", socket.id);
-      // Re-attach all registered listeners after reconnect
-      listenersRef.current.forEach((callbacks, event) => {
-        callbacks.forEach((cb) => socket.on(event, cb));
-      });
     });
 
     socket.on("disconnect", (reason) => {

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useMemo, useCallback, useState } from "react";
-import { View, Text, StyleSheet, ActivityIndicator, Platform } from "react-native";
+import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
@@ -165,7 +165,7 @@ interface A2BMapProps {
   initialZoom?: "street" | "city";
 }
 
-export default function A2BMap({
+function A2BMap({
   pickupLocation,
   dropoffLocation,
   stopLocations = [],
@@ -199,23 +199,6 @@ export default function A2BMap({
   const routeColor = isDay ? "#111111" : "#FFFFFF";
   const dropoffIconColor = isDay ? "#111111" : Colors.white;
   const edgeShade = isDay ? "255,255,255" : "0,0,0";
-
-  useEffect(() => {
-    if (Platform.OS !== "android") return;
-    console.log("[A2BMap] mount", {
-      loading,
-      showDriver,
-      followDriver,
-      hasPickup: !!pickupLocation,
-      hasDropoff: !!dropoffLocation,
-      hasDriver: !!driverLocation,
-      nearbyDrivers: nearbyDrivers.length,
-      hasRoutePolyline: !!routePolyline,
-    });
-    return () => {
-      console.log("[A2BMap] unmount");
-    };
-  }, []);
 
   // Use user's location for initialRegion if available, else Johannesburg
   const center = pickupLocation || DEFAULT_REGION;
@@ -271,34 +254,9 @@ export default function A2BMap({
 
   function handleMapReady() {
     mapReadyRef.current = true;
-    if (Platform.OS === "android") {
-      console.log("[A2BMap] onMapReady", {
-        loading,
-        showDriver,
-        followDriver,
-        hasPickup: !!pickupLocation,
-        hasDropoff: !!dropoffLocation,
-        hasDriver: !!driverLocation,
-        routeCoords: routeCoords.length,
-      });
-    }
     fitMap();
     setTimeout(fitMap, 400);
   }
-
-  useEffect(() => {
-    if (Platform.OS !== "android") return;
-    console.log("[A2BMap] render state", {
-      loading,
-      showDriver,
-      followDriver,
-      hasPickup: !!pickupLocation,
-      hasDropoff: !!dropoffLocation,
-      hasDriver: !!driverLocation,
-      nearbyDrivers: nearbyDrivers.length,
-      routeCoords: routeCoords.length,
-    });
-  }, [loading, showDriver, followDriver, pickupLocation?.lat, pickupLocation?.lng, dropoffLocation?.lat, dropoffLocation?.lng, driverLocation?.lat, driverLocation?.lng, nearbyDrivers.length, routeCoords.length]);
 
   // Zoom to user location when GPS first arrives (no route/dropoff set yet)
   useEffect(() => {
@@ -364,8 +322,7 @@ export default function A2BMap({
     if (routeCoords.length === 0) return;
     const t1 = setTimeout(() => zoomToCoords(routeCoords, 700), 200);
     const t2 = setTimeout(() => zoomToCoords(routeCoords, 700), 900);
-    const t3 = setTimeout(() => zoomToCoords(routeCoords, 700), 2000);
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+    return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [routeCoords, zoomToCoords]);
 
   return (
@@ -476,6 +433,44 @@ export default function A2BMap({
     </View>
   );
 }
+
+function sameCoordinate(
+  left?: { lat: number; lng: number } | null,
+  right?: { lat: number; lng: number } | null,
+) {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.lat === right.lat && left.lng === right.lng;
+}
+
+function sameCoordinateList(
+  left: Array<{ id?: string | number; lat: number; lng: number }> = [],
+  right: Array<{ id?: string | number; lat: number; lng: number }> = [],
+) {
+  return left.length === right.length && left.every((point, index) => {
+    const other = right[index];
+    return point.id === other?.id && point.lat === other?.lat && point.lng === other?.lng;
+  });
+}
+
+function areMapPropsEqual(previous: A2BMapProps, next: A2BMapProps) {
+  return (
+    sameCoordinate(previous.pickupLocation, next.pickupLocation) &&
+    sameCoordinate(previous.dropoffLocation, next.dropoffLocation) &&
+    sameCoordinate(previous.driverLocation, next.driverLocation) &&
+    sameCoordinateList(previous.stopLocations, next.stopLocations) &&
+    sameCoordinateList(previous.nearbyDrivers, next.nearbyDrivers) &&
+    previous.routePolyline === next.routePolyline &&
+    previous.showDriver === next.showDriver &&
+    previous.followDriver === next.followDriver &&
+    previous.loading === next.loading &&
+    previous.etaText === next.etaText &&
+    previous.statusText === next.statusText &&
+    previous.initialZoom === next.initialZoom
+  );
+}
+
+export default React.memo(A2BMap, areMapPropsEqual);
 
 const styles = StyleSheet.create({
   container: {

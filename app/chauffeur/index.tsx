@@ -164,7 +164,6 @@ export default function ChauffeurDashboard() {
   const [incomingRide, setIncomingRide] = useState<any>(null);
   const [incomingOfferSeconds, setIncomingOfferSeconds] = useState<number>(45);
   const [currentRide, setCurrentRide] = useState<any>(null);
-  const [locationInterval, setLocationIntervalId] = useState<any>(null);
   const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [routePolyline, setRoutePolyline] = useState<string | null>(null);
   const [showNavModal, setShowNavModal] = useState(false);
@@ -207,6 +206,7 @@ export default function ChauffeurDashboard() {
   const notificationsRef = useRef<any>(null);
   const locationWatchRef = useRef<Location.LocationSubscription | null>(null);
   const locationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastForegroundLocationAtRef = useRef(0);
   const lastLocationRestPostRef = useRef(0);
   const currentRideRef = useRef<any>(null);
   const isOnlineRef = useRef(false);
@@ -1229,7 +1229,13 @@ export default function ChauffeurDashboard() {
   const JHB_FALLBACK = { lat: -26.2041, lng: 28.0473 };
 
   function publishChauffeurLocation(next: { lat: number; lng: number }) {
-    setMyLocation(next);
+    lastForegroundLocationAtRef.current = Date.now();
+    setMyLocation((current) => {
+      if (current && haversineDistance(current.lat, current.lng, next.lat, next.lng) < 0.003) {
+        return current;
+      }
+      return next;
+    });
     if (chauffeur?.id) {
       emit("chauffeur:location", { chauffeurId: chauffeur.id, lat: next.lat, lng: next.lng });
       const now = Date.now();
@@ -1311,13 +1317,13 @@ export default function ChauffeurDashboard() {
       } catch {}
 
       const interval = setInterval(async () => {
+        if (Date.now() - lastForegroundLocationAtRef.current < 20_000) return;
         try {
           const loc = await getBestAvailablePosition();
           publishChauffeurLocation(toLatLng(loc));
         } catch {}
       }, 15000);
       locationIntervalRef.current = interval;
-      setLocationIntervalId(interval);
     } catch { setMyLocation(JHB_FALLBACK); }
   }
 
@@ -1327,10 +1333,7 @@ export default function ChauffeurDashboard() {
     if (locationIntervalRef.current) {
       clearInterval(locationIntervalRef.current);
       locationIntervalRef.current = null;
-      setLocationIntervalId(null);
-      return;
     }
-    if (locationInterval) { clearInterval(locationInterval); setLocationIntervalId(null); }
   }
 
   function stopLocationUpdates() {

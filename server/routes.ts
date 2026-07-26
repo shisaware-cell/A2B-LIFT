@@ -3964,9 +3964,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .filter((assignment) => !ownedVehicles.some((vehicle) => vehicle.id === assignment.vehicleId))
           .map((assignment) => storage.getVehicle(assignment.vehicleId)),
       );
+      const visibleVehicles = [...ownedVehicles, ...assignedVehicles.filter(Boolean)];
+      const [vehiclesWithDocuments, chauffeur] = await Promise.all([
+        Promise.all(visibleVehicles.map(async (vehicle: any) => ({
+          ...vehicle,
+          vehicle,
+          documents: await storage.getDocumentsByVehicle(vehicle.id).catch(() => []),
+        }))),
+        profile.type === "driver"
+          ? storage.getChauffeurByUserId(req.auth!.sub).catch(() => undefined)
+          : Promise.resolve(undefined),
+      ]);
       return res.json({
-        vehicles: [...ownedVehicles, ...assignedVehicles.filter(Boolean)],
+        vehicles: vehiclesWithDocuments,
         assignments,
+        operatorProfile: profile,
+        activeVehicleId: chauffeur?.activeVehicleId || null,
       });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });

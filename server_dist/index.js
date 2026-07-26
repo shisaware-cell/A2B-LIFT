@@ -5283,9 +5283,20 @@ async function registerRoutes(app2) {
       const assignedVehicles = await Promise.all(
         assignments.filter((assignment) => !ownedVehicles.some((vehicle) => vehicle.id === assignment.vehicleId)).map((assignment) => storage.getVehicle(assignment.vehicleId))
       );
+      const visibleVehicles = [...ownedVehicles, ...assignedVehicles.filter(Boolean)];
+      const [vehiclesWithDocuments, chauffeur] = await Promise.all([
+        Promise.all(visibleVehicles.map(async (vehicle) => ({
+          ...vehicle,
+          vehicle,
+          documents: await storage.getDocumentsByVehicle(vehicle.id).catch(() => [])
+        }))),
+        profile.type === "driver" ? storage.getChauffeurByUserId(req.auth.sub).catch(() => void 0) : Promise.resolve(void 0)
+      ]);
       return res.json({
-        vehicles: [...ownedVehicles, ...assignedVehicles.filter(Boolean)],
-        assignments
+        vehicles: vehiclesWithDocuments,
+        assignments,
+        operatorProfile: profile,
+        activeVehicleId: chauffeur?.activeVehicleId || null
       });
     } catch (error) {
       return res.status(500).json({ message: error.message });

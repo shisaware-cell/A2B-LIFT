@@ -887,6 +887,9 @@ export default function ClientHomeScreen() {
   const [submittingRating, setSubmittingRating] = useState(false);
   const [onlineDrivers, setOnlineDrivers] = useState<NearbyDriverState[]>([]);
   const [showPaymentPicker, setShowPaymentPicker] = useState(false);
+  const [paymentMethodsLoading, setPaymentMethodsLoading] = useState(false);
+  const [estimatingFare, setEstimatingFare] = useState(false);
+  const [rideRequestLoading, setRideRequestLoading] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "card" | "wallet">("cash");
   const [showCashSelfiePrompt, setShowCashSelfiePrompt] = useState(false);
   const [showCashSelfieCamera, setShowCashSelfieCamera] = useState(false);
@@ -1943,6 +1946,7 @@ export default function ClientHomeScreen() {
   }
 
   async function getEstimate() {
+    if (estimatingFare) return;
     if (!dropoffAddress.trim()) {
       Alert.alert("Enter Destination", "Please enter your dropoff location");
       return;
@@ -1955,6 +1959,7 @@ export default function ClientHomeScreen() {
       Alert.alert("Complete every stop", "Choose an address for each stop or remove the empty stop.");
       return;
     }
+    setEstimatingFare(true);
     try {
       // Use already-resolved coords from autocomplete selection, or geocode the typed address
       const dest = dropoffCoords ?? await geocodeDestination();
@@ -1970,6 +1975,8 @@ export default function ClientHomeScreen() {
       setRideStatus("confirming");
     } catch (e) {
       Alert.alert("Error", "Failed to get estimate");
+    } finally {
+      setEstimatingFare(false);
     }
   }
 
@@ -1979,6 +1986,8 @@ export default function ClientHomeScreen() {
       Alert.alert("Choose a Route", "Select a route option before requesting your ride.");
       return;
     }
+    setShowPaymentPicker(true);
+    setPaymentMethodsLoading(true);
     try {
       const res = await apiRequest("GET", "/api/payments/cards");
       const cards = await res.json();
@@ -1989,8 +1998,9 @@ export default function ClientHomeScreen() {
         return;
       }
       setSavedCards([]);
+    } finally {
+      setPaymentMethodsLoading(false);
     }
-    setShowPaymentPicker(true);
   }
 
   async function createRideRecord(
@@ -2037,6 +2047,8 @@ export default function ClientHomeScreen() {
 
   /** Creates and dispatches a ride for any payment method */
   async function proceedWithRide(method: "cash" | "card" | "wallet") {
+    if (rideRequestLoading) return;
+    setRideRequestLoading(true);
     try {
       const ride = await createRideRecord(method);
       if (!ride) return;
@@ -2103,6 +2115,8 @@ export default function ClientHomeScreen() {
         return;
       }
       Alert.alert("Error", err?.message || "Failed to request ride. Please try again.");
+    } finally {
+      setRideRequestLoading(false);
     }
   }
 
@@ -2598,10 +2612,22 @@ export default function ClientHomeScreen() {
             </Pressable>
 
             <Pressable
-              style={({ pressed }) => [styles.confirmBtn, pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] }]}
+              style={({ pressed }) => [
+                styles.confirmBtn,
+                estimatingFare && { opacity: 0.7 },
+                pressed && !estimatingFare && { opacity: 0.9, transform: [{ scale: 0.98 }] },
+              ]}
               onPress={getEstimate}
+              disabled={estimatingFare}
             >
-              <Text style={styles.confirmBtnText}>Get Estimated Fare</Text>
+              {estimatingFare ? (
+                <>
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                  <Text style={styles.confirmBtnText}>Calculating route...</Text>
+                </>
+              ) : (
+                <Text style={styles.confirmBtnText}>Get Estimated Fare</Text>
+              )}
             </Pressable>
           </ScrollView>
         </Animated.View>
@@ -2752,10 +2778,22 @@ export default function ClientHomeScreen() {
             </View>
 
             <Pressable
-              style={({ pressed }) => [styles.requestBtn, pressed && { opacity: 0.9 }]}
+              style={({ pressed }) => [
+                styles.requestBtn,
+                rideRequestLoading && { opacity: 0.7 },
+                pressed && !rideRequestLoading && { opacity: 0.9 },
+              ]}
               onPress={requestRide}
+              disabled={rideRequestLoading}
             >
-              <Text style={styles.requestBtnText}>Request Ride</Text>
+              {rideRequestLoading ? (
+                <>
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                  <Text style={styles.requestBtnText}>Requesting...</Text>
+                </>
+              ) : (
+                <Text style={styles.requestBtnText}>Request Ride</Text>
+              )}
             </Pressable>
 
             <Pressable style={styles.cancelFullBtn} onPress={cancelRide}>
@@ -3200,7 +3238,8 @@ export default function ClientHomeScreen() {
               const defaultCard = savedCards.find(c => c.isDefault) || savedCards[0];
               return (
                 <Pressable
-                  style={styles.payMethodRow}
+                  style={[styles.payMethodRow, paymentMethodsLoading && { opacity: 0.65 }]}
+                  disabled={paymentMethodsLoading}
                   onPress={() => {
                     if (!defaultCard) {
                       setShowPaymentPicker(false);
@@ -3221,7 +3260,11 @@ export default function ClientHomeScreen() {
                       {defaultCard ? "Charged immediately to saved card" : "No card saved — tap to add one in wallet"}
                     </Text>
                   </View>
-                  <Ionicons name={defaultCard ? "chevron-forward" : "add-circle-outline"} size={16} color={Colors.textMuted} />
+                  {paymentMethodsLoading ? (
+                    <ActivityIndicator size="small" color={Colors.textMuted} />
+                  ) : (
+                    <Ionicons name={defaultCard ? "chevron-forward" : "add-circle-outline"} size={16} color={Colors.textMuted} />
+                  )}
                 </Pressable>
               );
             })()}
@@ -4083,7 +4126,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     paddingVertical: 13,
     borderRadius: 12,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   },
   confirmBtnText: {
     fontSize: 14,
@@ -4355,7 +4401,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     paddingVertical: 13,
     borderRadius: 12,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   },
   requestBtnText: {
     fontSize: 14,

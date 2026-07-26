@@ -36,26 +36,16 @@ export default function VehiclesScreen() {
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [uploadingDocs, setUploadingDocs] = useState<Record<string, boolean>>({});
   const [submittingVehicles, setSubmittingVehicles] = useState<Record<string, boolean>>({});
+  const [activeVehicleId, setActiveVehicleId] = useState<string | null>(null);
+  const [selectingVehicleId, setSelectingVehicleId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [profileRes, vehicleRes] = await Promise.all([
-        apiRequest("GET", "/api/operator-profile/me"),
-        apiRequest("GET", "/api/vehicles"),
-      ]);
-      const profileData = await profileRes.json();
+      const vehicleRes = await apiRequest("GET", "/api/vehicles");
       const data = await vehicleRes.json();
-      setOperatorProfile(profileData.profile || null);
-      const baseVehicles = Array.isArray(data.vehicles) ? data.vehicles : [];
-      const enriched = await Promise.all(baseVehicles.map(async (vehicle) => {
-        try {
-          const detailRes = await apiRequest("GET", `/api/vehicles/${vehicle.id}`);
-          return { ...vehicle, ...(await detailRes.json()) };
-        } catch {
-          return vehicle;
-        }
-      }));
-      setVehicles(enriched);
+      setOperatorProfile(data.operatorProfile || null);
+      setActiveVehicleId(data.activeVehicleId || null);
+      setVehicles(Array.isArray(data.vehicles) ? data.vehicles : []);
       setAssignments(Array.isArray(data.assignments) ? data.assignments : []);
     } catch {
       Alert.alert("Error", "Could not load vehicles.");
@@ -96,12 +86,20 @@ export default function VehiclesScreen() {
   }
 
   async function selectVehicle(vehicleId: string) {
+    if (selectingVehicleId || activeVehicleId === vehicleId) return;
+    const previousActiveVehicleId = activeVehicleId;
+    setSelectingVehicleId(vehicleId);
+    setActiveVehicleId(vehicleId);
     try {
-      await apiRequest("POST", `/api/vehicles/${vehicleId}/select-active`);
+      const response = await apiRequest("POST", `/api/vehicles/${vehicleId}/select-active`);
+      const data = await response.json();
+      setActiveVehicleId(data.activeVehicleId || vehicleId);
       Alert.alert("Vehicle selected", "You can now go online with this vehicle.");
-      await load();
     } catch (e: any) {
+      setActiveVehicleId(previousActiveVehicleId);
       Alert.alert("Cannot select vehicle", e.message || "Vehicle must be approved and assigned to you.");
+    } finally {
+      setSelectingVehicleId(null);
     }
   }
 
@@ -239,13 +237,20 @@ export default function VehiclesScreen() {
           const unapprovedDocs = VEHICLE_DOCS.filter((doc) => docs.find((uploaded: any) => uploaded.type === doc.id)?.status !== "approved");
           const isSubmitting = !!submittingVehicles[vehicleData.id] || vehicleData.status === "pending";
           const ownsVehicle = vehicleData.ownerOperatorProfileId === operatorProfile?.id;
+          const isActiveVehicle = activeVehicleId === vehicleData.id;
+          const isSelectingVehicle = selectingVehicleId === vehicleData.id;
           return (
-            <View key={vehicle.id} style={styles.vehicleCard}>
+            <View key={vehicle.id} style={[styles.vehicleCard, isActiveVehicle && styles.vehicleCardActive]}>
               <View style={styles.vehicleTop}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.vehicleTitle}>{vehicleData.carMake} {vehicleData.vehicleModel}</Text>
                   <Text style={styles.vehicleMeta}>{vehicleData.plateNumber} · {vehicleData.vehicleYear}</Text>
                 </View>
+                {isActiveVehicle && (
+                  <View style={styles.activeCheck}>
+                    <Ionicons name="checkmark" size={16} color={Colors.primary} />
+                  </View>
+                )}
                 <View style={[styles.statusChip, styles[`status_${vehicleData.status}` as keyof typeof styles] as any]}>
                   <Text style={styles.statusText}>{vehicleData.status}</Text>
                 </View>
@@ -286,8 +291,23 @@ export default function VehiclesScreen() {
               {vehicleData.status === "approved" && (
                 <View style={styles.actionRow}>
                   {operatorProfile?.type === "driver" && assigned && (
-                    <Pressable style={styles.selectBtn} onPress={() => selectVehicle(vehicleData.id)}>
-                      <Text style={styles.selectText}>Select for Driving</Text>
+                    <Pressable
+                      style={[styles.selectBtn, isActiveVehicle && styles.selectBtnActive]}
+                      onPress={() => selectVehicle(vehicleData.id)}
+                      disabled={isActiveVehicle || selectingVehicleId !== null}
+                    >
+                      {isSelectingVehicle ? (
+                        <ActivityIndicator size="small" color={Colors.white} />
+                      ) : (
+                        <Ionicons
+                          name={isActiveVehicle ? "checkmark-circle" : "car-sport-outline"}
+                          size={16}
+                          color={Colors.white}
+                        />
+                      )}
+                      <Text style={styles.selectText}>
+                        {isSelectingVehicle ? "Selecting..." : isActiveVehicle ? "Selected for Driving" : "Select for Driving"}
+                      </Text>
                     </Pressable>
                   )}
                   {ownsVehicle && (
@@ -328,6 +348,7 @@ const styles = StyleSheet.create({
   submitText: { color: Colors.primary, fontFamily: "Inter_700Bold" },
   emptyText: { color: Colors.textMuted, fontFamily: "Inter_400Regular" },
   vehicleCard: { gap: 12, backgroundColor: Colors.card, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: Colors.border, marginBottom: 10 },
+  vehicleCardActive: { borderColor: Colors.success },
   vehicleTop: { flexDirection: "row", alignItems: "center", gap: 12 },
   vehicleTitle: { color: Colors.white, fontFamily: "Inter_700Bold", fontSize: 15 },
   vehicleMeta: { color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 12, marginTop: 4 },
@@ -346,7 +367,9 @@ const styles = StyleSheet.create({
   pendingText: { color: Colors.textSecondary, fontFamily: "Inter_400Regular", fontSize: 12, lineHeight: 17 },
   waitlistText: { color: Colors.warning, fontFamily: "Inter_600SemiBold", fontSize: 12, lineHeight: 17 },
   actionRow: { flexDirection: "row", justifyContent: "flex-end", flexWrap: "wrap", gap: 8 },
-  selectBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: Colors.accent },
+  activeCheck: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: Colors.success },
+  selectBtn: { minHeight: 38, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: Colors.accent, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  selectBtnActive: { backgroundColor: Colors.success },
   selectText: { color: Colors.white, fontFamily: "Inter_700Bold", fontSize: 12 },
   submitBtnMuted: { opacity: 0.55 },
 });
