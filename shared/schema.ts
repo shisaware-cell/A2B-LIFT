@@ -87,6 +87,7 @@ export const rides = pgTable("rides", {
   price: real("price"),
   pricePerKm: real("price_per_km"),
   baseFare: real("base_fare"),
+  commissionRate: real("commission_rate").notNull().default(0.25),
   distanceKm: real("distance_km"),
   durationMin: real("duration_min"),
   vehicleType: text("vehicle_type"),

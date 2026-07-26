@@ -42,7 +42,7 @@ import {
 } from "@/lib/google-navigation";
 import Colors from "@/constants/colors";
 import A2BMap from "@/components/A2BMap";
-import { getDriverNetFare } from "@shared/fare-policy";
+import { VEHICLE_CATEGORY_PRICING, getDriverNetFare } from "@shared/fare-policy";
 import { normalizeRideStops } from "@shared/ride-stops";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -209,6 +209,7 @@ export default function ChauffeurDashboard() {
   const lastForegroundLocationAtRef = useRef(0);
   const lastLocationRestPostRef = useRef(0);
   const currentRideRef = useRef<any>(null);
+  const handledCancellationRideIdsRef = useRef(new Set<string>());
   const isOnlineRef = useRef(false);
   const chauffeurRef = useRef<any>(null);
   const isExpoGoAndroid = Platform.OS === "android" && Constants.appOwnership === "expo";
@@ -346,15 +347,11 @@ export default function ChauffeurDashboard() {
       return `R ${getRideFare(currentRide).toFixed(0)}`;
     }
     const rates: Record<string, { pricePerKm: number; baseFare: number }> = {
-      budget:      { pricePerKm: 7,  baseFare: 50  },
-      luxury:      { pricePerKm: 13, baseFare: 100 },
-      business:    { pricePerKm: 35, baseFare: 150 },
-      van:         { pricePerKm: 13, baseFare: 120 },
-      luxury_van:  { pricePerKm: 35, baseFare: 200 },
+      ...VEHICLE_CATEGORY_PRICING,
     };
     const cat = rates[currentRide.vehicleType || "budget"] || rates.budget;
     const grossFare = Math.round(cat.baseFare + distanceKm * cat.pricePerKm);
-    return `R ${getDriverNetFare(grossFare).toFixed(0)}`;
+    return `R ${getDriverNetFare(grossFare, currentRide?.commissionRate).toFixed(0)}`;
   }
 
   function getRideRouteLabel(routeId?: string | null) {
@@ -386,7 +383,7 @@ export default function ChauffeurDashboard() {
   }
 
   function getRideFare(ride: any) {
-    return getDriverNetFare(getRideClientFare(ride));
+    return getDriverNetFare(getRideClientFare(ride), ride?.commissionRate);
   }
 
   async function getClientSummary(clientId?: string): Promise<ClientSummary | null> {
@@ -647,6 +644,46 @@ export default function ChauffeurDashboard() {
   }, [isOnline, chauffeur, currentRide]);
 
   // ─── Socket: rider cancellation ───────────────────────────────────────────
+  function handleRiderCancellation(ride: any) {
+    const activeRide = currentRideRef.current;
+    if (
+      !ride?.id ||
+      ride.status !== "cancelled" ||
+      !activeRide ||
+      ride.id !== activeRide.id ||
+      handledCancellationRideIdsRef.current.has(ride.id)
+    ) {
+      return;
+    }
+
+    handledCancellationRideIdsRef.current.add(ride.id);
+    suppressRideAlert(ride.id);
+    currentRideRef.current = null;
+    setCurrentRide(null);
+    setRoutePolyline(null);
+    setRouteAlternatives([]);
+    setSelectedRouteIndex(0);
+    setRideEta(null);
+    setShowNavModal(false);
+    setNavSteps([]);
+    setCurrentStepIdx(0);
+    routeContextRef.current = null;
+    AsyncStorage.removeItem("a2b_current_ride").catch(() => {});
+    if (chauffeur?.id) void refreshChauffeur(chauffeur.id);
+
+    const serverAmount = Number(ride.driverCancellationEarnings);
+    const cancellationFee = Math.max(0, Number(ride.cancellationFee || 0));
+    const amountDue = Number.isFinite(serverAmount) && serverAmount >= 0
+      ? serverAmount
+      : getDriverNetFare(cancellationFee, ride.commissionRate);
+    Alert.alert(
+      "Ride Cancelled",
+      amountDue > 0
+        ? `The rider cancelled this trip. R ${amountDue.toFixed(2)} has been added to your earnings.`
+        : "The rider cancelled this trip. No cancellation earnings are due.",
+    );
+  }
+
   useEffect(() => {
     const clearRideFromDiscovery = (ride: any) => {
       if (!ride?.id) return;
@@ -672,22 +709,7 @@ export default function ChauffeurDashboard() {
 
     const handleRideUpdate = (ride: any) => {
       clearRideFromDiscovery(ride);
-      setCurrentRide((prev: any) => {
-        if (prev && ride.id === prev.id && ride.status === "cancelled") {
-          setRoutePolyline(null);
-          setRouteAlternatives([]);
-          setSelectedRouteIndex(0);
-          setRideEta(null);
-          setShowNavModal(false);
-          setNavSteps([]);
-          setCurrentStepIdx(0);
-          routeContextRef.current = null;
-          AsyncStorage.removeItem("a2b_current_ride").catch(() => {});
-          Alert.alert("Ride Cancelled", "The rider has cancelled this trip.");
-          return null;
-        }
-        return prev;
-      });
+      handleRiderCancellation(ride);
     };
 
     const handleRideAccepted = (ride: any) => {
@@ -704,6 +726,25 @@ export default function ChauffeurDashboard() {
       off("ride:accepted", handleRideAccepted);
     };
   }, [chauffeur?.id]);
+
+  // Socket delivery is normally immediate. Polling catches cancellations when
+  // a mobile network silently suspends or reconnects the foreground socket.
+  useEffect(() => {
+    if (!currentRide?.id) return;
+    let active = true;
+    const checkRideStatus = async () => {
+      try {
+        const response = await apiRequest("GET", `/api/rides/${currentRide.id}`);
+        const ride = await response.json();
+        if (active && ride?.status === "cancelled") handleRiderCancellation(ride);
+      } catch {}
+    };
+    const interval = setInterval(checkRideStatus, 4000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [currentRide?.id]);
 
   // ─── Persist current ride + keep ref in sync (for notification closures) ──
   useEffect(() => {
@@ -1053,7 +1094,10 @@ export default function ChauffeurDashboard() {
         clientFirstName: fetchedRide.clientFirstName || ride.clientFirstName,
         clientName: fetchedRide.clientName || ride.clientName,
       }, "Client");
-      if (freshRide.status === "trip_completed" || freshRide.status === "cancelled") {
+      if (freshRide.status === "cancelled") {
+        currentRideRef.current = ride;
+        handleRiderCancellation(freshRide);
+      } else if (freshRide.status === "trip_completed") {
         await AsyncStorage.removeItem("a2b_current_ride");
       } else {
         setCurrentRide(freshRide);
@@ -2296,7 +2340,7 @@ export default function ChauffeurDashboard() {
                 <Text style={styles.payPopupTitle}>Your Trip Earnings</Text>
                 <Text style={styles.payPopupAmount}>R {getRideFare(completedTrip).toFixed(0)}</Text>
                 <Text style={styles.payPopupBody}>
-                  Collect R {getRideClientFare(completedTrip).toFixed(0)} cash from {completedTrip?.clientFirstName || (completedTrip?.clientName ? String(completedTrip.clientName).split(" ")[0] : "the client")} before they exit. After the 25% platform commission, R {getRideFare(completedTrip).toFixed(0)} is due to you.
+                  Collect R {getRideClientFare(completedTrip).toFixed(0)} cash from {completedTrip?.clientFirstName || (completedTrip?.clientName ? String(completedTrip.clientName).split(" ")[0] : "the client")} before they exit. After the 30% platform commission, R {getRideFare(completedTrip).toFixed(0)} is due to you.
                 </Text>
               </>
             ) : (
@@ -2307,7 +2351,7 @@ export default function ChauffeurDashboard() {
                 <Text style={styles.payPopupTitle}>Card Payment</Text>
                 <Text style={styles.payPopupAmount}>R {getRideFare(completedTrip).toFixed(0)}</Text>
                 <Text style={styles.payPopupBody}>
-                  Your net after 25% commission is R {getRideFare(completedTrip).toFixed(0)}, which will reflect in your wallet shortly.
+                  Your net after 30% commission is R {getRideFare(completedTrip).toFixed(0)}, which will reflect in your wallet shortly.
                 </Text>
               </>
             )}

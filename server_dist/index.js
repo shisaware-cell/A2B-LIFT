@@ -147,6 +147,7 @@ var rides = (0, import_pg_core.pgTable)("rides", {
   price: (0, import_pg_core.real)("price"),
   pricePerKm: (0, import_pg_core.real)("price_per_km"),
   baseFare: (0, import_pg_core.real)("base_fare"),
+  commissionRate: (0, import_pg_core.real)("commission_rate").notNull().default(0.25),
   distanceKm: (0, import_pg_core.real)("distance_km"),
   durationMin: (0, import_pg_core.real)("duration_min"),
   vehicleType: (0, import_pg_core.text)("vehicle_type"),
@@ -1571,33 +1572,45 @@ async function getAdminSignedUrl(bucket, storagePath, expiresInSeconds = 3600) {
 }
 
 // shared/fare-policy.ts
-var PLATFORM_COMMISSION_RATE = 0.25;
+var PLATFORM_COMMISSION_RATE = 0.3;
 var DRIVER_SHARE_RATE = 1 - PLATFORM_COMMISSION_RATE;
+var REFERRAL_REWARD_RATE = 0.025;
+var VEHICLE_CATEGORY_PRICING = {
+  budget: { pricePerKm: 8.5, baseFare: 50 },
+  luxury: { pricePerKm: 14.5, baseFare: 100 },
+  business: { pricePerKm: 35, baseFare: 150 },
+  van: { pricePerKm: 15, baseFare: 120 },
+  luxury_van: { pricePerKm: 35, baseFare: 200 }
+};
 function roundCurrency(amount) {
   return Math.round(amount * 100) / 100;
 }
-function getDriverNetFare(grossFare) {
-  const gross = Number(grossFare);
-  if (!Number.isFinite(gross) || gross <= 0) return 0;
-  return roundCurrency(gross * DRIVER_SHARE_RATE);
+function normalizeCommissionRate(rate) {
+  const numericRate = Number(rate);
+  return Number.isFinite(numericRate) && numericRate >= 0 && numericRate <= 1 ? numericRate : PLATFORM_COMMISSION_RATE;
 }
-function getPlatformCommission(grossFare) {
+function getDriverNetFare(grossFare, commissionRate = PLATFORM_COMMISSION_RATE) {
   const gross = Number(grossFare);
   if (!Number.isFinite(gross) || gross <= 0) return 0;
-  return roundCurrency(gross - getDriverNetFare(gross));
+  return roundCurrency(gross * (1 - normalizeCommissionRate(commissionRate)));
+}
+function getPlatformCommission(grossFare, commissionRate = PLATFORM_COMMISSION_RATE) {
+  const gross = Number(grossFare);
+  if (!Number.isFinite(gross) || gross <= 0) return 0;
+  return roundCurrency(gross - getDriverNetFare(gross, commissionRate));
 }
 
 // server/luxuryPricingEngine.ts
 var VEHICLE_CATEGORIES = {
-  budget: { name: "Budget", pricePerKm: 7, baseFare: 50, examples: "Toyota Corolla, Toyota Quest" },
-  luxury: { name: "Luxury", pricePerKm: 13, baseFare: 100, examples: "BMW 3 Series, Mercedes C Class" },
-  business: { name: "Business Class", pricePerKm: 35, baseFare: 150, examples: "BMW 5 Series, Mercedes E Class" },
-  van: { name: "Van", pricePerKm: 13, baseFare: 120, examples: "Hyundai H1, Mercedes Vito, Staria" },
-  luxury_van: { name: "Luxury Van", pricePerKm: 35, baseFare: 200, examples: "Mercedes V Class" }
+  budget: { name: "Budget", ...VEHICLE_CATEGORY_PRICING.budget, examples: "Toyota Corolla, Toyota Quest" },
+  luxury: { name: "Luxury", ...VEHICLE_CATEGORY_PRICING.luxury, examples: "BMW 3 Series, Mercedes C Class" },
+  business: { name: "Business Class", ...VEHICLE_CATEGORY_PRICING.business, examples: "BMW 5 Series, Mercedes E Class" },
+  van: { name: "Van", ...VEHICLE_CATEGORY_PRICING.van, examples: "Hyundai H1, Mercedes Vito, Staria" },
+  luxury_van: { name: "Luxury Van", ...VEHICLE_CATEGORY_PRICING.luxury_van, examples: "Mercedes V Class" }
 };
 var PRICING_CONFIG = {
   lateNightPremiumMultiplier: 1.3,
-  platformFeeRate: 0.2,
+  platformFeeRate: 0.25,
   driverAnnualShareRate: 0.05,
   maxSurgeMultiplier: 1.5,
   // Surge only kicks in once there is genuine, sustained demand — not just
@@ -1671,11 +1684,11 @@ function calculatePerMinuteAdjustment(estimatedDurationMin, actualDurationMin, r
     ratePerMinute: Math.max(0, ratePerMinute)
   };
 }
-function calculateChauffeurEarnings(totalPrice) {
-  const commission = getPlatformCommission(totalPrice);
+function calculateChauffeurEarnings(totalPrice, commissionRate = PLATFORM_COMMISSION_RATE) {
+  const commission = getPlatformCommission(totalPrice, commissionRate);
   const platformFee = totalPrice * PRICING_CONFIG.platformFeeRate;
   const driverAnnualShare = totalPrice * PRICING_CONFIG.driverAnnualShareRate;
-  const chauffeurEarnings = getDriverNetFare(totalPrice);
+  const chauffeurEarnings = getDriverNetFare(totalPrice, commissionRate);
   return {
     totalPrice,
     commission,
@@ -2154,9 +2167,8 @@ function combineDirectionSegments(segments) {
 // server/routes.ts
 var RIDE_MATCH_RADIUS_KM = 25;
 var CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1e3;
-var TOTAL_COMMISSION_RATE = 0.25;
+var TOTAL_COMMISSION_RATE = PLATFORM_COMMISSION_RATE;
 var DRIVER_ANNUAL_SHARE_RATE = 0.05;
-var REFERRAL_REWARD_RATE = 0.025;
 var DRIVER_SHARE_MIN_ACTIVE_MONTHS = 3;
 var DRIVER_SHARE_MIN_WEEKLY_TRIPS = 5;
 function calculateHaversineDistanceKm(lat1, lng1, lat2, lng2) {
@@ -2174,13 +2186,18 @@ function isSouthAfricaLateNight(now = /* @__PURE__ */ new Date()) {
   }).format(now));
   return hour >= 22 || hour < 5;
 }
-function getAnnualShareGrossFromEarning(earning) {
+function getAnnualShareGrossFromEarning(earning, grossFareByRideId = /* @__PURE__ */ new Map()) {
   const amount = Math.abs(Number(earning?.amount || 0));
   const commission = Math.abs(Number(earning?.commission || 0));
+  const lockedRideFare = earning?.rideId ? grossFareByRideId.get(earning.rideId) : void 0;
+  if (Number.isFinite(lockedRideFare)) return Math.max(0, Number(lockedRideFare));
+  if (amount > 0 && commission > 0 && !String(earning?.type || "").endsWith("cash")) {
+    return amount + commission;
+  }
   if (commission > 0) return commission / TOTAL_COMMISSION_RATE;
   return amount > 0 ? amount / (1 - TOTAL_COMMISSION_RATE) : 0;
 }
-function summarizeAnnualDriverShare(earnings2, year = (/* @__PURE__ */ new Date()).getFullYear()) {
+function summarizeAnnualDriverShare(earnings2, year = (/* @__PURE__ */ new Date()).getFullYear(), grossFareByRideId = /* @__PURE__ */ new Map()) {
   const start = new Date(year, 0, 1).getTime();
   const end = new Date(year + 1, 0, 1).getTime();
   const qualifying = earnings2.filter((earning) => {
@@ -2188,13 +2205,16 @@ function summarizeAnnualDriverShare(earnings2, year = (/* @__PURE__ */ new Date(
     const type = String(earning.type || "");
     return createdAt >= start && createdAt < end && !type.includes("lift_club") && (type === "cash" || type === "card" || type === "wallet" || type.startsWith("long_distance"));
   });
-  const gross = qualifying.reduce((sum, earning) => sum + getAnnualShareGrossFromEarning(earning), 0);
+  const gross = qualifying.reduce(
+    (sum, earning) => sum + getAnnualShareGrossFromEarning(earning, grossFareByRideId),
+    0
+  );
   return {
     year,
     qualifyingTrips: qualifying.length,
     grossQualifyingFare: Math.round(gross * 100) / 100,
     annualShare: Math.round(gross * DRIVER_ANNUAL_SHARE_RATE * 100) / 100,
-    platformFee: Math.round(gross * 0.2 * 100) / 100,
+    platformFee: Math.round(gross * 0.25 * 100) / 100,
     totalCommission: Math.round(gross * TOTAL_COMMISSION_RATE * 100) / 100,
     rules: {
       minimumActiveMonths: DRIVER_SHARE_MIN_ACTIVE_MONTHS,
@@ -2482,6 +2502,7 @@ async function registerRoutes(app2) {
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS trip_started_at timestamp");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancelled_by text");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancellation_fee real DEFAULT 0");
+    await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS commission_rate real NOT NULL DEFAULT 0.25");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS stops jsonb NOT NULL DEFAULT '[]'::jsonb");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS surge_multiplier real DEFAULT 1");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS surge_reason text");
@@ -5830,7 +5851,7 @@ async function registerRoutes(app2) {
       todayStart.setHours(0, 0, 0, 0);
       const todayCardEarnings = earningsList.filter((e) => e.createdAt && new Date(e.createdAt) >= todayStart && (e.type === "card" || e.type === "wallet")).reduce((s, e) => s + (e.amount || 0), 0);
       const chauffeurRides = await storage.getRidesByChauffeur(req.params.id);
-      const todayCashFares = chauffeurRides.filter((r) => r.status === "trip_completed" && r.paymentMethod === "cash" && r.completedAt && new Date(r.completedAt) >= todayStart).reduce((s, r) => s + calculateChauffeurEarnings(r.price || 0).chauffeurEarnings, 0);
+      const todayCashFares = chauffeurRides.filter((r) => r.status === "trip_completed" && r.paymentMethod === "cash" && r.completedAt && new Date(r.completedAt) >= todayStart).reduce((s, r) => s + calculateChauffeurEarnings(r.price || 0, r.commissionRate).chauffeurEarnings, 0);
       const todayEarnings = Math.round(todayCardEarnings + todayCashFares);
       return res.json({
         ...chauffeur,
@@ -7432,6 +7453,58 @@ async function registerRoutes(app2) {
       return res.status(500).json({ message: error.message });
     }
   });
+  app2.post("/api/pricing/options", async (req, res) => {
+    try {
+      const rawRoutes = Array.isArray(req.body?.routes) ? req.body.routes.slice(0, 4) : [];
+      const routes = rawRoutes.map((route, index) => {
+        const distanceKm = Number(route?.distanceKm);
+        const durationMin = Number(route?.durationMin);
+        if (!Number.isFinite(distanceKm) || distanceKm <= 0 || distanceKm > 2500) {
+          throw new Error("Each route must include a valid distance.");
+        }
+        return {
+          id: String(route?.id || `route_${index}`),
+          distanceKm,
+          durationMin: Number.isFinite(durationMin) && durationMin > 0 ? durationMin : null
+        };
+      });
+      if (routes.length === 0) {
+        return res.status(400).json({ message: "At least one route is required." });
+      }
+      const categories = Object.keys(getVehicleCategories());
+      const estimates = await Promise.all(categories.map(async (categoryId) => {
+        const rideForDemand = {
+          id: `options_${categoryId}_${Date.now()}`,
+          vehicleType: categoryId,
+          pickupLat: req.body?.pickupLat,
+          pickupLng: req.body?.pickupLng
+        };
+        const [activeRequests, eligibleDrivers] = await Promise.all([
+          countActiveDemandForRide(rideForDemand),
+          getEligibleChauffeursForRide(rideForDemand)
+        ]);
+        const surge = calculateSurgeMultiplier({
+          activeRequests,
+          eligibleDrivers: eligibleDrivers.length
+        });
+        return [
+          categoryId,
+          Object.fromEntries(routes.map((route) => [
+            route.id,
+            calculatePrice(route.distanceKm, categoryId, {
+              isLateNight: isSouthAfricaLateNight(),
+              surgeMultiplier: surge.multiplier,
+              surgeReason: surge.reason,
+              estimatedDurationMin: route.durationMin
+            })
+          ]))
+        ];
+      }));
+      return res.json({ estimates: Object.fromEntries(estimates) });
+    } catch (error) {
+      return res.status(400).json({ message: error.message || "Could not price route options." });
+    }
+  });
   app2.get("/api/pricing/config", async (_req, res) => {
     return res.json(getPricingConfig());
   });
@@ -7699,6 +7772,7 @@ async function registerRoutes(app2) {
         estimatedDurationMin: safeDurationMin,
         pricePerKm: priceEstimate.pricePerKm,
         baseFare: priceEstimate.baseFare,
+        commissionRate: PLATFORM_COMMISSION_RATE,
         surgeMultiplier: priceEstimate.surgeMultiplier,
         demandMultiplier: priceEstimate.demandMultiplier,
         surgeReason: priceEstimate.surgeReason,
@@ -7871,7 +7945,7 @@ async function registerRoutes(app2) {
         });
         if (ride.chauffeurId && finalAmount > 0) {
           try {
-            const earningsCalc = calculateChauffeurEarnings(finalAmount);
+            const earningsCalc = calculateChauffeurEarnings(finalAmount, ride.commissionRate);
             const existing = await storage.getEarningsByChauffeur(ride.chauffeurId);
             const alreadyRecorded = existing.some((e) => e.rideId === ride.id);
             if (!alreadyRecorded) {
@@ -8095,11 +8169,46 @@ async function registerRoutes(app2) {
       }
       const ride = await storage.updateRide(req.params.id, updateData);
       if (!ride) return res.status(404).json({ message: "Ride not found" });
+      let cancellationDriverEarnings = 0;
       if (status === "cancelled" || status === "trip_completed") {
         const timer = dispatchTimers.get(ride.id);
         if (timer) clearTimeout(timer);
         dispatchTimers.delete(ride.id);
         skippedChauffeursByRide.delete(ride.id);
+      }
+      if (status === "cancelled" && rideBeforeUpdate) {
+        const cancellationFee = Math.max(0, Number(ride.cancellationFee || 0));
+        if (rideBeforeUpdate.chauffeurId && cancelledBy === "client" && cancellationFee > 0) {
+          const cancellationEarnings = calculateChauffeurEarnings(cancellationFee, ride.commissionRate);
+          cancellationDriverEarnings = cancellationEarnings.chauffeurEarnings;
+          try {
+            const existingEarnings = await storage.getEarningsByChauffeur(rideBeforeUpdate.chauffeurId);
+            const alreadyCredited = existingEarnings.some(
+              (earning) => earning.rideId === ride.id && earning.type === "cancellation"
+            );
+            if (!alreadyCredited) {
+              await storage.createEarning({
+                chauffeurId: rideBeforeUpdate.chauffeurId,
+                rideId: ride.id,
+                amount: cancellationEarnings.chauffeurEarnings,
+                commission: cancellationEarnings.commission,
+                type: "cancellation"
+              });
+              const chauffeur = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
+              if (chauffeur) {
+                await storage.updateChauffeur(chauffeur.id, {
+                  earningsTotal: Number(chauffeur.earningsTotal || 0) + cancellationEarnings.chauffeurEarnings
+                });
+              }
+            }
+          } catch (earningsError) {
+            console.error("Cancellation earnings failed (non-fatal):", earningsError.message);
+          }
+        }
+        io.emit("ride:statusUpdate", {
+          ...ride,
+          driverCancellationEarnings: cancellationDriverEarnings
+        });
       }
       if (status === "cancelled" && rideBeforeUpdate) {
         try {
@@ -8217,35 +8326,13 @@ async function registerRoutes(app2) {
               );
             }
           }
-          if (rideBeforeUpdate.chauffeurId && cancelledBy === "client" && cancellationFee > 0) {
-            const existingEarnings = await storage.getEarningsByChauffeur(rideBeforeUpdate.chauffeurId);
-            const alreadyCredited = existingEarnings.some(
-              (earning) => earning.rideId === ride.id && earning.type === "cancellation"
-            );
-            if (!alreadyCredited) {
-              const cancellationEarnings = calculateChauffeurEarnings(cancellationFee);
-              await storage.createEarning({
-                chauffeurId: rideBeforeUpdate.chauffeurId,
-                rideId: ride.id,
-                amount: cancellationEarnings.chauffeurEarnings,
-                commission: cancellationEarnings.commission,
-                type: "cancellation"
-              });
-              const chauffeur = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
-              if (chauffeur) {
-                await storage.updateChauffeur(chauffeur.id, {
-                  earningsTotal: Number(chauffeur.earningsTotal || 0) + cancellationEarnings.chauffeurEarnings
-                });
-              }
-            }
-          }
           if (rideBeforeUpdate.chauffeurId) {
             const chauffeur = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
             if (chauffeur?.userId) {
               await storage.createNotification({
                 userId: chauffeur.userId,
                 title: "Ride Cancelled",
-                body: cancellationFee > 0 ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee).chauffeurEarnings.toFixed(2)} was added to your earnings.` : "The client has cancelled this trip.",
+                body: cancellationFee > 0 ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee, ride.commissionRate).chauffeurEarnings.toFixed(2)} was added to your earnings.` : "The client has cancelled this trip.",
                 type: "ride"
               });
             }
@@ -8253,7 +8340,7 @@ async function registerRoutes(app2) {
               sendExpoPushNotification(
                 [chauffeur.pushToken],
                 "Ride Cancelled",
-                cancellationFee > 0 ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee).chauffeurEarnings.toFixed(2)} was added to your earnings.` : "The client has cancelled this trip."
+                cancellationFee > 0 ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee, ride.commissionRate).chauffeurEarnings.toFixed(2)} was added to your earnings.` : "The client has cancelled this trip."
               );
             }
           }
@@ -8263,7 +8350,7 @@ async function registerRoutes(app2) {
       }
       if (status === "trip_completed" && ride.chauffeurId && ride.price) {
         try {
-          const earningsCalc = calculateChauffeurEarnings(ride.price);
+          const earningsCalc = calculateChauffeurEarnings(ride.price, ride.commissionRate);
           const existingEarnings = await storage.getEarningsByChauffeur(ride.chauffeurId);
           const alreadyRecorded = existingEarnings.some((e) => e.rideId === ride.id);
           const paymentMethod = ride.paymentMethod || "cash";
@@ -8383,8 +8470,14 @@ async function registerRoutes(app2) {
         clientFirstName = getUserFirstName(client, "Client");
       } catch {
       }
-      const rideWithClientName = { ...ride, clientFirstName };
-      io.emit("ride:statusUpdate", rideWithClientName);
+      const rideWithClientName = {
+        ...ride,
+        clientFirstName,
+        ...status === "cancelled" ? { driverCancellationEarnings: cancellationDriverEarnings } : {}
+      };
+      if (status !== "cancelled") {
+        io.emit("ride:statusUpdate", rideWithClientName);
+      }
       try {
         if (status === "chauffeur_arriving" && ride.clientId) {
           await storage.createNotification({
@@ -8638,11 +8731,18 @@ async function registerRoutes(app2) {
     try {
       const yearParam = Number(req.query.year);
       const year = Number.isFinite(yearParam) && yearParam > 2020 ? yearParam : (/* @__PURE__ */ new Date()).getFullYear();
-      const [chauffeur, earningsList] = await Promise.all([
+      const [chauffeur, earningsList, chauffeurRides] = await Promise.all([
         storage.getChauffeur(req.params.chauffeurId),
-        storage.getEarningsByChauffeur(req.params.chauffeurId)
+        storage.getEarningsByChauffeur(req.params.chauffeurId),
+        storage.getRidesByChauffeur(req.params.chauffeurId)
       ]);
-      const summary = summarizeAnnualDriverShare(earningsList, year);
+      const grossFareByRideId = new Map(
+        chauffeurRides.map((ride) => [
+          ride.id,
+          Number(ride.finalFare || ride.price || ride.actualFare || ride.quotedFare || 0)
+        ])
+      );
+      const summary = summarizeAnnualDriverShare(earningsList, year, grossFareByRideId);
       const createdAt = chauffeur?.createdAt ? new Date(chauffeur.createdAt).getTime() : Date.now();
       const activeMonths = Math.max(0, Math.floor((Date.now() - createdAt) / (1e3 * 60 * 60 * 24 * 30)));
       return res.json({
@@ -9155,7 +9255,7 @@ async function registerRoutes(app2) {
           totalRevenue: Math.round(totalRevenue),
           totalPlatformCommission: Math.round(totalPlatformCommission),
           totalDriverEarnings: Math.round(totalDriverEarnings),
-          commissionRate: 25,
+          commissionRate: 30,
           totalChauffeurs: allChauffeurs.length,
           onlineChauffeurs: allChauffeurs.filter((c) => c.isOnline).length,
           pendingApprovals: pendingApprovals.length,

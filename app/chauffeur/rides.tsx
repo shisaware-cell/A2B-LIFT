@@ -22,7 +22,7 @@ function getGrossFare(ride: any) {
 }
 
 function getDriverFare(ride: any) {
-  return getDriverNetFare(getGrossFare(ride));
+  return getDriverNetFare(getGrossFare(ride), ride?.commissionRate);
 }
 
 function formatDate(dateStr: string | null | undefined) {

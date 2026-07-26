@@ -1,19 +1,21 @@
 import {
+  PLATFORM_COMMISSION_RATE,
+  VEHICLE_CATEGORY_PRICING,
   getDriverNetFare,
   getPlatformCommission,
 } from "../shared/fare-policy";
 
 export const VEHICLE_CATEGORIES: Record<string, { name: string; pricePerKm: number; baseFare: number; examples: string }> = {
-  budget: { name: "Budget", pricePerKm: 7, baseFare: 50, examples: "Toyota Corolla, Toyota Quest" },
-  luxury: { name: "Luxury", pricePerKm: 13, baseFare: 100, examples: "BMW 3 Series, Mercedes C Class" },
-  business: { name: "Business Class", pricePerKm: 35, baseFare: 150, examples: "BMW 5 Series, Mercedes E Class" },
-  van: { name: "Van", pricePerKm: 13, baseFare: 120, examples: "Hyundai H1, Mercedes Vito, Staria" },
-  luxury_van: { name: "Luxury Van", pricePerKm: 35, baseFare: 200, examples: "Mercedes V Class" },
+  budget: { name: "Budget", ...VEHICLE_CATEGORY_PRICING.budget, examples: "Toyota Corolla, Toyota Quest" },
+  luxury: { name: "Luxury", ...VEHICLE_CATEGORY_PRICING.luxury, examples: "BMW 3 Series, Mercedes C Class" },
+  business: { name: "Business Class", ...VEHICLE_CATEGORY_PRICING.business, examples: "BMW 5 Series, Mercedes E Class" },
+  van: { name: "Van", ...VEHICLE_CATEGORY_PRICING.van, examples: "Hyundai H1, Mercedes Vito, Staria" },
+  luxury_van: { name: "Luxury Van", ...VEHICLE_CATEGORY_PRICING.luxury_van, examples: "Mercedes V Class" },
 };
 
 const PRICING_CONFIG = {
   lateNightPremiumMultiplier: 1.3,
-  platformFeeRate: 0.2,
+  platformFeeRate: 0.25,
   driverAnnualShareRate: 0.05,
   maxSurgeMultiplier: 1.5,
   // Surge only kicks in once there is genuine, sustained demand — not just
@@ -180,11 +182,14 @@ export function calculateCancellationFee(
   return { fee: Math.round(category.baseFare), eligible: true, elapsedMinutes };
 }
 
-export function calculateChauffeurEarnings(totalPrice: number) {
-  const commission = getPlatformCommission(totalPrice);
+export function calculateChauffeurEarnings(
+  totalPrice: number,
+  commissionRate = PLATFORM_COMMISSION_RATE,
+) {
+  const commission = getPlatformCommission(totalPrice, commissionRate);
   const platformFee = totalPrice * PRICING_CONFIG.platformFeeRate;
   const driverAnnualShare = totalPrice * PRICING_CONFIG.driverAnnualShareRate;
-  const chauffeurEarnings = getDriverNetFare(totalPrice);
+  const chauffeurEarnings = getDriverNetFare(totalPrice, commissionRate);
   return {
     totalPrice,
     commission,

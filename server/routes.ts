@@ -39,12 +39,12 @@ import {
   combineDirectionSegments,
   parseOsrmRoutes,
 } from "./multi-stop-routing";
+import { PLATFORM_COMMISSION_RATE, REFERRAL_REWARD_RATE } from "../shared/fare-policy";
 
 const RIDE_MATCH_RADIUS_KM = 25;
 const CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
-const TOTAL_COMMISSION_RATE = 0.25;
+const TOTAL_COMMISSION_RATE = PLATFORM_COMMISSION_RATE;
 const DRIVER_ANNUAL_SHARE_RATE = 0.05;
-const REFERRAL_REWARD_RATE = 0.025;
 const DRIVER_SHARE_MIN_ACTIVE_MONTHS = 3;
 const DRIVER_SHARE_MIN_WEEKLY_TRIPS = 5;
 
@@ -69,14 +69,26 @@ function isSouthAfricaLateNight(now = new Date()) {
   return hour >= 22 || hour < 5;
 }
 
-function getAnnualShareGrossFromEarning(earning: any): number {
+function getAnnualShareGrossFromEarning(
+  earning: any,
+  grossFareByRideId: Map<string, number> = new Map(),
+): number {
   const amount = Math.abs(Number(earning?.amount || 0));
   const commission = Math.abs(Number(earning?.commission || 0));
+  const lockedRideFare = earning?.rideId ? grossFareByRideId.get(earning.rideId) : undefined;
+  if (Number.isFinite(lockedRideFare)) return Math.max(0, Number(lockedRideFare));
+  if (amount > 0 && commission > 0 && !String(earning?.type || "").endsWith("cash")) {
+    return amount + commission;
+  }
   if (commission > 0) return commission / TOTAL_COMMISSION_RATE;
   return amount > 0 ? amount / (1 - TOTAL_COMMISSION_RATE) : 0;
 }
 
-function summarizeAnnualDriverShare(earnings: any[], year = new Date().getFullYear()) {
+function summarizeAnnualDriverShare(
+  earnings: any[],
+  year = new Date().getFullYear(),
+  grossFareByRideId: Map<string, number> = new Map(),
+) {
   const start = new Date(year, 0, 1).getTime();
   const end = new Date(year + 1, 0, 1).getTime();
   const qualifying = earnings.filter((earning) => {
@@ -89,13 +101,16 @@ function summarizeAnnualDriverShare(earnings: any[], year = new Date().getFullYe
       (type === "cash" || type === "card" || type === "wallet" || type.startsWith("long_distance"))
     );
   });
-  const gross = qualifying.reduce((sum, earning) => sum + getAnnualShareGrossFromEarning(earning), 0);
+  const gross = qualifying.reduce(
+    (sum, earning) => sum + getAnnualShareGrossFromEarning(earning, grossFareByRideId),
+    0,
+  );
   return {
     year,
     qualifyingTrips: qualifying.length,
     grossQualifyingFare: Math.round(gross * 100) / 100,
     annualShare: Math.round(gross * DRIVER_ANNUAL_SHARE_RATE * 100) / 100,
-    platformFee: Math.round(gross * 0.2 * 100) / 100,
+    platformFee: Math.round(gross * 0.25 * 100) / 100,
     totalCommission: Math.round(gross * TOTAL_COMMISSION_RATE * 100) / 100,
     rules: {
       minimumActiveMonths: DRIVER_SHARE_MIN_ACTIVE_MONTHS,
@@ -501,6 +516,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS trip_started_at timestamp");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancelled_by text");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancellation_fee real DEFAULT 0");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS commission_rate real NOT NULL DEFAULT 0.25");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS stops jsonb NOT NULL DEFAULT '[]'::jsonb");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS surge_multiplier real DEFAULT 1");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS surge_reason text");
@@ -4593,7 +4609,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const chauffeurRides = await storage.getRidesByChauffeur(req.params.id);
       const todayCashFares = chauffeurRides
         .filter((r: any) => r.status === "trip_completed" && r.paymentMethod === "cash" && r.completedAt && new Date(r.completedAt) >= todayStart)
-        .reduce((s: number, r: any) => s + calculateChauffeurEarnings(r.price || 0).chauffeurEarnings, 0);
+        .reduce((s: number, r: any) => s + calculateChauffeurEarnings(r.price || 0, r.commissionRate).chauffeurEarnings, 0);
       const todayEarnings = Math.round(todayCardEarnings + todayCashFares);
       return res.json({
         ...chauffeur,
@@ -6451,6 +6467,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/pricing/options", async (req: Request, res: Response) => {
+    try {
+      const rawRoutes = Array.isArray(req.body?.routes) ? req.body.routes.slice(0, 4) : [];
+      const routes = rawRoutes.map((route: any, index: number) => {
+        const distanceKm = Number(route?.distanceKm);
+        const durationMin = Number(route?.durationMin);
+        if (!Number.isFinite(distanceKm) || distanceKm <= 0 || distanceKm > 2500) {
+          throw new Error("Each route must include a valid distance.");
+        }
+        return {
+          id: String(route?.id || `route_${index}`),
+          distanceKm,
+          durationMin: Number.isFinite(durationMin) && durationMin > 0 ? durationMin : null,
+        };
+      });
+      if (routes.length === 0) {
+        return res.status(400).json({ message: "At least one route is required." });
+      }
+
+      const categories = Object.keys(getVehicleCategories());
+      const estimates = await Promise.all(categories.map(async (categoryId) => {
+        const rideForDemand = {
+          id: `options_${categoryId}_${Date.now()}`,
+          vehicleType: categoryId,
+          pickupLat: req.body?.pickupLat,
+          pickupLng: req.body?.pickupLng,
+        };
+        const [activeRequests, eligibleDrivers] = await Promise.all([
+          countActiveDemandForRide(rideForDemand),
+          getEligibleChauffeursForRide(rideForDemand),
+        ]);
+        const surge = calculateSurgeMultiplier({
+          activeRequests,
+          eligibleDrivers: eligibleDrivers.length,
+        });
+        return [
+          categoryId,
+          Object.fromEntries(routes.map((route) => [
+            route.id,
+            calculatePrice(route.distanceKm, categoryId, {
+              isLateNight: isSouthAfricaLateNight(),
+              surgeMultiplier: surge.multiplier,
+              surgeReason: surge.reason,
+              estimatedDurationMin: route.durationMin,
+            }),
+          ])),
+        ] as const;
+      }));
+
+      return res.json({ estimates: Object.fromEntries(estimates) });
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message || "Could not price route options." });
+    }
+  });
+
   app.get("/api/pricing/config", async (_req: Request, res: Response) => {
     return res.json(getPricingConfig());
   });
@@ -6768,6 +6839,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         estimatedDurationMin: safeDurationMin,
         pricePerKm: priceEstimate.pricePerKm,
         baseFare: priceEstimate.baseFare,
+        commissionRate: PLATFORM_COMMISSION_RATE,
         surgeMultiplier: priceEstimate.surgeMultiplier,
         demandMultiplier: priceEstimate.demandMultiplier,
         surgeReason: priceEstimate.surgeReason,
@@ -6994,7 +7066,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Record earnings and commission if not already done (webhook may fire before trip_completed)
         if (ride.chauffeurId && finalAmount > 0) {
           try {
-            const earningsCalc = calculateChauffeurEarnings(finalAmount);
+            const earningsCalc = calculateChauffeurEarnings(finalAmount, ride.commissionRate);
             const existing = await storage.getEarningsByChauffeur(ride.chauffeurId);
             const alreadyRecorded = existing.some((e) => e.rideId === ride.id);
             if (!alreadyRecorded) {
@@ -7258,11 +7330,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const ride = await storage.updateRide(req.params.id, updateData as any);
       if (!ride) return res.status(404).json({ message: "Ride not found" });
+      let cancellationDriverEarnings = 0;
       if (status === "cancelled" || status === "trip_completed") {
         const timer = dispatchTimers.get(ride.id);
         if (timer) clearTimeout(timer);
         dispatchTimers.delete(ride.id);
         skippedChauffeursByRide.delete(ride.id);
+      }
+
+      if (status === "cancelled" && rideBeforeUpdate) {
+        const cancellationFee = Math.max(0, Number((ride as any).cancellationFee || 0));
+        if (rideBeforeUpdate.chauffeurId && cancelledBy === "client" && cancellationFee > 0) {
+          const cancellationEarnings = calculateChauffeurEarnings(cancellationFee, ride.commissionRate);
+          cancellationDriverEarnings = cancellationEarnings.chauffeurEarnings;
+          try {
+            const existingEarnings = await storage.getEarningsByChauffeur(rideBeforeUpdate.chauffeurId);
+            const alreadyCredited = existingEarnings.some((earning: any) =>
+              earning.rideId === ride.id && earning.type === "cancellation"
+            );
+            if (!alreadyCredited) {
+              await storage.createEarning({
+                chauffeurId: rideBeforeUpdate.chauffeurId,
+                rideId: ride.id,
+                amount: cancellationEarnings.chauffeurEarnings,
+                commission: cancellationEarnings.commission,
+                type: "cancellation",
+              });
+              const chauffeur = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
+              if (chauffeur) {
+                await storage.updateChauffeur(chauffeur.id, {
+                  earningsTotal: Number(chauffeur.earningsTotal || 0) + cancellationEarnings.chauffeurEarnings,
+                });
+              }
+            }
+          } catch (earningsError: any) {
+            console.error("Cancellation earnings failed (non-fatal):", earningsError.message);
+          }
+        }
+
+        // Clear the active ride immediately. Refund APIs and notification writes
+        // can take several seconds and must not leave the driver's trip open.
+        io.emit("ride:statusUpdate", {
+          ...ride,
+          driverCancellationEarnings: cancellationDriverEarnings,
+        });
       }
 
       // ── Cancellation: refunds + notifications for all parties ──
@@ -7391,29 +7502,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
 
-          if (rideBeforeUpdate.chauffeurId && cancelledBy === "client" && cancellationFee > 0) {
-            const existingEarnings = await storage.getEarningsByChauffeur(rideBeforeUpdate.chauffeurId);
-            const alreadyCredited = existingEarnings.some((earning: any) =>
-              earning.rideId === ride.id && earning.type === "cancellation"
-            );
-            if (!alreadyCredited) {
-              const cancellationEarnings = calculateChauffeurEarnings(cancellationFee);
-              await storage.createEarning({
-                chauffeurId: rideBeforeUpdate.chauffeurId,
-                rideId: ride.id,
-                amount: cancellationEarnings.chauffeurEarnings,
-                commission: cancellationEarnings.commission,
-                type: "cancellation",
-              });
-              const chauffeur = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
-              if (chauffeur) {
-                await storage.updateChauffeur(chauffeur.id, {
-                  earningsTotal: Number(chauffeur.earningsTotal || 0) + cancellationEarnings.chauffeurEarnings,
-                });
-              }
-            }
-          }
-
           // ── Notify the assigned chauffeur (if any) ──
           if (rideBeforeUpdate.chauffeurId) {
             const chauffeur = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
@@ -7422,7 +7510,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 userId: chauffeur.userId,
                 title: "Ride Cancelled",
                 body: cancellationFee > 0
-                  ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee).chauffeurEarnings.toFixed(2)} was added to your earnings.`
+                  ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee, ride.commissionRate).chauffeurEarnings.toFixed(2)} was added to your earnings.`
                   : "The client has cancelled this trip.",
                 type: "ride",
               });
@@ -7432,7 +7520,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 [(chauffeur as any).pushToken],
                 "Ride Cancelled",
                 cancellationFee > 0
-                  ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee).chauffeurEarnings.toFixed(2)} was added to your earnings.`
+                  ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee, ride.commissionRate).chauffeurEarnings.toFixed(2)} was added to your earnings.`
                   : "The client has cancelled this trip."
               );
             }
@@ -7446,7 +7534,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Wrap each ancillary operation independently so a DB hiccup
         // on earnings / notifications does NOT kill the status update.
         try {
-          const earningsCalc = calculateChauffeurEarnings(ride.price);
+          const earningsCalc = calculateChauffeurEarnings(ride.price, ride.commissionRate);
           // Guard against double-counting: Paystack webhook may have already created
           // the earning record for card payments before trip_completed fires.
           const existingEarnings = await storage.getEarningsByChauffeur(ride.chauffeurId);
@@ -7455,7 +7543,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (!alreadyRecorded) {
             if (paymentMethod === "cash") {
               // Cash trips: driver collects the gross fare in hand,
-              // while the platform records the 25% commission digitally.
+              // while the platform records the 30% commission digitally.
               await storage.createEarning({
                 chauffeurId: ride.chauffeurId,
                 rideId: ride.id,
@@ -7471,7 +7559,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 });
               }
             } else {
-              // Card / wallet trips: add the driver's 75% share to the digital wallet balance.
+              // Card / wallet trips: add the driver's 70% share to the digital wallet balance.
               await storage.createEarning({
                 chauffeurId: ride.chauffeurId,
                 rideId: ride.id,
@@ -7577,9 +7665,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const client = await storage.getUser(ride.clientId);
         clientFirstName = getUserFirstName(client, "Client");
       } catch {}
-      const rideWithClientName = { ...ride, clientFirstName };
+      const rideWithClientName = {
+        ...ride,
+        clientFirstName,
+        ...(status === "cancelled" ? { driverCancellationEarnings: cancellationDriverEarnings } : {}),
+      };
 
-      io.emit("ride:statusUpdate", rideWithClientName);
+      if (status !== "cancelled") {
+        io.emit("ride:statusUpdate", rideWithClientName);
+      }
 
       // ── Notify rider for key status transitions ──
       try {
@@ -7880,11 +7974,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const yearParam = Number(req.query.year);
       const year = Number.isFinite(yearParam) && yearParam > 2020 ? yearParam : new Date().getFullYear();
-      const [chauffeur, earningsList] = await Promise.all([
+      const [chauffeur, earningsList, chauffeurRides] = await Promise.all([
         storage.getChauffeur(req.params.chauffeurId),
         storage.getEarningsByChauffeur(req.params.chauffeurId),
+        storage.getRidesByChauffeur(req.params.chauffeurId),
       ]);
-      const summary = summarizeAnnualDriverShare(earningsList, year);
+      const grossFareByRideId = new Map(
+        chauffeurRides.map((ride: any) => [
+          ride.id,
+          Number(ride.finalFare || ride.price || ride.actualFare || ride.quotedFare || 0),
+        ]),
+      );
+      const summary = summarizeAnnualDriverShare(earningsList, year, grossFareByRideId);
       const createdAt = chauffeur?.createdAt ? new Date(chauffeur.createdAt).getTime() : Date.now();
       const activeMonths = Math.max(0, Math.floor((Date.now() - createdAt) / (1000 * 60 * 60 * 24 * 30)));
       return res.json({
@@ -8479,7 +8580,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalRevenue: Math.round(totalRevenue),
           totalPlatformCommission: Math.round(totalPlatformCommission),
           totalDriverEarnings: Math.round(totalDriverEarnings),
-          commissionRate: 25,
+          commissionRate: 30,
           totalChauffeurs: allChauffeurs.length,
           onlineChauffeurs: allChauffeurs.filter((c) => c.isOnline).length,
           pendingApprovals: pendingApprovals.length,

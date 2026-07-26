@@ -10,7 +10,7 @@ const FAQ_ITEMS = [
   { q: "What payment methods are accepted?", a: "We accept Visa, PayPal, EFT bank transfers, and cash payments. You can manage your payment methods in the Wallet tab." },
   { q: "How is pricing calculated?", a: "Pricing is based on distance, duration, vehicle type, and time of day. Airport transfers and late-night rides may have surcharges. All prices are shown upfront before you confirm." },
   { q: "How do I become a chauffeur?", a: "Switch to Chauffeur mode from your Profile, then complete the registration form with your vehicle details and phone number. Your application will be reviewed by our team." },
-  { q: "What is the commission rate?", a: "A2B LIFT deducts 25% from qualifying rides. Drivers receive 75% immediately, while 20% is the platform fee and 5% accumulates toward the annual driver share paid in December if qualification rules are met." },
+  { q: "What is the commission rate?", a: "A2B LIFT deducts 30% from qualifying rides. Drivers receive 70% immediately, while 25% is the platform fee and 5% accumulates toward the annual driver share paid in December if qualification rules are met." },
   { q: "How do withdrawals work?", a: "Chauffeurs can request withdrawals from their earnings balance. Withdrawals are processed and reviewed by the admin team, typically within 24-48 hours." },
 ];
 

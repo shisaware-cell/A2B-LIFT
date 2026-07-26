@@ -26,7 +26,7 @@ test("caps automatic high-demand pricing at the configured 1.5x maximum", () => 
 test("includes the locked demand multiplier in a server-side quote", () => {
   const estimate = calculatePrice(10, "budget", { demandMultiplier: 1.5 });
   assert.equal(estimate.demandMultiplier, 1.5);
-  assert.equal(estimate.totalPrice, 180);
+  assert.equal(estimate.totalPrice, 203);
 });
 
 test("charges the selected vehicle base fare only after three driving minutes", () => {

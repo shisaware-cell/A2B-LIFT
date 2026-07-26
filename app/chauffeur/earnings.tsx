@@ -117,7 +117,7 @@ export default function EarningsScreen() {
       <View style={styles.totalCard}>
         <Text style={styles.totalLabel}>Card Trip Earnings</Text>
         <Text style={styles.totalValue}>R {totalEarnings.toFixed(0)}</Text>
-        <Text style={styles.totalSub}>Commission paid: R {totalCommission.toFixed(0)} (25%)</Text>
+        <Text style={styles.totalSub}>Commission paid: R {totalCommission.toFixed(0)} (30%)</Text>
         <Pressable
           style={({ pressed }) => [styles.withdrawBtn, pressed && { opacity: 0.9 }]}
           onPress={() => setShowWithdraw(true)}
@@ -141,7 +141,7 @@ export default function EarningsScreen() {
         </Text>
         <View style={styles.shareRules}>
           <Text style={styles.shareRule}>Trips counted: {annualShare?.qualifyingTrips || 0}</Text>
-          <Text style={styles.shareRule}>Platform fee: 25% | Annual share: 5%</Text>
+          <Text style={styles.shareRule}>Total commission: 30% | Annual share allocation: 5%</Text>
           <Text style={styles.shareRule}>Rules: 3+ months active, 5 trips/week, good service standards</Text>
         </View>
         <Text style={styles.shareMotto}>Improving Drivers' Lives and Building True Partnerships.</Text>

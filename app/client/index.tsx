@@ -39,14 +39,15 @@ import { uploadDocument } from "@/lib/supabase-storage";
 import Colors from "@/constants/colors";
 import A2BMap from "@/components/A2BMap";
 import LivenessCamera, { type LivenessChallenge, type LivenessCaptureResult } from "@/components/LivenessCamera";
+import { VEHICLE_CATEGORY_PRICING } from "@shared/fare-policy";
 import { encodeStopsQuery, normalizeRideStops, type RideStop } from "@shared/ride-stops";
 
 const VEHICLE_TYPES = [
-  { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", icon: "car" as const, pricePerKm: 35, baseFare: 200, badge: "recommended" },
-  { id: "luxury", name: "Luxury", desc: "BMW 3 Series, Mercedes C Class", icon: "car-sport" as const, pricePerKm: 13, baseFare: 100 },
-  { id: "business", name: "Business Class", desc: "BMW 5 Series, Mercedes E Class", icon: "briefcase" as const, pricePerKm: 35, baseFare: 150 },
-  { id: "van", name: "Van", desc: "Hyundai H1, Mercedes Vito, Staria", icon: "bus" as const, pricePerKm: 13, baseFare: 120 },
-  { id: "budget", name: "Budget", desc: "Toyota Corolla, Toyota Quest", icon: "car-outline" as const, pricePerKm: 7, baseFare: 50 },
+  { id: "budget", name: "Budget", desc: "Toyota Corolla, Toyota Quest", icon: "car-outline" as const, ...VEHICLE_CATEGORY_PRICING.budget },
+  { id: "luxury", name: "Luxury", desc: "BMW 3 Series, Mercedes C Class", icon: "car-sport" as const, ...VEHICLE_CATEGORY_PRICING.luxury },
+  { id: "business", name: "Business Class", desc: "BMW 5 Series, Mercedes E Class", icon: "briefcase" as const, ...VEHICLE_CATEGORY_PRICING.business },
+  { id: "van", name: "Van", desc: "Hyundai H1, Mercedes Vito, Staria", icon: "bus" as const, ...VEHICLE_CATEGORY_PRICING.van },
+  { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", icon: "car" as const, ...VEHICLE_CATEGORY_PRICING.luxury_van, badge: "recommended" },
 ];
 
 type RideStatus = "idle" | "selecting" | "confirming" | "requested" | "assigned" | "arriving" | "in_trip" | "completed" | "no_drivers";
@@ -130,6 +131,21 @@ interface RouteChoice extends DirectionRoute {
   surgeAmount?: number;
   perMinuteRate?: number;
 }
+
+interface CategoryPriceEstimate {
+  totalPrice: number;
+  baseFare: number;
+  pricePerKm: number;
+  lateNightPremium: number;
+  currency: string;
+  surgeMultiplier?: number;
+  surgeReason?: string | null;
+  highDemand?: boolean;
+  surgeAmount?: number;
+  perMinuteRate?: number;
+}
+
+type CategoryPricingMatrix = Record<string, Record<string, CategoryPriceEstimate>>;
 
 interface AutocompleteDebugEntry {
   id: string;
@@ -872,6 +888,7 @@ export default function ClientHomeScreen() {
   const [estimatedDistance, setEstimatedDistance] = useState<number | null>(null);
   const [lateNightPremium, setLateNightPremium] = useState<number>(0);
   const [routeChoices, setRouteChoices] = useState<RouteChoice[]>([]);
+  const [categoryPricing, setCategoryPricing] = useState<CategoryPricingMatrix>({});
   const [selectedRouteId, setSelectedRouteId] = useState<RouteChoiceId | null>(null);
   const [currentRide, setCurrentRide] = useState<any>(null);
   const [showVehicleSheet, setShowVehicleSheet] = useState(false);
@@ -1778,6 +1795,53 @@ export default function ClientHomeScreen() {
     setEtaText(`ETA: ${choice.durationText}`);
   }
 
+  async function fetchCategoryPricing(
+    routes: Array<{ id: string; distanceKm: number; durationMin: number }>,
+    origin: { lat: number; lng: number },
+  ): Promise<CategoryPricingMatrix> {
+    try {
+      const response = await apiRequest("POST", "/api/pricing/options", {
+        routes,
+        pickupLat: origin.lat,
+        pickupLng: origin.lng,
+      });
+      const data = await response.json();
+      return data?.estimates && typeof data.estimates === "object" ? data.estimates : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function mergeRoutePrice(choice: RouteChoice, estimate?: CategoryPriceEstimate): RouteChoice {
+    if (!estimate) return choice;
+    return {
+      ...choice,
+      fare: Number(estimate.totalPrice ?? choice.fare),
+      baseFare: Number(estimate.baseFare ?? choice.baseFare),
+      pricePerKm: Number(estimate.pricePerKm ?? choice.pricePerKm),
+      lateNightPremium: Number(estimate.lateNightPremium ?? choice.lateNightPremium),
+      currency: estimate.currency || choice.currency,
+      surgeMultiplier: Number(estimate.surgeMultiplier || 1),
+      surgeReason: estimate.surgeReason || null,
+      highDemand: !!estimate.highDemand,
+      surgeAmount: Number(estimate.surgeAmount || 0),
+      perMinuteRate: Number(estimate.perMinuteRate || 1),
+    };
+  }
+
+  function selectEstimatedVehicle(vehicle: (typeof VEHICLE_TYPES)[number]) {
+    setSelectedVehicle(vehicle);
+    const pricesForVehicle = categoryPricing[vehicle.id];
+    if (!pricesForVehicle || routeChoices.length === 0) return;
+
+    const pricedChoices = routeChoices.map((choice) =>
+      mergeRoutePrice(choice, pricesForVehicle[choice.id]),
+    );
+    setRouteChoices(pricedChoices);
+    const activeChoice = pricedChoices.find((choice) => choice.id === selectedRouteId) || pricedChoices[0];
+    if (activeChoice) applyRouteChoice(activeChoice);
+  }
+
   async function fetchRouteChoices(origin: { lat: number; lng: number }, dest: { lat: number; lng: number }) {
     let data: any = null;
 
@@ -1811,17 +1875,59 @@ export default function ClientHomeScreen() {
     if (choiceDescriptors.length === 0) {
       if (stops.length > 0) {
         setRouteChoices([]);
+        setCategoryPricing({});
         return [];
       }
       const approximateChoice = buildApproximateRouteChoice(origin, dest, selectedVehicle, isLateNightWindow());
-      setRouteChoices([approximateChoice]);
-      applyRouteChoice(approximateChoice);
-      return [approximateChoice];
+      const pricing = await fetchCategoryPricing([{
+        id: approximateChoice.id,
+        distanceKm: approximateChoice.distanceKm,
+        durationMin: approximateChoice.durationMin,
+      }], origin);
+      setCategoryPricing(pricing);
+      const pricedApproximateChoice = mergeRoutePrice(
+        approximateChoice,
+        pricing[selectedVehicle.id]?.[approximateChoice.id],
+      );
+      setRouteChoices([pricedApproximateChoice]);
+      applyRouteChoice(pricedApproximateChoice);
+      return [pricedApproximateChoice];
     }
 
     const lateNightRide = isLateNightWindow();
-    const choices = await Promise.all(
-      choiceDescriptors.map(async ({ id, route, title, subtitle, badge, icon }) => {
+    const pricing = await fetchCategoryPricing(
+      choiceDescriptors.map(({ id, route }) => ({
+        id,
+        distanceKm: route.distanceKm,
+        durationMin: route.durationMin,
+      })),
+      origin,
+    );
+    setCategoryPricing(pricing);
+
+    const fallbackChoices = choiceDescriptors.map(({ id, route, title, subtitle, badge, icon }) => {
+      const fallbackEstimate = calculateFallbackEstimate(route.distanceKm, selectedVehicle, lateNightRide);
+      return {
+        ...route,
+        id,
+        title,
+        subtitle,
+        badge,
+        icon,
+        fare: fallbackEstimate.totalPrice,
+        baseFare: fallbackEstimate.baseFare,
+        pricePerKm: fallbackEstimate.pricePerKm,
+        lateNightPremium: fallbackEstimate.lateNightPremium,
+        currency: fallbackEstimate.currency,
+      } as RouteChoice;
+    });
+
+    let choices = fallbackChoices.map((choice) =>
+      mergeRoutePrice(choice, pricing[selectedVehicle.id]?.[choice.id]),
+    );
+
+    if (Object.keys(pricing).length === 0) {
+      choices = await Promise.all(choiceDescriptors.map(async ({ id, route, title, subtitle, badge, icon }) => {
         const fallbackEstimate = calculateFallbackEstimate(route.distanceKm, selectedVehicle, lateNightRide);
 
         try {
@@ -1867,8 +1973,8 @@ export default function ClientHomeScreen() {
             currency: fallbackEstimate.currency,
           } as RouteChoice;
         }
-      })
-    );
+      }));
+    }
 
     setRouteChoices(choices);
     applyRouteChoice(choices[0]);
@@ -2653,44 +2759,54 @@ export default function ClientHomeScreen() {
             ]}
             keyboardShouldPersistTaps="handled"
           >
-            <View style={styles.priceCard}>
-              <Text style={styles.priceLabel}>{selectedVehicle.name}</Text>
-              <Text style={styles.priceValue}>R {selectedRouteChoice?.fare ?? estimatedPrice}</Text>
-              <Text style={styles.priceCurrency}>{selectedRouteChoice?.currency || "ZAR"}</Text>
-              {(estimatedDistance || tripDurationText) && (
-                <View style={styles.tripInfoPill}>
-                  {estimatedDistance && (
-                    <Text style={styles.tripInfoText}>{estimatedDistance} km</Text>
-                  )}
-                  {estimatedDistance && tripDurationText && (
-                    <Text style={styles.tripInfoSep}>·</Text>
-                  )}
-                  {tripDurationText && (
-                    <Text style={styles.tripInfoText}>{tripDurationText}</Text>
-                  )}
-                </View>
-              )}
-              {selectedRouteChoice ? (
-                <View style={styles.estimateBadgeRow}>
-                  <View style={styles.estimateBadge}>
-                    <Ionicons name={selectedRouteChoice.icon} size={14} color={Colors.primary} />
-                    <Text style={styles.estimateBadgeText}>{selectedRouteChoice.badge}</Text>
-                  </View>
-                  <View style={styles.estimateBadgeMuted}>
-                    <Text style={styles.estimateBadgeMutedText}>{selectedRouteChoice.title}</Text>
-                  </View>
-                </View>
-              ) : null}
-              {selectedRouteChoice?.highDemand ? (
-                <View style={styles.estimateBadgeRow}>
-                  <View style={[styles.estimateBadge, { backgroundColor: "rgba(245, 158, 11, 0.16)" }]}>
-                    <Ionicons name="flash" size={14} color={Colors.warning} />
-                    <Text style={[styles.estimateBadgeText, { color: Colors.warning }]}>
-                      High demand {selectedRouteChoice.surgeMultiplier?.toFixed(1)}x
-                    </Text>
-                  </View>
-                </View>
-              ) : null}
+            <View style={styles.categoryFareSection}>
+              <View style={styles.categoryFareHeader}>
+                <Text style={styles.categoryFareTitle}>Choose your ride</Text>
+                <Text style={styles.categoryFareSubtitle}>
+                  {tripDurationText || "Estimated arrival"} · {estimatedDistance || 0} km
+                </Text>
+              </View>
+              {VEHICLE_TYPES.map((vehicle) => {
+                const routeId = selectedRouteChoice?.id || routeChoices[0]?.id;
+                const liveEstimate = routeId ? categoryPricing[vehicle.id]?.[routeId] : null;
+                const fallbackEstimate = calculateFallbackEstimate(
+                  estimatedDistance || 0,
+                  vehicle,
+                  isLateNightWindow(),
+                );
+                const fare = Number(liveEstimate?.totalPrice ?? fallbackEstimate.totalPrice);
+                const isSelected = vehicle.id === selectedVehicle.id;
+                return (
+                  <Pressable
+                    key={vehicle.id}
+                    style={({ pressed }) => [
+                      styles.categoryFareRow,
+                      isSelected && styles.categoryFareRowSelected,
+                      pressed && { opacity: 0.86 },
+                    ]}
+                    onPress={() => selectEstimatedVehicle(vehicle)}
+                  >
+                    <View style={[styles.categoryFareIcon, isSelected && styles.categoryFareIconSelected]}>
+                      <Ionicons name={vehicle.icon} size={22} color={isSelected ? Colors.primary : Colors.white} />
+                    </View>
+                    <View style={styles.categoryFareInfo}>
+                      <View style={styles.categoryFareNameRow}>
+                        <Text style={styles.categoryFareName}>{vehicle.name}</Text>
+                        {"badge" in vehicle && vehicle.badge ? (
+                          <Text style={styles.categoryFareBadge}>{vehicle.badge}</Text>
+                        ) : null}
+                      </View>
+                      <Text style={styles.categoryFareMeta} numberOfLines={1}>
+                        {vehicle.desc} · R{vehicle.pricePerKm}/km
+                      </Text>
+                    </View>
+                    <View style={styles.categoryFarePriceWrap}>
+                      <Text style={styles.categoryFarePrice}>R {fare.toFixed(0)}</Text>
+                      {isSelected ? <Ionicons name="checkmark-circle" size={18} color={Colors.success} /> : null}
+                    </View>
+                  </Pressable>
+                );
+              })}
             </View>
 
             {routeChoices.length > 0 && (
@@ -3628,7 +3744,7 @@ export default function ClientHomeScreen() {
                   pressed && { opacity: 0.8 },
                 ]}
                 onPress={() => {
-                  setSelectedVehicle(vt);
+                  selectEstimatedVehicle(vt);
                   setShowVehicleSheet(false);
                 }}
               >
@@ -4216,6 +4332,91 @@ const styles = StyleSheet.create({
   estimateBadgeMutedText: {
     fontSize: 12,
     fontFamily: "Inter_500Medium",
+    color: Colors.white,
+  },
+  categoryFareSection: {
+    gap: 8,
+  },
+  categoryFareHeader: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 2,
+  },
+  categoryFareTitle: {
+    fontSize: 17,
+    fontFamily: "Inter_700Bold",
+    color: Colors.white,
+  },
+  categoryFareSubtitle: {
+    flexShrink: 1,
+    textAlign: "right",
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textMuted,
+  },
+  categoryFareRow: {
+    minHeight: 70,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  categoryFareRowSelected: {
+    borderColor: Colors.white,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  categoryFareIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.card,
+  },
+  categoryFareIconSelected: {
+    backgroundColor: Colors.white,
+  },
+  categoryFareInfo: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+  categoryFareNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  categoryFareName: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.white,
+  },
+  categoryFareBadge: {
+    fontSize: 10,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.accent,
+    textTransform: "uppercase",
+  },
+  categoryFareMeta: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textMuted,
+  },
+  categoryFarePriceWrap: {
+    minWidth: 62,
+    alignItems: "flex-end",
+    gap: 5,
+  },
+  categoryFarePrice: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
     color: Colors.white,
   },
   routeChoiceSection: {
