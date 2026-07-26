@@ -293,24 +293,29 @@ export default function RootLayout() {
 
   if (!fontsLoaded && !fontError && !fontLoadTimedOut) return null;
 
-  const appTree = (
-    <FaceDetectionProvider
-      options={{
-        performanceMode: "accurate",
-        landmarkMode: true,
-        classificationMode: true,
-        minFaceSize: 0.2,
-        isTrackingEnabled: false,
-      }}
-    >
-      <AuthProvider>
-        <SocketProvider>
-          <StatusBar style="light" />
-          <RootLayoutNav />
-        </SocketProvider>
-      </AuthProvider>
-    </FaceDetectionProvider>
+  const authenticatedApp = (
+    <AuthProvider>
+      <SocketProvider>
+        <StatusBar style="light" />
+        <RootLayoutNav />
+      </SocketProvider>
+    </AuthProvider>
   );
+  const appTree = getAppVariant() === "client"
+    ? (
+        <FaceDetectionProvider
+          options={{
+            performanceMode: "accurate",
+            landmarkMode: true,
+            classificationMode: true,
+            minFaceSize: 0.2,
+            isTrackingEnabled: false,
+          }}
+        >
+          {authenticatedApp}
+        </FaceDetectionProvider>
+      )
+    : authenticatedApp;
 
   return (
     <ErrorBoundary>
