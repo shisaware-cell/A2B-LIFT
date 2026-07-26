@@ -73,6 +73,14 @@ test("renders nearby drivers with the bundled rich car marker", () => {
   assert.doesNotMatch(nearbyMarkerBlock, /name="car-sport"/);
 });
 
+test("marks the driver's next stop with a visible white map label", () => {
+  const mapSource = readProjectFile("components/A2BMap.native.tsx");
+
+  assert.match(mapSource, /activeStopIndex\?: number/);
+  assert.match(mapSource, /\{index === activeStopIndex \? "NEXT" : index \+ 1\}/);
+  assert.match(mapSource, /activeStopMarkerText:[\s\S]*?color: Colors\.white/);
+});
+
 test("requires ML Kit face validation before a selfie can be used", () => {
   const cameraSource = readProjectFile("components/LivenessCamera.tsx");
 

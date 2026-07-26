@@ -7135,6 +7135,134 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.put("/api/rides/:id/stops", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const existingRide = await storage.getRide(req.params.id);
+      if (!existingRide) return res.status(404).json({ message: "Ride not found" });
+      if (existingRide.clientId !== req.auth!.sub) {
+        return res.status(403).json({ message: "Only the rider can update trip stops." });
+      }
+      if (["trip_completed", "cancelled"].includes(existingRide.status)) {
+        return res.status(409).json({ message: "Stops cannot be changed after the trip has ended." });
+      }
+
+      const nextStops = normalizeRideStops(req.body?.stops);
+      if (nextStops.length !== (Array.isArray(req.body?.stops) ? req.body.stops.length : 0)) {
+        return res.status(400).json({ message: "Choose a valid address for every stop." });
+      }
+
+      const previousStops = normalizeRideStops(existingRide.stops);
+      const completedStopCount = Math.max(
+        0,
+        Math.min(previousStops.length, Number((existingRide as any).completedStopCount || 0)),
+      );
+      for (let index = 0; index < completedStopCount; index += 1) {
+        const previous = previousStops[index];
+        const next = nextStops[index];
+        if (
+          !next ||
+          Math.abs(previous.lat - next.lat) > 0.00001 ||
+          Math.abs(previous.lng - next.lng) > 0.00001
+        ) {
+          return res.status(409).json({
+            message: "Stops already completed by the driver cannot be changed.",
+          });
+        }
+      }
+
+      const pickup = {
+        lat: Number(existingRide.pickupLat),
+        lng: Number(existingRide.pickupLng),
+      };
+      const destination = {
+        lat: Number(existingRide.dropoffLat),
+        lng: Number(existingRide.dropoffLng),
+      };
+      const [verifiedRoute] = await fetchVerifiedDirections(
+        pickup,
+        destination,
+        nextStops,
+      );
+      const priceEstimate = calculatePrice(
+        verifiedRoute.distanceKm,
+        existingRide.vehicleType || "budget",
+        {
+          isLateNight: isSouthAfricaLateNight(),
+          surgeMultiplier: Number(
+            (existingRide as any).demandMultiplier ||
+              existingRide.surgeMultiplier ||
+              1,
+          ),
+          surgeReason: existingRide.surgeReason || undefined,
+          estimatedDurationMin: verifiedRoute.durationMin,
+        },
+      );
+
+      const paymentMethod = existingRide.paymentMethod || "cash";
+      const paymentAlreadyCaptured =
+        paymentMethod !== "cash" && existingRide.paymentStatus === "paid";
+      if (
+        paymentAlreadyCaptured &&
+        Math.abs(Number(existingRide.price || 0) - priceEstimate.totalPrice) > 0.01
+      ) {
+        return res.status(409).json({
+          message: "Stops cannot be repriced after card or wallet payment has been captured.",
+        });
+      }
+
+      const updatedRide = await storage.updateRide(existingRide.id, {
+        stops: nextStops,
+        distanceKm: verifiedRoute.distanceKm,
+        durationMin: verifiedRoute.durationMin,
+        estimatedDurationMin: verifiedRoute.durationMin,
+        price: priceEstimate.totalPrice,
+        quotedFare: priceEstimate.totalPrice,
+        actualFare: priceEstimate.totalPrice,
+        finalFare: priceEstimate.totalPrice,
+        pricePerKm: priceEstimate.pricePerKm,
+        baseFare: priceEstimate.baseFare,
+      } as any);
+      if (!updatedRide) return res.status(404).json({ message: "Ride not found" });
+
+      const payload = {
+        ...updatedRide,
+        stopsUpdatedAt: new Date().toISOString(),
+      };
+      io.emit("ride:stopsUpdated", payload);
+      io.emit("ride:statusUpdate", payload);
+
+      if (updatedRide.chauffeurId) {
+        try {
+          const chauffeur = await storage.getChauffeur(updatedRide.chauffeurId);
+          if (chauffeur?.userId) {
+            await storage.createNotification({
+              userId: chauffeur.userId,
+              title: "Trip Stops Updated",
+              body: `The rider updated this trip. It now has ${nextStops.length} stop${nextStops.length === 1 ? "" : "s"}.`,
+              type: "ride",
+            });
+          }
+          if (chauffeur?.pushToken) {
+            sendExpoPushNotification(
+              [chauffeur.pushToken],
+              "Trip Stops Updated",
+              `The rider updated this trip. It now has ${nextStops.length} stop${nextStops.length === 1 ? "" : "s"}.`,
+              { rideId: updatedRide.id, type: "ride:stops-updated" },
+            );
+          }
+        } catch (notificationError: any) {
+          console.error("stop update notification failed (non-fatal):", notificationError.message);
+        }
+      }
+
+      return res.json(payload);
+    } catch (error: any) {
+      return res.status(500).json({
+        message: error.message || "Failed to update trip stops.",
+      });
+    }
+  });
+
   app.put("/api/rides/:id/accept", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
       const { chauffeurId } = req.body;
@@ -7346,6 +7474,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (timer) clearTimeout(timer);
         dispatchTimers.delete(ride.id);
         skippedChauffeursByRide.delete(ride.id);
+      }
+
+      // Trip settlement performs several independent ledger and notification
+      // writes. Acknowledge the authoritative ride completion first so the
+      // driver's UI is never held open by those background operations.
+      if (status === "trip_completed") {
+        const immediateRide = { ...ride, clientFirstName: "Client" };
+        io.emit("ride:statusUpdate", immediateRide);
+        res.json(immediateRide);
       }
 
       if (status === "cancelled" && rideBeforeUpdate) {
@@ -7681,7 +7818,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...(status === "cancelled" ? { driverCancellationEarnings: cancellationDriverEarnings } : {}),
       };
 
-      if (status !== "cancelled") {
+      if (status !== "cancelled" && status !== "trip_completed") {
         io.emit("ride:statusUpdate", rideWithClientName);
       }
 
@@ -7726,10 +7863,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error("rider status notification failed (non-fatal):", notifErr.message);
       }
 
-      return res.json(rideWithClientName);
+      if (!res.headersSent) {
+        return res.json(rideWithClientName);
+      }
+      return;
     } catch (error: any) {
       console.error("ride status update error:", error.message, error.stack);
-      return res.status(500).json({ message: error.message });
+      if (!res.headersSent) {
+        return res.status(500).json({ message: error.message });
+      }
+      return;
     }
   });
 

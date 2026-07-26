@@ -73,9 +73,37 @@ test("requires drivers to confirm every requested stop before ending a trip", ()
   assert.match(routesSource, /"\/api\/rides\/:id\/stops\/complete"/);
   assert.match(routesSource, /Confirm every requested stop before ending this trip/);
   assert.match(driverSource, /getActiveTripTarget/);
-  assert.match(driverSource, /Confirm Stop \$\{completedStopCount \+ 1\} of \$\{currentRideStops\.length\}/);
+  assert.match(driverSource, /Confirm Arrival at Stop \$\{completedStopCount \+ 1\}/);
   assert.match(driverSource, /"End Trip"/);
   assert.match(driverSource, /styles\.stopProgressIndexComplete/);
+});
+
+test("acknowledges trip completion before background settlement work", () => {
+  const routesSource = readProjectFile("server/routes.ts");
+  const immediateResponse = routesSource.indexOf(
+    'if (status === "trip_completed") {\n        const immediateRide',
+  );
+  const settlementWork = routesSource.indexOf(
+    'if (status === "trip_completed" && ride.chauffeurId && ride.price)',
+  );
+
+  assert.ok(immediateResponse >= 0);
+  assert.ok(settlementWork > immediateResponse);
+  assert.match(routesSource, /if \(!res\.headersSent\)/);
+});
+
+test("reprices rider stop updates and notifies the assigned driver", () => {
+  const routesSource = readProjectFile("server/routes.ts");
+  const driverSource = readProjectFile("app/chauffeur/index.tsx");
+  const clientSource = readProjectFile("app/client/index.tsx");
+
+  assert.match(routesSource, /"\/api\/rides\/:id\/stops"/);
+  assert.match(routesSource, /fetchVerifiedDirections\(\s*pickup,\s*destination,\s*nextStops/);
+  assert.match(routesSource, /io\.emit\("ride:stopsUpdated"/);
+  assert.match(routesSource, /Trip Stops Updated/);
+  assert.match(driverSource, /on\("ride:stopsUpdated", handleStopsUpdated\)/);
+  assert.match(clientSource, /Save Stops and Update Fare/);
+  assert.match(clientSource, /getActiveRideTarget/);
 });
 
 test("uses realistic vehicle artwork throughout the rider category selectors", () => {
@@ -85,8 +113,12 @@ test("uses realistic vehicle artwork throughout the rider category selectors", (
   assert.match(clientSource, /category-van\.png/);
   assert.match(clientSource, /source=\{vehicle\.artwork\}/);
   assert.match(clientSource, /source=\{vt\.artwork\}/);
+  assert.match(clientSource, /source=\{selectedVehicle\.artwork\}/);
+  assert.ok(clientSource.indexOf('id: "luxury_van"') < clientSource.indexOf('id: "budget"'));
+  assert.match(clientSource, /vehicleOptionBadge:[\s\S]*?color: Colors\.white/);
   assert.doesNotMatch(clientSource, /name=\{vehicle\.icon\}/);
   assert.doesNotMatch(clientSource, /name=\{vt\.icon\}/);
+  assert.doesNotMatch(clientSource, /selectedVehicle\.icon/);
 });
 
 test("locks the commission rate onto each new ride", () => {

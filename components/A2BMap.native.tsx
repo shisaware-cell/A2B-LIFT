@@ -175,6 +175,7 @@ interface A2BMapProps {
   pickupLocation: { lat: number; lng: number } | null;
   dropoffLocation?: { lat: number; lng: number } | null;
   stopLocations?: { id?: string; lat: number; lng: number }[];
+  activeStopIndex?: number;
   driverLocation?: { lat: number; lng: number } | null;
   nearbyDrivers?: NearbyDriver[];
   routePolyline?: string | null;
@@ -191,6 +192,7 @@ function A2BMap({
   pickupLocation,
   dropoffLocation,
   stopLocations = [],
+  activeStopIndex,
   driverLocation,
   nearbyDrivers = [],
   routePolyline,
@@ -403,8 +405,10 @@ function A2BMap({
             coordinate={{ latitude: stop.lat, longitude: stop.lng }}
             title={`Stop ${index + 1}`}
           >
-            <View style={styles.stopMarker}>
-              <Text style={styles.stopMarkerText}>{index + 1}</Text>
+            <View style={[styles.stopMarker, index === activeStopIndex && styles.activeStopMarker]}>
+              <Text style={[styles.stopMarkerText, index === activeStopIndex && styles.activeStopMarkerText]}>
+                {index === activeStopIndex ? "NEXT" : index + 1}
+              </Text>
             </View>
           </Marker>
         ))}
@@ -486,6 +490,7 @@ function areMapPropsEqual(previous: A2BMapProps, next: A2BMapProps) {
     sameCoordinate(previous.dropoffLocation, next.dropoffLocation) &&
     sameCoordinate(previous.driverLocation, next.driverLocation) &&
     sameCoordinateList(previous.stopLocations, next.stopLocations) &&
+    previous.activeStopIndex === next.activeStopIndex &&
     sameCoordinateList(previous.nearbyDrivers, next.nearbyDrivers) &&
     previous.routePolyline === next.routePolyline &&
     previous.showDriver === next.showDriver &&
@@ -559,6 +564,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Inter_700Bold",
     color: Colors.primary,
+  },
+  activeStopMarker: {
+    width: 44,
+    borderRadius: 7,
+    backgroundColor: Colors.accent,
+  },
+  activeStopMarkerText: {
+    color: Colors.white,
+    fontSize: 9,
   },
   nearbyDriverMarker: {
     width: 54,

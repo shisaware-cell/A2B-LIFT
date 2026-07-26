@@ -46,17 +46,43 @@ const CATEGORY_SEDAN_ART = require("../../assets/images/nearby-car-marker.png");
 const CATEGORY_VAN_ART = require("../../assets/images/category-van.png");
 
 const VEHICLE_TYPES = [
+  { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury_van, badge: "recommended" },
   { id: "budget", name: "Budget", desc: "Toyota Corolla, Toyota Quest", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.budget },
   { id: "luxury", name: "Luxury", desc: "BMW 3 Series, Mercedes C Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury },
   { id: "business", name: "Business Class", desc: "BMW 5 Series, Mercedes E Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.business },
   { id: "van", name: "Van", desc: "Hyundai H1, Mercedes Vito, Staria", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.van },
-  { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury_van, badge: "recommended" },
 ];
 
 type RideStatus = "idle" | "selecting" | "confirming" | "requested" | "assigned" | "arriving" | "in_trip" | "completed" | "no_drivers";
 
 type NearbyDriverState = { id: string; lat: number; lng: number };
 type LocationPickerTarget = "pickup" | "dropoff" | number;
+
+function getActiveRideTarget(ride: any) {
+  const rideStops = normalizeRideStops(ride?.stops);
+  const completedStopCount = Math.max(
+    0,
+    Math.min(rideStops.length, Number(ride?.completedStopCount || 0)),
+  );
+  const nextStop = rideStops[completedStopCount];
+  return nextStop
+    ? {
+        type: "stop" as const,
+        index: completedStopCount,
+        totalStops: rideStops.length,
+        address: nextStop.address || `Stop ${completedStopCount + 1}`,
+        lat: nextStop.lat,
+        lng: nextStop.lng,
+      }
+    : {
+        type: "dropoff" as const,
+        index: completedStopCount,
+        totalStops: rideStops.length,
+        address: ride?.dropoffAddress || "Final destination",
+        lat: Number(ride?.dropoffLat),
+        lng: Number(ride?.dropoffLng),
+      };
+}
 
 interface ChauffeurDetails {
   id?: string;
@@ -914,6 +940,8 @@ export default function ClientHomeScreen() {
   const [showCashSelfiePrompt, setShowCashSelfiePrompt] = useState(false);
   const [showCashSelfieCamera, setShowCashSelfieCamera] = useState(false);
   const [cashSelfieSaving, setCashSelfieSaving] = useState(false);
+  const [showActiveStopsEditor, setShowActiveStopsEditor] = useState(false);
+  const [savingActiveStops, setSavingActiveStops] = useState(false);
   const [savedCards, setSavedCards] = useState<{ id: string; last4: string; cardType: string; isDefault: boolean }[]>([]);
   // Reserve-a-ride (advance booking)
   const [showReservePicker, setShowReservePicker] = useState(false);
@@ -1212,6 +1240,41 @@ export default function ClientHomeScreen() {
 
   function removeStop(index: number) {
     setStops((current) => current.filter((_, stopIndex) => stopIndex !== index));
+  }
+
+  function openActiveStopsEditor() {
+    if (!currentRide) return;
+    setStops(normalizeRideStops(currentRide.stops));
+    setShowActiveStopsEditor(true);
+  }
+
+  async function saveActiveStops() {
+    if (!currentRide || savingActiveStops) return;
+    const normalizedStops = normalizeRideStops(stops);
+    if (normalizedStops.length !== stops.length) {
+      Alert.alert("Complete every stop", "Choose an address for each stop or remove the empty stop.");
+      return;
+    }
+
+    try {
+      setSavingActiveStops(true);
+      const res = await apiRequest("PUT", `/api/rides/${currentRide.id}/stops`, {
+        stops: normalizedStops,
+      });
+      const updatedRide = await res.json();
+      setCurrentRide((previous: any) => ({ ...previous, ...updatedRide }));
+      setEstimatedPrice(Number(updatedRide.price || estimatedPrice || 0));
+      setEstimatedDistance(Number(updatedRide.distanceKm || estimatedDistance || 0));
+      setShowActiveStopsEditor(false);
+      Alert.alert(
+        "Stops Updated",
+        `Your driver has been notified. The updated fare is R ${Number(updatedRide.price || 0).toFixed(0)}.`,
+      );
+    } catch (error: any) {
+      Alert.alert("Could not update stops", error?.message || "Please try again.");
+    } finally {
+      setSavingActiveStops(false);
+    }
   }
 
   function isActiveAutocompleteRequest(requestId: number, query: string) {
@@ -1651,10 +1714,11 @@ export default function ClientHomeScreen() {
       setRideStatus("arriving");
     } else if (ride.status === "trip_started") {
       setRideStatus("in_trip");
-      // Switch route to driver → dropoff
-      if (ride.dropoffLat && ride.dropoffLng) {
+      const activeTarget = getActiveRideTarget(ride);
+      // Keep both rider and driver focused on the same next stop or destination.
+      if (activeTarget.lat && activeTarget.lng) {
         setDriverLocation((prev) => {
-          if (prev) fetchRoute(prev, { lat: ride.dropoffLat, lng: ride.dropoffLng });
+          if (prev) fetchRoute(prev, { lat: activeTarget.lat, lng: activeTarget.lng });
           return prev;
         });
       }
@@ -2513,6 +2577,11 @@ export default function ClientHomeScreen() {
           pickupLocation={mapPickupLocation}
           dropoffLocation={mapDropoffLocation}
           stopLocations={mapStops}
+          activeStopIndex={
+            rideStatus === "in_trip"
+              ? Number(currentRide?.completedStopCount || 0)
+              : undefined
+          }
           driverLocation={driverLocation}
           nearbyDrivers={onlineDrivers}
           routePolyline={routePolyline}
@@ -2712,7 +2781,11 @@ export default function ClientHomeScreen() {
               style={styles.vehicleSelector}
               onPress={() => setShowVehicleSheet(true)}
             >
-              <Ionicons name={selectedVehicle.icon} size={20} color={Colors.white} />
+              <Image
+                source={selectedVehicle.artwork}
+                style={styles.selectedVehicleArtwork}
+                resizeMode="contain"
+              />
               <View style={{ flex: 1 }}>
                 <Text style={styles.vehicleName}>{selectedVehicle.name}</Text>
                 <Text style={styles.vehiclePrice}>R{selectedVehicle.baseFare} base + R{selectedVehicle.pricePerKm}/km</Text>
@@ -3054,6 +3127,43 @@ export default function ClientHomeScreen() {
               <Text style={styles.tripPriceValue}>R {currentRide.price}</Text>
             </View>
           )}
+          <View style={styles.activeStopsCard}>
+            <View style={styles.activeStopsHeader}>
+              <View>
+                <Text style={styles.activeStopsTitle}>
+                  {normalizeRideStops(currentRide?.stops).length > 0
+                    ? `${normalizeRideStops(currentRide?.stops).length} trip stop${normalizeRideStops(currentRide?.stops).length === 1 ? "" : "s"}`
+                    : "Direct trip"}
+                </Text>
+                {rideStatus === "in_trip" ? (
+                  <Text style={styles.activeStopsNext} numberOfLines={1}>
+                    Next: {getActiveRideTarget(currentRide).address}
+                  </Text>
+                ) : null}
+              </View>
+              <Pressable style={styles.editStopsBtn} onPress={openActiveStopsEditor}>
+                <Ionicons name="create-outline" size={14} color={Colors.white} />
+                <Text style={styles.editStopsBtnText}>Edit stops</Text>
+              </Pressable>
+            </View>
+            {normalizeRideStops(currentRide?.stops).map((stop, index) => {
+              const isComplete = index < Number(currentRide?.completedStopCount || 0);
+              return (
+                <View key={stop.id} style={styles.activeStopItem}>
+                  <View style={[styles.activeStopNumber, isComplete && styles.activeStopNumberComplete]}>
+                    {isComplete ? (
+                      <Ionicons name="checkmark" size={11} color={Colors.primary} />
+                    ) : (
+                      <Text style={styles.activeStopNumberText}>{index + 1}</Text>
+                    )}
+                  </View>
+                  <Text style={[styles.activeStopAddress, isComplete && styles.activeStopAddressComplete]} numberOfLines={1}>
+                    {stop.address}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
           <View style={styles.selectionMetaRow}>
             <View style={styles.selectionMetaChip}>
               <Ionicons name="navigate-circle-outline" size={14} color={Colors.white} />
@@ -3737,6 +3847,90 @@ export default function ClientHomeScreen() {
         </View>
       </Modal>
 
+      <Modal
+        visible={showActiveStopsEditor}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowActiveStopsEditor(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 18 }]}>
+            <View style={styles.sheetHandle} />
+            <View style={styles.stopEditorHeader}>
+              <View>
+                <Text style={styles.sheetTitle}>Update Trip Stops</Text>
+                <Text style={styles.stopEditorSubtitle}>
+                  The fare and both apps update after you save.
+                </Text>
+              </View>
+              <Pressable
+                style={styles.dismissBtn}
+                onPress={() => setShowActiveStopsEditor(false)}
+                hitSlop={10}
+              >
+                <Ionicons name="close" size={20} color={Colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            <ScrollView
+              style={styles.stopEditorList}
+              contentContainerStyle={{ gap: 8 }}
+              keyboardShouldPersistTaps="handled"
+            >
+              {stops.map((stop, index) => {
+                const isComplete = index < Number(currentRide?.completedStopCount || 0);
+                return (
+                  <View key={stop.id} style={[styles.stopEditorRow, isComplete && { opacity: 0.6 }]}>
+                    <Pressable
+                      style={styles.stopInputMain}
+                      onPress={() => openLocationPicker(index)}
+                      disabled={isComplete}
+                    >
+                      <View style={[styles.stopNumber, isComplete && { backgroundColor: Colors.success }]}>
+                        {isComplete ? (
+                          <Ionicons name="checkmark" size={12} color={Colors.primary} />
+                        ) : (
+                          <Text style={styles.stopNumberText}>{index + 1}</Text>
+                        )}
+                      </View>
+                      <View style={styles.locationInputInner}>
+                        <Text style={styles.locationInputLabel}>
+                          {isComplete ? `Stop ${index + 1} completed` : `Stop ${index + 1}`}
+                        </Text>
+                        <Text style={styles.locationInputValue} numberOfLines={1}>
+                          {stop.address || "Choose stop location"}
+                        </Text>
+                      </View>
+                    </Pressable>
+                    {!isComplete ? (
+                      <Pressable style={styles.removeStopBtn} onPress={() => removeStop(index)} hitSlop={8}>
+                        <Ionicons name="close-circle" size={20} color={Colors.textMuted} />
+                      </Pressable>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </ScrollView>
+
+            <Pressable style={styles.addStopBtn} onPress={addStop}>
+              <Ionicons name="add-circle-outline" size={18} color={Colors.white} />
+              <Text style={styles.addStopText}>Add another stop</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.confirmBtn, savingActiveStops && { opacity: 0.65 }]}
+              onPress={saveActiveStops}
+              disabled={savingActiveStops}
+            >
+              {savingActiveStops ? (
+                <ActivityIndicator size="small" color={Colors.primary} />
+              ) : (
+                <Text style={styles.confirmBtnText}>Save Stops and Update Fare</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={showVehicleSheet} transparent animationType="slide" onRequestClose={() => setShowVehicleSheet(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setShowVehicleSheet(false)}>
           <View style={[styles.modalSheet, { paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 16) }]}>
@@ -4104,6 +4298,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  stopEditorHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  stopEditorSubtitle: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textMuted,
+    marginTop: 3,
+  },
+  stopEditorList: {
+    maxHeight: 300,
+  },
+  stopEditorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.surface,
+    borderRadius: 8,
+    paddingRight: 10,
+  },
   addStopBtn: {
     minHeight: 42,
     flexDirection: "row",
@@ -4237,6 +4453,10 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderRadius: 12,
+  },
+  selectedVehicleArtwork: {
+    width: 66,
+    height: 44,
   },
   vehicleName: {
     fontSize: 15,
@@ -4411,7 +4631,7 @@ const styles = StyleSheet.create({
   categoryFareBadge: {
     fontSize: 10,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.accent,
+    color: Colors.white,
     textTransform: "uppercase",
   },
   categoryFareMeta: {
@@ -5385,6 +5605,79 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     color: Colors.white,
   },
+  activeStopsCard: {
+    gap: 8,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: Colors.border,
+  },
+  activeStopsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  activeStopsTitle: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.white,
+  },
+  activeStopsNext: {
+    maxWidth: 210,
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  editStopsBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: Colors.accent,
+  },
+  editStopsBtnText: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.white,
+  },
+  activeStopItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  activeStopNumber: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  activeStopNumberComplete: {
+    backgroundColor: Colors.success,
+    borderColor: Colors.success,
+  },
+  activeStopNumberText: {
+    fontSize: 9,
+    fontFamily: "Inter_700Bold",
+    color: Colors.white,
+  },
+  activeStopAddress: {
+    flex: 1,
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textSecondary,
+  },
+  activeStopAddressComplete: {
+    color: Colors.textMuted,
+    textDecorationLine: "line-through",
+  },
   completedContainer: {
     alignItems: "center",
     gap: 8,
@@ -5461,7 +5754,7 @@ const styles = StyleSheet.create({
   vehicleOptionBadge: {
     fontSize: 10,
     fontFamily: "Inter_700Bold",
-    color: Colors.accent,
+    color: Colors.white,
     textTransform: "uppercase",
   },
   vehicleOptionDesc: {

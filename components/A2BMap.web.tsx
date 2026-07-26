@@ -68,6 +68,7 @@ interface A2BMapProps {
   pickupLocation: { lat: number; lng: number } | null;
   dropoffLocation?: { lat: number; lng: number } | null;
   stopLocations?: { id?: string; lat: number; lng: number }[];
+  activeStopIndex?: number;
   driverLocation?: { lat: number; lng: number } | null;
   nearbyDrivers?: NearbyDriver[];
   routePolyline?: string | null;
@@ -83,6 +84,7 @@ export default function A2BMap({
   pickupLocation,
   dropoffLocation,
   stopLocations = [],
+  activeStopIndex,
   driverLocation,
   nearbyDrivers = [],
   routePolyline,
@@ -140,7 +142,7 @@ export default function A2BMap({
     // Small delay so Google Maps finishes rendering before we fit bounds
     const t = setTimeout(() => updateMarkers(), 200);
     return () => clearTimeout(t);
-  }, [pickupLocation, dropoffLocation, stopLocations, driverLocation, showDriver, nearbyDrivers]);
+  }, [pickupLocation, dropoffLocation, stopLocations, activeStopIndex, driverLocation, showDriver, nearbyDrivers]);
 
   useEffect(() => {
     if (!mapInstanceRef.current) return;
@@ -224,7 +226,11 @@ export default function A2BMap({
       const stopMarker = new google.maps.Marker({
         position: { lat: stop.lat, lng: stop.lng },
         map: mapInstanceRef.current,
-        label: { text: String(index + 1), color: "#000000", fontWeight: "700" },
+        label: {
+          text: index === activeStopIndex ? "NEXT" : String(index + 1),
+          color: index === activeStopIndex ? "#FFFFFF" : "#000000",
+          fontWeight: "700",
+        },
         title: `Stop ${index + 1}`,
       });
       markersRef.current.push(stopMarker);
