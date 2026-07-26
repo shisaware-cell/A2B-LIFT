@@ -276,7 +276,7 @@ export class DatabaseStorage implements IStorage {
     const [user] = await db
       .select()
       .from(users)
-      .where(sql`lower(${users.username}) = ${normalised}`);
+      .where(sql`lower(trim(${users.username})) = ${normalised}`);
     return user;
   }
 

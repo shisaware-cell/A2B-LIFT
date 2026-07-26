@@ -309,6 +309,7 @@ function buildApproximateRouteChoice(
 }
 
 const CURRENT_LOCATION_LABEL = "Current Location";
+const JHB_FALLBACK = { lat: -26.2041, lng: 28.0473 };
 const SIGNIFICANT_LOCATION_SHIFT_KM = 0.03;
 const DRIVER_MARKER_SHIFT_KM = 0.01;
 const AUTOCOMPLETE_DEBOUNCE_MS = 220;
@@ -1111,10 +1112,10 @@ export default function ClientHomeScreen() {
   useEffect(() => {
     if (location && dropoffCoords) {
       fetchRoute(location, dropoffCoords);
-    } else {
+    } else if (!dropoffCoords) {
       setRoutePolyline(null);
     }
-  }, [dropoffCoords?.lat, dropoffCoords?.lng]);
+  }, [location?.lat, location?.lng, dropoffCoords?.lat, dropoffCoords?.lng]);
 
   // Cancel ride and show "no drivers" if no driver accepts within 45 seconds
   useEffect(() => {
@@ -2262,6 +2263,37 @@ export default function ClientHomeScreen() {
     setRatingComment("");
   }
 
+  const ridePickupLocation = currentRide
+    ? {
+        lat: Number(currentRide.pickupLat),
+        lng: Number(currentRide.pickupLng),
+      }
+    : null;
+  const rideDropoffLocation = currentRide
+    ? {
+        lat: Number(currentRide.dropoffLat),
+        lng: Number(currentRide.dropoffLng),
+      }
+    : null;
+  const validRidePickup =
+    ridePickupLocation &&
+    Number.isFinite(ridePickupLocation.lat) &&
+    Number.isFinite(ridePickupLocation.lng)
+      ? ridePickupLocation
+      : null;
+  const validRideDropoff =
+    rideDropoffLocation &&
+    Number.isFinite(rideDropoffLocation.lat) &&
+    Number.isFinite(rideDropoffLocation.lng)
+      ? rideDropoffLocation
+      : null;
+  const mapPickupLocation = location || validRidePickup || JHB_FALLBACK;
+  const mapDropoffLocation = dropoffCoords || validRideDropoff;
+  const mapHasLiveRideFocus =
+    rideStatus === "assigned" ||
+    rideStatus === "arriving" ||
+    rideStatus === "in_trip";
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + (Platform.OS === "web" ? 67 : 0) }]}>
       <View style={styles.header}>
@@ -2293,15 +2325,15 @@ export default function ClientHomeScreen() {
 
       <View style={styles.mapArea}>
         <A2BMap
-          pickupLocation={location}
-          dropoffLocation={dropoffCoords}
+          pickupLocation={mapPickupLocation}
+          dropoffLocation={mapDropoffLocation}
           driverLocation={driverLocation}
           nearbyDrivers={onlineDrivers}
           routePolyline={routePolyline}
           showDriver={rideStatus === "assigned" || rideStatus === "arriving" || rideStatus === "in_trip"}
           followDriver={rideStatus === "arriving" || rideStatus === "in_trip"}
-          loading={locationLoading}
-          initialZoom={currentRide ? "street" : "city"}
+          loading={locationLoading && !location}
+          initialZoom={mapHasLiveRideFocus ? "street" : "city"}
           etaText={etaText || undefined}
           statusText={
             rideStatus === "in_trip" ? "Trip In Progress" : undefined

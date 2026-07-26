@@ -14,6 +14,7 @@ import { queryClient } from "@mobile-core/query";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AuthProvider, useAuth } from "@mobile-core/auth";
 import { SocketProvider } from "@mobile-core/socket";
+import { FaceDetectionProvider } from "@infinitered/react-native-mlkit-face-detection";
 
 const RIDE_ALERT_CHANNEL_ID = "ride-alerts-v3";
 const RIDE_ALERT_SOUND = "trip_alert.wav";
@@ -293,12 +294,22 @@ export default function RootLayout() {
   if (!fontsLoaded && !fontError && !fontLoadTimedOut) return null;
 
   const appTree = (
-    <AuthProvider>
-      <SocketProvider>
-        <StatusBar style="light" />
-        <RootLayoutNav />
-      </SocketProvider>
-    </AuthProvider>
+    <FaceDetectionProvider
+      options={{
+        performanceMode: "accurate",
+        landmarkMode: true,
+        classificationMode: true,
+        minFaceSize: 0.2,
+        isTrackingEnabled: false,
+      }}
+    >
+      <AuthProvider>
+        <SocketProvider>
+          <StatusBar style="light" />
+          <RootLayoutNav />
+        </SocketProvider>
+      </AuthProvider>
+    </FaceDetectionProvider>
   );
 
   return (

@@ -47,6 +47,34 @@ test("uses the Google map provider on every native platform", () => {
   assert.doesNotMatch(mapSource, /Platform\.OS === "android" \? PROVIDER_GOOGLE : undefined/);
 });
 
+test("keeps the client map centred on a city or active ride while GPS settles", () => {
+  const clientMapSource = readProjectFile("app/client/index.tsx");
+
+  assert.match(clientMapSource, /const JHB_FALLBACK = \{ lat: -26\.2041, lng: 28\.0473 \}/);
+  assert.match(clientMapSource, /const mapPickupLocation = location \|\| validRidePickup \|\| JHB_FALLBACK/);
+  assert.match(clientMapSource, /pickupLocation=\{mapPickupLocation\}/);
+  assert.match(clientMapSource, /dropoffLocation=\{mapDropoffLocation\}/);
+  assert.match(clientMapSource, /initialZoom=\{mapHasLiveRideFocus \? "street" : "city"\}/);
+});
+
+test("requires ML Kit face validation before a selfie can be used", () => {
+  const cameraSource = readProjectFile("components/LivenessCamera.tsx");
+
+  assert.match(cameraSource, /useFacesInPhoto\(capturedUri \|\| undefined\)/);
+  assert.match(cameraSource, /faceCount !== 1/);
+  assert.match(cameraSource, /faceValidation\.passed/);
+  assert.doesNotMatch(cameraSource, /onCapture\(\{ uri: capturedUri, passed: true/);
+});
+
+test("moves referral funds atomically and records both ledgers", () => {
+  const routesSource = readProjectFile("server/routes.ts");
+
+  assert.match(routesSource, /WHERE id = \$1\s+FOR UPDATE/);
+  assert.match(routesSource, /INSERT INTO wallet_transactions/);
+  assert.match(routesSource, /INSERT INTO reward_transactions/);
+  assert.match(routesSource, /await client\.query\("COMMIT"\)/);
+});
+
 test("uses the iOS Google Maps key for iOS builds even when Android key is present", () => {
   const config = loadAppConfigWithEnv({
     MAPS_BUILD_PLATFORM: "ios",

@@ -621,7 +621,7 @@ var DatabaseStorage = class {
   }
   async getUserByUsername(username) {
     const normalised = username.toLowerCase().trim();
-    const [user] = await db.select().from(users).where(import_drizzle_orm2.sql`lower(${users.username}) = ${normalised}`);
+    const [user] = await db.select().from(users).where(import_drizzle_orm2.sql`lower(trim(${users.username})) = ${normalised}`);
     return user;
   }
   async getUserByReferralCode(referralCode) {
@@ -3131,8 +3131,22 @@ async function registerRoutes(app2) {
         storage.getRewardTransactions(user.id),
         storage.getRewardCashoutsByUser(user.id)
       ]);
-      const referredUserIds = (referralEvents2 || []).map((event) => event.referredUserId).filter(Boolean);
+      const linkedUsersResult = await pool2.query(
+        `SELECT id, name, created_at
+         FROM users
+         WHERE referred_by_user_id = $1
+         ORDER BY created_at DESC`,
+        [user.id]
+      );
+      const linkedUsers = linkedUsersResult.rows;
+      const referredUserIds = Array.from(new Set([
+        ...(referralEvents2 || []).map((event) => event.referredUserId),
+        ...linkedUsers.map((linkedUser) => linkedUser.id)
+      ].filter(Boolean)));
       const referredUsersMap = /* @__PURE__ */ new Map();
+      for (const linkedUser of linkedUsers) {
+        referredUsersMap.set(linkedUser.id, { id: linkedUser.id, name: linkedUser.name });
+      }
       if (referredUserIds.length > 0) {
         try {
           const result = await pool2.query(
@@ -3145,20 +3159,35 @@ async function registerRoutes(app2) {
         } catch {
         }
       }
-      const referredPeople = (referralEvents2 || []).map((event) => {
-        const referredUser = event?.referredUserId ? referredUsersMap.get(event.referredUserId) : null;
-        return {
-          id: event.id,
-          name: referredUser?.name || "A2B User",
-          joinedAt: event.createdAt,
-          firstRewardAt: event.firstRewardAt || null,
-          lastRewardAt: event.lastRewardAt || null,
-          rewardedAt: event.status === "rewarded" ? event.lastRewardAt || event.firstRewardAt || event.updatedAt || event.createdAt : null,
-          totalRewards: Number(event.totalRewards || 0),
-          status: event.status || "registered"
-        };
-      });
-      const totalRewardsEarned = (transactions || []).filter((tx) => Number(tx.amount || 0) > 0 && tx.status !== "failed").reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const eventReferredUserIds = new Set(
+        (referralEvents2 || []).map((event) => event.referredUserId).filter(Boolean)
+      );
+      const referredPeople = [
+        ...(referralEvents2 || []).map((event) => {
+          const referredUser = event?.referredUserId ? referredUsersMap.get(event.referredUserId) : null;
+          return {
+            id: event.id,
+            name: referredUser?.name || "A2B User",
+            joinedAt: event.createdAt,
+            firstRewardAt: event.firstRewardAt || null,
+            lastRewardAt: event.lastRewardAt || null,
+            rewardedAt: event.status === "rewarded" ? event.lastRewardAt || event.firstRewardAt || event.updatedAt || event.createdAt : null,
+            totalRewards: Number(event.totalRewards || 0),
+            status: event.status || "registered"
+          };
+        }),
+        ...linkedUsers.filter((linkedUser) => !eventReferredUserIds.has(linkedUser.id)).map((linkedUser) => ({
+          id: `linked_${linkedUser.id}`,
+          name: linkedUser.name || "A2B User",
+          joinedAt: linkedUser.created_at,
+          firstRewardAt: null,
+          lastRewardAt: null,
+          rewardedAt: null,
+          totalRewards: 0,
+          status: "registered"
+        }))
+      ].sort((a, b) => new Date(b.joinedAt || 0).getTime() - new Date(a.joinedAt || 0).getTime());
+      const totalRewardsEarned = (transactions || []).filter((tx) => Number(tx.amount || 0) > 0 && tx.status !== "failed" && !["wallet_transfer", "ride_redemption", "cashout_request"].includes(String(tx.type || ""))).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
       const pendingCashoutAmount = (cashouts || []).filter((cashout) => ["pending", "processing"].includes(String(cashout.status || "").toLowerCase())).reduce((sum, cashout) => sum + Number(cashout.amount || 0), 0);
       const rewardedReferrals = (referralEvents2 || []).filter(
         (event) => Number(event.totalRewards || 0) > 0 || event.status === "rewarded"
@@ -3169,7 +3198,7 @@ async function registerRoutes(app2) {
         referralCode: hydratedUser.referralCode,
         shareUrl: `${String(referralBase).replace(/\/$/, "")}/r/${encodeURIComponent(hydratedUser.referralCode)}?app=${encodeURIComponent(rewardApp)}`,
         rewardsBalance: Number(hydratedUser.rewardsBalance || 0),
-        referredCount: referralEvents2.length,
+        referredCount: referredPeople.length,
         rewardedReferrals,
         totalRewardsEarned,
         pendingCashoutAmount,
@@ -3224,48 +3253,62 @@ async function registerRoutes(app2) {
     }
   });
   app2.post("/api/rewards/transfer-to-wallet", requireAuth, async (req, res) => {
+    const client = await pool2.connect();
     try {
       const userId = req.auth.sub;
-      const user = await storage.getUser(userId);
-      if (!user) return res.status(404).json({ message: "User not found" });
-      const rewardsBalance = Math.round(Number(await getUserRewardsBalance(userId)) * 100) / 100;
+      await client.query("BEGIN");
+      const userResult = await client.query(
+        `SELECT id, COALESCE(wallet_balance, 0) AS wallet_balance,
+                COALESCE(rewards_balance, 0) AS rewards_balance
+         FROM users
+         WHERE id = $1
+         FOR UPDATE`,
+        [userId]
+      );
+      const user = userResult.rows[0];
+      if (!user) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ message: "User not found" });
+      }
+      const rewardsBalance = Math.round(Number(user.rewards_balance || 0) * 100) / 100;
       if (rewardsBalance <= 0) {
+        await client.query("ROLLBACK");
         return res.status(400).json({ message: "You have no referral balance to transfer." });
       }
       let amount = Number(req.body?.amount);
       if (!Number.isFinite(amount) || amount <= 0) amount = rewardsBalance;
       amount = Math.round(amount * 100) / 100;
       if (amount > rewardsBalance) {
+        await client.query("ROLLBACK");
         return res.status(400).json({ message: `You can transfer at most R${rewardsBalance.toFixed(2)}.` });
       }
-      const walletBefore = Number(user.walletBalance || 0);
+      const walletBefore = Number(user.wallet_balance || 0);
       const walletAfter = Math.round((walletBefore + amount) * 100) / 100;
       const rewardsAfter = Math.round((rewardsBalance - amount) * 100) / 100;
       const reference = `rewards_to_wallet_${Date.now()}_${userId.slice(0, 6)}`;
-      await storage.updateUser(userId, { walletBalance: walletAfter, rewardsBalance: rewardsAfter });
-      await storage.createWalletTransaction({
-        userId,
-        type: "referral_transfer",
-        amount,
-        balanceBefore: walletBefore,
-        balanceAfter: walletAfter,
-        reference,
-        description: "Referral balance transferred to wallet",
-        status: "completed"
-      });
-      await storage.createRewardTransaction({
-        userId,
-        type: "wallet_transfer",
-        amount,
-        balanceBefore: rewardsBalance,
-        balanceAfter: rewardsAfter,
-        reference,
-        description: "Transferred to wallet",
-        status: "completed"
-      }).catch(() => void 0);
+      await client.query(
+        "UPDATE users SET wallet_balance = $1, rewards_balance = $2 WHERE id = $3",
+        [walletAfter, rewardsAfter, userId]
+      );
+      await client.query(
+        `INSERT INTO wallet_transactions
+          (user_id, type, amount, balance_before, balance_after, reference, description, status)
+         VALUES ($1, 'referral_transfer', $2, $3, $4, $5, $6, 'completed')`,
+        [userId, amount, walletBefore, walletAfter, reference, "Referral balance transferred to wallet"]
+      );
+      await client.query(
+        `INSERT INTO reward_transactions
+          (user_id, type, amount, balance_before, balance_after, reference, description, status)
+         VALUES ($1, 'wallet_transfer', $2, $3, $4, $5, $6, 'completed')`,
+        [userId, amount, rewardsBalance, rewardsAfter, reference, "Transferred to wallet"]
+      );
+      await client.query("COMMIT");
       return res.json({ success: true, amount, walletBalance: walletAfter, rewardsBalance: rewardsAfter });
     } catch (error) {
+      await client.query("ROLLBACK").catch(() => void 0);
       return res.status(500).json({ message: error.message || "Failed to transfer referral balance" });
+    } finally {
+      client.release();
     }
   });
   const GOOGLE_KEY = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_SERVER_API_KEY || process.env.GOOGLE_MAPS_WEB_SERVICE_API_KEY || process.env.GOOGLE_MAPS_API_KEY || "";

@@ -197,7 +197,7 @@ export default function ReferralsScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const segments = useSegments();
-  const { user, refreshUser } = useAuth();
+  const { user, setUser, refreshUser } = useAuth();
   const hasLoadedOnceRef = useRef(false);
   const [summary, setSummary] = useState<ReferralSummary | null>(null);
   const [referredPeople, setReferredPeople] = useState<ReferredPerson[]>([]);
@@ -408,6 +408,13 @@ export default function ReferralsScreen() {
     try {
       const res = await apiRequest("POST", "/api/rewards/transfer-to-wallet");
       const data = await res.json().catch(() => ({}));
+      if (user && Number.isFinite(Number(data.walletBalance))) {
+        setUser({
+          ...user,
+          walletBalance: Number(data.walletBalance),
+          rewardsBalance: Number(data.rewardsBalance || 0),
+        });
+      }
       await refreshUser();
       await loadData({ showLoader: false });
       Alert.alert(
