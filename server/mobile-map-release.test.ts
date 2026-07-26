@@ -57,6 +57,22 @@ test("keeps the client map centred on a city or active ride while GPS settles", 
   assert.match(clientMapSource, /initialZoom=\{mapHasLiveRideFocus \? "street" : "city"\}/);
 });
 
+test("renders nearby drivers with the bundled rich car marker", () => {
+  const mapSource = readProjectFile("components/A2BMap.native.tsx");
+  const nearbyMarkerStart = mapSource.indexOf("Nearby idle drivers");
+  const nearbyMarkerEnd = mapSource.indexOf(
+    "{showDriver && driverLocation",
+    nearbyMarkerStart,
+  );
+  const nearbyMarkerBlock = mapSource.slice(nearbyMarkerStart, nearbyMarkerEnd);
+
+  assert.match(mapSource, /nearby-car-marker\.png/);
+  assert.match(nearbyMarkerBlock, /<Image/);
+  assert.match(nearbyMarkerBlock, /source=\{NEARBY_CAR_MARKER\}/);
+  assert.match(nearbyMarkerBlock, /tracksViewChanges=\{false\}/);
+  assert.doesNotMatch(nearbyMarkerBlock, /name="car-sport"/);
+});
+
 test("requires ML Kit face validation before a selfie can be used", () => {
   const cameraSource = readProjectFile("components/LivenessCamera.tsx");
 

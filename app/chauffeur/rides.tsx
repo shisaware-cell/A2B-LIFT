@@ -76,10 +76,6 @@ function RideDetail({ ride, onBack }: { ride: any; onBack: () => void }) {
   const grossFare = getGrossFare(ride);
   const driverFare = getDriverFare(ride);
 
-  const earningsCalc = grossFare
-    ? { chauffeur: driverFare.toFixed(2), commission: (grossFare - driverFare).toFixed(2) }
-    : null;
-
   return (
     <View style={[styles.container, { paddingTop: insets.top + (Platform.OS === "web" ? 67 : 0) }]}>
       {/* Header */}
@@ -142,23 +138,11 @@ function RideDetail({ ride, onBack }: { ride: any; onBack: () => void }) {
           <Text style={styles.detailCardTitle}>Earnings</Text>
           <View style={styles.earningsRow}>
             <View style={styles.earningsItem}>
-              <Text style={styles.earningsAmount}>R {grossFare ? grossFare.toFixed(2) : "—"}</Text>
-              <Text style={styles.earningsLabel}>Total Fare</Text>
+              <Text style={[styles.earningsAmount, { color: Colors.success }]}>
+                R {grossFare ? driverFare.toFixed(2) : "—"}
+              </Text>
+              <Text style={styles.earningsLabel}>Your Earnings</Text>
             </View>
-            {earningsCalc && (
-              <>
-                <View style={styles.earningsDivider} />
-                <View style={styles.earningsItem}>
-                  <Text style={[styles.earningsAmount, { color: Colors.success }]}>R {earningsCalc.chauffeur}</Text>
-                  <Text style={styles.earningsLabel}>Your Earnings</Text>
-                </View>
-                <View style={styles.earningsDivider} />
-                <View style={styles.earningsItem}>
-                  <Text style={[styles.earningsAmount, { color: Colors.textMuted }]}>R {earningsCalc.commission}</Text>
-                  <Text style={styles.earningsLabel}>Commission</Text>
-                </View>
-              </>
-            )}
           </View>
           <DetailRow icon="cash-outline" label="Payment Method" value={(ride.paymentMethod || "cash").toUpperCase()} />
           <DetailRow icon="shield-checkmark-outline" label="Payment Status" value={(ride.paymentStatus || "unpaid").toUpperCase()} />

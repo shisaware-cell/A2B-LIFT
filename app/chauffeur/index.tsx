@@ -2340,7 +2340,7 @@ export default function ChauffeurDashboard() {
                 <Text style={styles.payPopupTitle}>Your Trip Earnings</Text>
                 <Text style={styles.payPopupAmount}>R {getRideFare(completedTrip).toFixed(0)}</Text>
                 <Text style={styles.payPopupBody}>
-                  Collect R {getRideClientFare(completedTrip).toFixed(0)} cash from {completedTrip?.clientFirstName || (completedTrip?.clientName ? String(completedTrip.clientName).split(" ")[0] : "the client")} before they exit. After the 30% platform commission, R {getRideFare(completedTrip).toFixed(0)} is due to you.
+                  Your earnings for this cash trip are R {getRideFare(completedTrip).toFixed(0)}. The rider can confirm the cash amount in their A2B app.
                 </Text>
               </>
             ) : (
@@ -2348,10 +2348,10 @@ export default function ChauffeurDashboard() {
                 <View style={styles.payPopupIconWrap}>
                   <Text style={{ fontSize: 40 }}>💳</Text>
                 </View>
-                <Text style={styles.payPopupTitle}>Card Payment</Text>
+                <Text style={styles.payPopupTitle}>Your Trip Earnings</Text>
                 <Text style={styles.payPopupAmount}>R {getRideFare(completedTrip).toFixed(0)}</Text>
                 <Text style={styles.payPopupBody}>
-                  Your net after 30% commission is R {getRideFare(completedTrip).toFixed(0)}, which will reflect in your wallet shortly.
+                  R {getRideFare(completedTrip).toFixed(0)} has been added to your earnings and will reflect in your wallet shortly.
                 </Text>
               </>
             )}

@@ -43,6 +43,24 @@ test("driver closes cancelled trips and shows any earnings due", () => {
   assert.match(driverSource, /setInterval\(checkRideStatus, 4000\)/);
 });
 
+test("driver trip screens reveal earnings without the rider's total fare", () => {
+  const driverSource = readProjectFile("app/chauffeur/index.tsx");
+  const completedPopupStart = driverSource.indexOf("Post-trip payment popup");
+  const completedPopupEnd = driverSource.indexOf(
+    "Post-trip client rating modal",
+    completedPopupStart,
+  );
+  const completedPopup = driverSource.slice(completedPopupStart, completedPopupEnd);
+  const rideHistorySource = readProjectFile("app/chauffeur/rides.tsx");
+
+  assert.match(completedPopup, /Your Trip Earnings/);
+  assert.doesNotMatch(completedPopup, /getRideClientFare\(completedTrip\)/);
+  assert.doesNotMatch(completedPopup, /platform commission/i);
+  assert.match(rideHistorySource, /Your Earnings/);
+  assert.doesNotMatch(rideHistorySource, />Total Fare</);
+  assert.doesNotMatch(rideHistorySource, />Commission</);
+});
+
 test("locks the commission rate onto each new ride", () => {
   const schemaSource = readProjectFile("shared/schema.ts");
   const routesSource = readProjectFile("server/routes.ts");

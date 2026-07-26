@@ -1,8 +1,10 @@
 import React, { useRef, useEffect, useMemo, useCallback, useState } from "react";
-import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ActivityIndicator, Image } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
+
+const NEARBY_CAR_MARKER = require("../assets/images/nearby-car-marker.png");
 
 // Fallback region — Johannesburg CBD. Used when GPS not yet acquired so map
 // never renders at world zoom level.
@@ -71,13 +73,33 @@ const DriverMarker = React.memo(
       flat={true}
     >
       <View style={driverMarkerStyle.wrap}>
-        <Ionicons name="car-sport" size={20} color="#000" />
+        <Image
+          source={NEARBY_CAR_MARKER}
+          style={driverMarkerStyle.image}
+          resizeMode="contain"
+        />
       </View>
     </Marker>
   ),
   (prev, next) => prev.latitude === next.latitude && prev.longitude === next.longitude,
 );
-const driverMarkerStyle = { wrap: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#FFFFFF", borderWidth: 1.5, borderColor: "rgba(0,0,0,0.15)", alignItems: "center" as const, justifyContent: "center" as const, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 6 } };
+const driverMarkerStyle = {
+  wrap: {
+    width: 58,
+    height: 42,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    shadowColor: "#000",
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+  },
+  image: {
+    width: 56,
+    height: 36,
+  },
+};
 
 function decodePolyline(encoded: string): { latitude: number; longitude: number }[] {
   const points: { latitude: number; longitude: number }[] = [];
@@ -394,9 +416,14 @@ function A2BMap({
             coordinate={{ latitude: driver.lat, longitude: driver.lng }}
             anchor={{ x: 0.5, y: 0.5 }}
             tracksViewChanges={false}
+            flat={true}
           >
             <View style={styles.nearbyDriverMarker}>
-              <Ionicons name="car-sport" size={16} color="#000" />
+              <Image
+                source={NEARBY_CAR_MARKER}
+                style={styles.nearbyDriverImage}
+                resizeMode="contain"
+              />
             </View>
           </Marker>
         ))}
@@ -534,14 +561,19 @@ const styles = StyleSheet.create({
     color: Colors.primary,
   },
   nearbyDriverMarker: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: "#FFD700",
+    width: 54,
+    height: 38,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1.5,
-    borderColor: "#000",
+    shadowColor: "#000",
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 5,
+  },
+  nearbyDriverImage: {
+    width: 52,
+    height: 34,
   },
   statusOverlay: {
     position: "absolute",
