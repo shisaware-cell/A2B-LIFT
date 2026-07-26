@@ -2050,6 +2050,41 @@ function isValidLocationSample(lat, lng) {
 }
 
 // server/multi-stop-routing.ts
+function buildOsrmRouteUrl(origin, destination, stops = [], alternatives = false) {
+  const coordinates = [origin, ...stops, destination].map((point) => `${point.lng},${point.lat}`).join(";");
+  return `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=polyline&steps=true&alternatives=${alternatives ? "true" : "false"}`;
+}
+function parseOsrmRoutes(data) {
+  if (data?.code !== "Ok" || !Array.isArray(data.routes) || data.routes.length === 0) {
+    throw new Error(data?.message || data?.code || "No route found");
+  }
+  return data.routes.map((route, index) => {
+    const legs = Array.isArray(route?.legs) ? route.legs : [];
+    const distanceKm = Number(route?.distance || 0) / 1e3;
+    const durationMin = Math.ceil(Number(route?.duration || 0) / 60);
+    const steps = legs.flatMap((leg) => (leg?.steps || []).map((step) => {
+      const maneuver = step?.maneuver || {};
+      const action = [maneuver.type, maneuver.modifier].filter(Boolean).join(" ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+      return {
+        instruction: [action, step?.name ? `onto ${step.name}` : ""].filter(Boolean).join(" "),
+        distance: `${(Number(step?.distance || 0) / 1e3).toFixed(1)} km`,
+        duration: `${Math.ceil(Number(step?.duration || 0) / 60)} min`,
+        endLat: maneuver?.location?.[1],
+        endLng: maneuver?.location?.[0],
+        maneuver: maneuver?.type || "straight"
+      };
+    }));
+    return {
+      polyline: String(route?.geometry || ""),
+      distanceKm,
+      distanceText: `${distanceKm.toFixed(distanceKm >= 10 ? 0 : 1)} km`,
+      durationMin,
+      durationText: `${durationMin} min`,
+      summary: legs.map((leg) => leg?.summary).filter(Boolean).join(", ") || `Route ${index + 1}`,
+      steps
+    };
+  });
+}
 function decodePolyline(encoded) {
   const points = [];
   let index = 0;
@@ -3640,15 +3675,25 @@ async function registerRoutes(app2) {
       return [combineDirectionSegments(segments)];
     }
     const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY || process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_API_KEY;
-    if (!apiKey) throw new Error("Google Maps API key not configured");
-    const waypointParam = stops.length ? `&waypoints=${encodeURIComponent(stops.map((stop) => `${stop.lat},${stop.lng}`).join("|"))}` : "";
-    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.lat},${origin.lng}&destination=${destination.lat},${destination.lng}${waypointParam}&alternatives=${alternatives ? "true" : "false"}&key=${apiKey}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    if (data.status !== "OK" || !data.routes?.length) {
-      throw new Error(data.error_message || data.status || "No route found");
+    if (apiKey) {
+      try {
+        const waypointParam = stops.length ? `&waypoints=${encodeURIComponent(stops.map((stop) => `${stop.lat},${stop.lng}`).join("|"))}` : "";
+        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.lat},${origin.lng}&destination=${destination.lat},${destination.lng}${waypointParam}&alternatives=${alternatives ? "true" : "false"}&key=${apiKey}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.status === "OK" && data.routes?.length) {
+          return data.routes.map((route, index) => parseGoogleDirectionsRoute(route, index));
+        }
+        console.warn("[maps] Google Directions fallback engaged:", data.error_message || data.status || response.status);
+      } catch (googleError) {
+        console.warn("[maps] Google Directions request failed; using OSRM:", googleError?.message || googleError);
+      }
     }
-    return data.routes.map((route, index) => parseGoogleDirectionsRoute(route, index));
+    const osrmResponse = await fetch(buildOsrmRouteUrl(origin, destination, stops, alternatives));
+    if (!osrmResponse.ok) {
+      throw new Error(`Route service unavailable (${osrmResponse.status})`);
+    }
+    return parseOsrmRoutes(await osrmResponse.json());
   }
   function getDirectionsCacheEntry(cacheKey) {
     const cached = directionsCache.get(cacheKey);

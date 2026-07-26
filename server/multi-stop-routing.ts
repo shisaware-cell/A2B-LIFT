@@ -1,5 +1,55 @@
 type Coordinate = { lat: number; lng: number };
 
+export function buildOsrmRouteUrl(
+  origin: Coordinate,
+  destination: Coordinate,
+  stops: Coordinate[] = [],
+  alternatives = false,
+) {
+  const coordinates = [origin, ...stops, destination]
+    .map((point) => `${point.lng},${point.lat}`)
+    .join(";");
+  return `https://router.project-osrm.org/route/v1/driving/${coordinates}` +
+    `?overview=full&geometries=polyline&steps=true&alternatives=${alternatives ? "true" : "false"}`;
+}
+
+export function parseOsrmRoutes(data: any) {
+  if (data?.code !== "Ok" || !Array.isArray(data.routes) || data.routes.length === 0) {
+    throw new Error(data?.message || data?.code || "No route found");
+  }
+
+  return data.routes.map((route: any, index: number) => {
+    const legs = Array.isArray(route?.legs) ? route.legs : [];
+    const distanceKm = Number(route?.distance || 0) / 1000;
+    const durationMin = Math.ceil(Number(route?.duration || 0) / 60);
+    const steps = legs.flatMap((leg: any) => (leg?.steps || []).map((step: any) => {
+      const maneuver = step?.maneuver || {};
+      const action = [maneuver.type, maneuver.modifier]
+        .filter(Boolean)
+        .join(" ")
+        .replace(/\b\w/g, (letter: string) => letter.toUpperCase());
+      return {
+        instruction: [action, step?.name ? `onto ${step.name}` : ""].filter(Boolean).join(" "),
+        distance: `${(Number(step?.distance || 0) / 1000).toFixed(1)} km`,
+        duration: `${Math.ceil(Number(step?.duration || 0) / 60)} min`,
+        endLat: maneuver?.location?.[1],
+        endLng: maneuver?.location?.[0],
+        maneuver: maneuver?.type || "straight",
+      };
+    }));
+
+    return {
+      polyline: String(route?.geometry || ""),
+      distanceKm,
+      distanceText: `${distanceKm.toFixed(distanceKm >= 10 ? 0 : 1)} km`,
+      durationMin,
+      durationText: `${durationMin} min`,
+      summary: legs.map((leg: any) => leg?.summary).filter(Boolean).join(", ") || `Route ${index + 1}`,
+      steps,
+    };
+  });
+}
+
 function decodePolyline(encoded: string): Coordinate[] {
   const points: Coordinate[] = [];
   let index = 0;

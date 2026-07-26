@@ -34,7 +34,11 @@ import {
   isValidLocationSample,
   resolveCancellation,
 } from "./ride-operations-policy";
-import { combineDirectionSegments } from "./multi-stop-routing";
+import {
+  buildOsrmRouteUrl,
+  combineDirectionSegments,
+  parseOsrmRoutes,
+} from "./multi-stop-routing";
 
 const RIDE_MATCH_RADIUS_KM = 25;
 const CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
@@ -1931,20 +1935,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       process.env.GOOGLE_MAPS_SERVER_API_KEY ||
       process.env.GOOGLE_MAPS_API_KEY ||
       process.env.GOOGLE_API_KEY;
-    if (!apiKey) throw new Error("Google Maps API key not configured");
-    const waypointParam = stops.length
-      ? `&waypoints=${encodeURIComponent(stops.map((stop) => `${stop.lat},${stop.lng}`).join("|"))}`
-      : "";
-    const url =
-      `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.lat},${origin.lng}` +
-      `&destination=${destination.lat},${destination.lng}${waypointParam}` +
-      `&alternatives=${alternatives ? "true" : "false"}&key=${apiKey}`;
-    const response = await fetch(url);
-    const data = (await response.json()) as any;
-    if (data.status !== "OK" || !data.routes?.length) {
-      throw new Error(data.error_message || data.status || "No route found");
+    if (apiKey) {
+      try {
+        const waypointParam = stops.length
+          ? `&waypoints=${encodeURIComponent(stops.map((stop) => `${stop.lat},${stop.lng}`).join("|"))}`
+          : "";
+        const url =
+          `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.lat},${origin.lng}` +
+          `&destination=${destination.lat},${destination.lng}${waypointParam}` +
+          `&alternatives=${alternatives ? "true" : "false"}&key=${apiKey}`;
+        const response = await fetch(url);
+        const data = (await response.json()) as any;
+        if (data.status === "OK" && data.routes?.length) {
+          return data.routes.map((route: any, index: number) => parseGoogleDirectionsRoute(route, index));
+        }
+        console.warn("[maps] Google Directions fallback engaged:", data.error_message || data.status || response.status);
+      } catch (googleError: any) {
+        console.warn("[maps] Google Directions request failed; using OSRM:", googleError?.message || googleError);
+      }
     }
-    return data.routes.map((route: any, index: number) => parseGoogleDirectionsRoute(route, index));
+
+    const osrmResponse = await fetch(buildOsrmRouteUrl(origin, destination, stops, alternatives));
+    if (!osrmResponse.ok) {
+      throw new Error(`Route service unavailable (${osrmResponse.status})`);
+    }
+    return parseOsrmRoutes(await osrmResponse.json());
   }
 
   function getDirectionsCacheEntry(cacheKey: string) {
