@@ -58,3 +58,13 @@ test("deduplicates concurrent reads and gives slow actions immediate feedback", 
       clientSource.indexOf('apiRequest("GET", "/api/payments/cards")'),
   );
 });
+
+test("keeps both mobile variants awake while the shared app root is mounted", () => {
+  const rootLayoutSource = readProjectFile("app/_layout.tsx");
+
+  assert.match(rootLayoutSource, /import \{ useKeepAwake \} from "expo-keep-awake"/);
+  assert.match(
+    rootLayoutSource,
+    /useKeepAwake\("a2b-active-app", \{ suppressDeactivateWarnings: true \}\)/,
+  );
+});

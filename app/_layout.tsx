@@ -7,6 +7,7 @@ import * as Linking from "expo-linking";
 import Constants from "expo-constants";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { StatusBar } from "expo-status-bar";
+import { useKeepAwake } from "expo-keep-awake";
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from "@expo-google-fonts/inter";
 import { ErrorBoundary } from "@mobile-ui/errors";
 import { getAppVariant, getAuthenticatedHomeRoute, usesRoleSelect } from "@mobile-core/app-variant";
@@ -269,6 +270,8 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  useKeepAwake("a2b-active-app", { suppressDeactivateWarnings: true });
+
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
