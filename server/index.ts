@@ -344,6 +344,12 @@ async function configureExpoAndLanding(app: express.Application) {
   app.get("/admin", serveAdmin);
   app.get("/a2b-admin", serveAdmin);
 
+  // Short link used in driver SMS/emails so the message fits one SMS.
+  // /driver → the driver app store listing.
+  app.get("/driver", (_req: Request, res: Response) => {
+    res.redirect(302, process.env.DRIVER_APP_STORE_URL || "https://play.google.com/store/apps/details?id=com.a2blift");
+  });
+
   const serveReferralLaunch = (req: Request, res: Response) => {
     const referralCode = req.params.code;
     const appTarget = String(req.query.app || req.query.source || req.query.role || "").trim();

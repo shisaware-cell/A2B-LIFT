@@ -5766,13 +5766,14 @@ async function registerRoutes(app2) {
       const driverEmail = driverUser?.username && driverUser.username.includes("@") ? driverUser.username : "";
       const driverPhone = driverUser?.phone || driverChauffeur?.phone || "";
       const driverName = driverUser?.name || "there";
-      const driverAppUrl = process.env.DRIVER_APP_URL || "https://play.google.com/store/apps/details?id=com.a2blift";
+      const driverAppUrl = process.env.DRIVER_APP_URL || "https://a2blift.com/driver";
+      const smsInviter = inviterName.length > 18 ? inviterName.slice(0, 17) + "\u2026" : inviterName;
       const emailBody = `<p>Hi ${driverName},</p>
         <p><strong>${inviterName}</strong> wants you to become one of their drivers on A2B LIFT and drive one of their vehicles.</p>
         ${message ? `<p style="padding:12px 14px;background:#f4f4f6;border-radius:10px;">"${message}"</p>` : ""}
         <p>Open the A2B LIFT driver app and go to <strong>Fleet \u2192 Invitations</strong> to accept or decline.</p>
         <p>Don't have the app yet? Get it here: <a href="${driverAppUrl}">${driverAppUrl}</a></p>`;
-      const smsText = `A2B LIFT: ${inviterName} has invited you to drive for their fleet. Open the A2B driver app > Fleet > Invitations to accept: ${driverAppUrl}`;
+      const smsText = `A2B LIFT: ${smsInviter} invited you to drive for their fleet. Accept in the A2B driver app > Fleet: ${driverAppUrl}`;
       const [emailResult, smsResult] = await Promise.all([
         sendEmail({
           to: driverEmail,
@@ -5843,8 +5844,8 @@ async function registerRoutes(app2) {
     try {
       const to = String(req.body?.to || "").trim();
       if (!to) return res.status(400).json({ message: "A phone number is required." });
-      const driverAppUrl = process.env.DRIVER_APP_URL || "https://play.google.com/store/apps/details?id=com.a2blift";
-      const message = String(req.body?.message || "").trim() || `A2B LIFT: A fleet partner has invited you to drive for their fleet. Open the A2B driver app > Fleet > Invitations to accept: ${driverAppUrl}`;
+      const driverAppUrl = process.env.DRIVER_APP_URL || "https://a2blift.com/driver";
+      const message = String(req.body?.message || "").trim() || `A2B LIFT: A fleet partner invited you to drive for their fleet. Accept in the A2B driver app > Fleet: ${driverAppUrl}`;
       const result = await sendSms({ to, message });
       return res.json({ result, smsConfigured: smsEnabled() });
     } catch (error) {
@@ -10492,6 +10493,9 @@ async function configureExpoAndLanding(app2) {
   };
   app2.get("/admin", serveAdmin);
   app2.get("/a2b-admin", serveAdmin);
+  app2.get("/driver", (_req, res) => {
+    res.redirect(302, process.env.DRIVER_APP_STORE_URL || "https://play.google.com/store/apps/details?id=com.a2blift");
+  });
   const serveReferralLaunch = (req, res) => {
     const referralCode = req.params.code;
     const appTarget = String(req.query.app || req.query.source || req.query.role || "").trim();
