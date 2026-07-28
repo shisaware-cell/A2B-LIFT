@@ -335,6 +335,15 @@ tbody tr:hover { background:#fafaf8; }
       <div class="stats-row" id="stats-row">
         <div class="stat-card"><div class="loading">Loading…</div></div>
       </div>
+      <div class="sec-head"><div class="sec-title">Test SMS (BulkSMS)</div></div>
+      <div class="table-card" style="padding:16px;">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+          <input class="f-input" id="test-sms-to" placeholder="Phone e.g. 0714120915" style="max-width:220px;" />
+          <input class="f-input" id="test-sms-msg" placeholder="Message (optional — default includes app link)" style="flex:1;min-width:220px;" />
+          <button class="btn-sm btn-approve" onclick="sendTestSms()">Send test SMS</button>
+        </div>
+        <div id="test-sms-result" style="font-size:13px;color:var(--muted);margin-top:10px;"></div>
+      </div>
       <div class="sec-head"><div class="sec-title">Pending Chauffeur Approvals</div></div>
       <div class="table-card" id="pending-table"><div class="loading">Loading…</div></div>
     </div>
@@ -2650,6 +2659,29 @@ async function doSearch(q) {
     // Cleared search — restore the current filter tab.
     renderFilteredChauf();
   }
+}
+
+// ── TEST SMS ──
+async function sendTestSms() {
+  const to = document.getElementById('test-sms-to').value.trim();
+  const msg = document.getElementById('test-sms-msg').value.trim();
+  const out = document.getElementById('test-sms-result');
+  if (!to) { out.textContent = 'Enter a phone number.'; return; }
+  out.textContent = 'Sending…';
+  try {
+    const res = await apiFetch('/api/admin/test-sms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, message: msg || undefined }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || res.status);
+    const r = data.result || {};
+    if (r.status === 'sent') out.textContent = '✅ Sent to ' + to + ' (id: ' + (r.id || 'n/a') + ')';
+    else if (r.status === 'pending_configuration') out.textContent = '⚠️ BulkSMS not configured — check Railway env vars.';
+    else if (r.status === 'skipped') out.textContent = '⚠️ ' + (r.error || 'Skipped — invalid number.');
+    else out.textContent = '❌ ' + (r.status || 'failed') + ': ' + (r.error || 'unknown error');
+  } catch(e) { out.textContent = '❌ ' + (e.message || 'Failed to send'); }
 }
 
 // ── UTILS ──

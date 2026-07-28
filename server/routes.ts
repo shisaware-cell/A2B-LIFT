@@ -4454,11 +4454,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const driverPhone = driverUser?.phone || (driverChauffeur as any)?.phone || "";
       const driverName = driverUser?.name || "there";
 
+      const driverAppUrl = process.env.DRIVER_APP_URL || "https://play.google.com/store/apps/details?id=com.a2blift";
       const emailBody = `<p>Hi ${driverName},</p>
         <p><strong>${inviterName}</strong> wants you to become one of their drivers on A2B LIFT and drive one of their vehicles.</p>
         ${message ? `<p style="padding:12px 14px;background:#f4f4f6;border-radius:10px;">"${message}"</p>` : ""}
-        <p>Open the A2B LIFT driver app and go to <strong>Fleet → Invitations</strong> to accept or decline.</p>`;
-      const smsText = `A2B LIFT: ${inviterName} wants you to drive their vehicle. Open the A2B LIFT app → Fleet → Invitations to accept.`;
+        <p>Open the A2B LIFT driver app and go to <strong>Fleet → Invitations</strong> to accept or decline.</p>
+        <p>Don't have the app yet? Get it here: <a href="${driverAppUrl}">${driverAppUrl}</a></p>`;
+      const smsText = `A2B LIFT: ${inviterName} wants you to drive their vehicle. Open the driver app > Fleet > Invitations to accept: ${driverAppUrl}`;
 
       // Fire email + SMS (both no-op gracefully until providers are configured).
       const [emailResult, smsResult] = await Promise.all([
@@ -4540,6 +4542,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({ invite: await serializeFleetInvite(updated) });
     } catch (error: any) {
       return res.status(400).json({ message: error.message });
+    }
+  });
+
+  // Admin-only: send a test SMS (and check provider status) to verify BulkSMS setup.
+  app.get("/api/admin/sms-status", requireAuth, requireRole(["admin"]), async (_req: Request, res: Response) => {
+    return res.json({ email: emailEnabled(), sms: smsEnabled() });
+  });
+
+  app.post("/api/admin/test-sms", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
+    try {
+      const to = String(req.body?.to || "").trim();
+      if (!to) return res.status(400).json({ message: "A phone number is required." });
+      const driverAppUrl = process.env.DRIVER_APP_URL || "https://play.google.com/store/apps/details?id=com.a2blift";
+      const message = String(req.body?.message || "").trim()
+        || `A2B LIFT test message. Get the driver app: ${driverAppUrl}`;
+      const result = await sendSms({ to, message });
+      return res.json({ result, smsConfigured: smsEnabled() });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || "Failed to send test SMS" });
     }
   });
 
