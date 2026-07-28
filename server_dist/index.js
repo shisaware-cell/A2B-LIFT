@@ -5772,7 +5772,7 @@ async function registerRoutes(app2) {
         ${message ? `<p style="padding:12px 14px;background:#f4f4f6;border-radius:10px;">"${message}"</p>` : ""}
         <p>Open the A2B LIFT driver app and go to <strong>Fleet \u2192 Invitations</strong> to accept or decline.</p>
         <p>Don't have the app yet? Get it here: <a href="${driverAppUrl}">${driverAppUrl}</a></p>`;
-      const smsText = `A2B LIFT: ${inviterName} wants you to drive their vehicle. Open the driver app > Fleet > Invitations to accept: ${driverAppUrl}`;
+      const smsText = `A2B LIFT: ${inviterName} has invited you to drive for their fleet. Open the A2B driver app > Fleet > Invitations to accept: ${driverAppUrl}`;
       const [emailResult, smsResult] = await Promise.all([
         sendEmail({
           to: driverEmail,
@@ -5844,7 +5844,7 @@ async function registerRoutes(app2) {
       const to = String(req.body?.to || "").trim();
       if (!to) return res.status(400).json({ message: "A phone number is required." });
       const driverAppUrl = process.env.DRIVER_APP_URL || "https://play.google.com/store/apps/details?id=com.a2blift";
-      const message = String(req.body?.message || "").trim() || `A2B LIFT test message. Get the driver app: ${driverAppUrl}`;
+      const message = String(req.body?.message || "").trim() || `A2B LIFT: A fleet partner has invited you to drive for their fleet. Open the A2B driver app > Fleet > Invitations to accept: ${driverAppUrl}`;
       const result = await sendSms({ to, message });
       return res.json({ result, smsConfigured: smsEnabled() });
     } catch (error) {
