@@ -23,12 +23,31 @@ export interface DeliveryResult {
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "A2B LIFT <no-reply@a2blift.com>";
 
-const SMS_API_URL = process.env.SMS_API_URL || "";
-const SMS_API_KEY = process.env.SMS_API_KEY || "";
-const SMS_SENDER_ID = process.env.SMS_SENDER_ID || "A2BLIFT";
+// BulkSMS JSON API v1 (https://www.bulksms.com/developer/json/v1/).
+// Preferred: an API token (Settings → Advanced → API Tokens) via
+// BULKSMS_TOKEN_ID + BULKSMS_TOKEN_SECRET. Falls back to account
+// username/password if a token isn't set.
+const BULKSMS_TOKEN_ID = process.env.BULKSMS_TOKEN_ID || "";
+const BULKSMS_TOKEN_SECRET = process.env.BULKSMS_TOKEN_SECRET || "";
+const BULKSMS_USERNAME = process.env.BULKSMS_USERNAME || "";
+const BULKSMS_PASSWORD = process.env.BULKSMS_PASSWORD || "";
+// Optional sender ID. In South Africa an alphanumeric sender (e.g. "A2BLIFT")
+// must be pre-registered with BulkSMS; leave unset to use the account default.
+const SMS_SENDER_ID = process.env.SMS_SENDER_ID || "";
+const SMS_DEFAULT_COUNTRY_CODE = process.env.SMS_DEFAULT_COUNTRY_CODE || "27"; // South Africa
+
+function bulkSmsAuthHeader(): string | null {
+  if (BULKSMS_TOKEN_ID && BULKSMS_TOKEN_SECRET) {
+    return "Basic " + Buffer.from(`${BULKSMS_TOKEN_ID}:${BULKSMS_TOKEN_SECRET}`).toString("base64");
+  }
+  if (BULKSMS_USERNAME && BULKSMS_PASSWORD) {
+    return "Basic " + Buffer.from(`${BULKSMS_USERNAME}:${BULKSMS_PASSWORD}`).toString("base64");
+  }
+  return null;
+}
 
 export const emailEnabled = (): boolean => Boolean(RESEND_API_KEY);
-export const smsEnabled = (): boolean => Boolean(SMS_API_URL && SMS_API_KEY);
+export const smsEnabled = (): boolean => Boolean(bulkSmsAuthHeader());
 
 export interface SendEmailOptions {
   to: string;
@@ -81,49 +100,62 @@ export interface SendSmsOptions {
 }
 
 /**
- * Send an SMS via a generic HTTP provider. No-op ("pending_configuration") until
- * SMS_API_URL + SMS_API_KEY are set. The payload shape below is a common
- * bulk-SMS format; adjust the body mapping when the final provider is chosen.
+ * Send an SMS via the BulkSMS JSON API v1. No-op ("pending_configuration")
+ * until BulkSMS credentials are set (token pair or username/password).
  */
 export async function sendSms(options: SendSmsOptions): Promise<DeliveryResult> {
   const to = normalisePhone(options.to);
   if (!to) {
     return { status: "skipped", error: "No valid phone number on file." };
   }
-  if (!smsEnabled()) {
-    return { status: "pending_configuration", error: "SMS provider is not configured yet." };
+  const auth = bulkSmsAuthHeader();
+  if (!auth) {
+    return { status: "pending_configuration", error: "BulkSMS is not configured yet." };
   }
   try {
     const res = await axios.post(
-      SMS_API_URL,
+      "https://api.bulksms.com/v1/messages",
       {
         to,
-        from: SMS_SENDER_ID,
         body: options.message,
-        text: options.message,
+        ...(SMS_SENDER_ID ? { from: SMS_SENDER_ID } : {}),
       },
       {
         headers: {
-          Authorization: `Bearer ${SMS_API_KEY}`,
+          Authorization: auth,
           "Content-Type": "application/json",
         },
         timeout: 15000,
       },
     );
-    return { status: "sent", id: res.data?.id || res.data?.messageId || null };
+    // BulkSMS returns an array of submitted messages.
+    const first = Array.isArray(res.data) ? res.data[0] : res.data;
+    return { status: "sent", id: first?.id || null };
   } catch (error: any) {
-    const message = error?.response?.data?.message || error?.message || "SMS send failed.";
+    const detail = error?.response?.data;
+    const message =
+      (Array.isArray(detail) ? detail[0]?.detail : detail?.detail) ||
+      detail?.title ||
+      error?.message ||
+      "SMS send failed.";
     return { status: "failed", error: String(message) };
   }
 }
 
+/** Normalise a phone number to E.164 (+27…) for BulkSMS. Converts SA local 0… numbers. */
 function normalisePhone(raw?: string | null): string {
   if (!raw) return "";
-  const trimmed = String(raw).trim();
-  if (!trimmed) return "";
-  // Keep leading + then digits only.
-  const cleaned = trimmed.replace(/(?!^\+)[^\d]/g, "");
-  return cleaned.length >= 9 ? cleaned : "";
+  let s = String(raw).trim();
+  if (!s) return "";
+  const hasPlus = s.startsWith("+");
+  let digits = s.replace(/\D/g, "");
+  if (!digits) return "";
+  if (hasPlus) return "+" + digits;
+  // Local South African number starting with 0 → +27…
+  if (digits.startsWith("0")) return "+" + SMS_DEFAULT_COUNTRY_CODE + digits.slice(1);
+  // Already has a country code but no + (e.g. 2782…)
+  if (digits.startsWith(SMS_DEFAULT_COUNTRY_CODE)) return "+" + digits;
+  return digits.length >= 9 ? "+" + digits : "";
 }
 
 /** Shared branded wrapper so all A2B emails look consistent. */

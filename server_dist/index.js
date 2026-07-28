@@ -1940,11 +1940,23 @@ var externalApiService = new ExternalApiService();
 var import_axios = __toESM(require("axios"));
 var RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 var RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "A2B LIFT <no-reply@a2blift.com>";
-var SMS_API_URL = process.env.SMS_API_URL || "";
-var SMS_API_KEY = process.env.SMS_API_KEY || "";
-var SMS_SENDER_ID = process.env.SMS_SENDER_ID || "A2BLIFT";
+var BULKSMS_TOKEN_ID = process.env.BULKSMS_TOKEN_ID || "";
+var BULKSMS_TOKEN_SECRET = process.env.BULKSMS_TOKEN_SECRET || "";
+var BULKSMS_USERNAME = process.env.BULKSMS_USERNAME || "";
+var BULKSMS_PASSWORD = process.env.BULKSMS_PASSWORD || "";
+var SMS_SENDER_ID = process.env.SMS_SENDER_ID || "";
+var SMS_DEFAULT_COUNTRY_CODE = process.env.SMS_DEFAULT_COUNTRY_CODE || "27";
+function bulkSmsAuthHeader() {
+  if (BULKSMS_TOKEN_ID && BULKSMS_TOKEN_SECRET) {
+    return "Basic " + Buffer.from(`${BULKSMS_TOKEN_ID}:${BULKSMS_TOKEN_SECRET}`).toString("base64");
+  }
+  if (BULKSMS_USERNAME && BULKSMS_PASSWORD) {
+    return "Basic " + Buffer.from(`${BULKSMS_USERNAME}:${BULKSMS_PASSWORD}`).toString("base64");
+  }
+  return null;
+}
 var emailEnabled = () => Boolean(RESEND_API_KEY);
-var smsEnabled = () => Boolean(SMS_API_URL && SMS_API_KEY);
+var smsEnabled = () => Boolean(bulkSmsAuthHeader());
 async function sendEmail(options) {
   if (!options.to || !options.to.includes("@")) {
     return { status: "skipped", error: "No valid email address on file." };
@@ -1982,38 +1994,45 @@ async function sendSms(options) {
   if (!to) {
     return { status: "skipped", error: "No valid phone number on file." };
   }
-  if (!smsEnabled()) {
-    return { status: "pending_configuration", error: "SMS provider is not configured yet." };
+  const auth = bulkSmsAuthHeader();
+  if (!auth) {
+    return { status: "pending_configuration", error: "BulkSMS is not configured yet." };
   }
   try {
     const res = await import_axios.default.post(
-      SMS_API_URL,
+      "https://api.bulksms.com/v1/messages",
       {
         to,
-        from: SMS_SENDER_ID,
         body: options.message,
-        text: options.message
+        ...SMS_SENDER_ID ? { from: SMS_SENDER_ID } : {}
       },
       {
         headers: {
-          Authorization: `Bearer ${SMS_API_KEY}`,
+          Authorization: auth,
           "Content-Type": "application/json"
         },
         timeout: 15e3
       }
     );
-    return { status: "sent", id: res.data?.id || res.data?.messageId || null };
+    const first = Array.isArray(res.data) ? res.data[0] : res.data;
+    return { status: "sent", id: first?.id || null };
   } catch (error) {
-    const message = error?.response?.data?.message || error?.message || "SMS send failed.";
+    const detail = error?.response?.data;
+    const message = (Array.isArray(detail) ? detail[0]?.detail : detail?.detail) || detail?.title || error?.message || "SMS send failed.";
     return { status: "failed", error: String(message) };
   }
 }
 function normalisePhone(raw) {
   if (!raw) return "";
-  const trimmed = String(raw).trim();
-  if (!trimmed) return "";
-  const cleaned = trimmed.replace(/(?!^\+)[^\d]/g, "");
-  return cleaned.length >= 9 ? cleaned : "";
+  let s = String(raw).trim();
+  if (!s) return "";
+  const hasPlus = s.startsWith("+");
+  let digits = s.replace(/\D/g, "");
+  if (!digits) return "";
+  if (hasPlus) return "+" + digits;
+  if (digits.startsWith("0")) return "+" + SMS_DEFAULT_COUNTRY_CODE + digits.slice(1);
+  if (digits.startsWith(SMS_DEFAULT_COUNTRY_CODE)) return "+" + digits;
+  return digits.length >= 9 ? "+" + digits : "";
 }
 function renderBrandedEmail(opts) {
   const cta = opts.ctaLabel && opts.ctaUrl ? `<a href="${opts.ctaUrl}" style="display:inline-block;margin-top:20px;padding:12px 22px;background:#0b0b0f;color:#ffffff;border-radius:10px;text-decoration:none;font-weight:600;font-family:Arial,sans-serif;">${opts.ctaLabel}</a>` : "";
