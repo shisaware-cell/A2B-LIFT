@@ -1946,6 +1946,7 @@ var BULKSMS_USERNAME = process.env.BULKSMS_USERNAME || "";
 var BULKSMS_PASSWORD = process.env.BULKSMS_PASSWORD || "";
 var SMS_SENDER_ID = process.env.SMS_SENDER_ID || "";
 var SMS_DEFAULT_COUNTRY_CODE = process.env.SMS_DEFAULT_COUNTRY_CODE || "27";
+var SMS_ROUTING_GROUP = (process.env.SMS_ROUTING_GROUP || "STANDARD").toUpperCase();
 function bulkSmsAuthHeader() {
   if (BULKSMS_TOKEN_ID && BULKSMS_TOKEN_SECRET) {
     return "Basic " + Buffer.from(`${BULKSMS_TOKEN_ID}:${BULKSMS_TOKEN_SECRET}`).toString("base64");
@@ -2004,6 +2005,7 @@ async function sendSms(options) {
       {
         to,
         body: options.message,
+        routingGroup: SMS_ROUTING_GROUP,
         ...SMS_SENDER_ID ? { from: SMS_SENDER_ID } : {}
       },
       {
@@ -2015,7 +2017,12 @@ async function sendSms(options) {
       }
     );
     const first = Array.isArray(res.data) ? res.data[0] : res.data;
-    return { status: "sent", id: first?.id || null };
+    return {
+      status: "sent",
+      id: first?.id || null,
+      // Surface what BulkSMS actually accepted (route, status, credits) for diagnostics.
+      error: first ? `route=${first.type || SMS_ROUTING_GROUP} status=${first.status?.type || first.status || "?"} credits=${first.creditCost ?? "?"}` : null
+    };
   } catch (error) {
     const detail = error?.response?.data;
     const message = (Array.isArray(detail) ? detail[0]?.detail : detail?.detail) || detail?.title || error?.message || "SMS send failed.";

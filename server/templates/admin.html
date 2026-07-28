@@ -2677,7 +2677,7 @@ async function sendTestSms() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.message || res.status);
     const r = data.result || {};
-    if (r.status === 'sent') out.textContent = '✅ Sent to ' + to + ' (id: ' + (r.id || 'n/a') + ')';
+    if (r.status === 'sent') out.textContent = '✅ Accepted for ' + to + ' (id: ' + (r.id || 'n/a') + ')' + (r.error ? ' · ' + r.error : '');
     else if (r.status === 'pending_configuration') out.textContent = '⚠️ BulkSMS not configured — check Railway env vars.';
     else if (r.status === 'skipped') out.textContent = '⚠️ ' + (r.error || 'Skipped — invalid number.');
     else out.textContent = '❌ ' + (r.status || 'failed') + ': ' + (r.error || 'unknown error');

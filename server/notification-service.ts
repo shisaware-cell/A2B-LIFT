@@ -35,6 +35,9 @@ const BULKSMS_PASSWORD = process.env.BULKSMS_PASSWORD || "";
 // must be pre-registered with BulkSMS; leave unset to use the account default.
 const SMS_SENDER_ID = process.env.SMS_SENDER_ID || "";
 const SMS_DEFAULT_COUNTRY_CODE = process.env.SMS_DEFAULT_COUNTRY_CODE || "27"; // South Africa
+// BulkSMS routing: ECONOMY routes via SIM farms and often drops Sender ID and
+// delivery entirely. Transactional invites must use STANDARD (default) or PREMIUM.
+const SMS_ROUTING_GROUP = (process.env.SMS_ROUTING_GROUP || "STANDARD").toUpperCase();
 
 function bulkSmsAuthHeader(): string | null {
   if (BULKSMS_TOKEN_ID && BULKSMS_TOKEN_SECRET) {
@@ -118,6 +121,7 @@ export async function sendSms(options: SendSmsOptions): Promise<DeliveryResult> 
       {
         to,
         body: options.message,
+        routingGroup: SMS_ROUTING_GROUP,
         ...(SMS_SENDER_ID ? { from: SMS_SENDER_ID } : {}),
       },
       {
@@ -130,7 +134,14 @@ export async function sendSms(options: SendSmsOptions): Promise<DeliveryResult> 
     );
     // BulkSMS returns an array of submitted messages.
     const first = Array.isArray(res.data) ? res.data[0] : res.data;
-    return { status: "sent", id: first?.id || null };
+    return {
+      status: "sent",
+      id: first?.id || null,
+      // Surface what BulkSMS actually accepted (route, status, credits) for diagnostics.
+      error: first
+        ? `route=${first.type || SMS_ROUTING_GROUP} status=${first.status?.type || first.status || "?"} credits=${first.creditCost ?? "?"}`
+        : null,
+    };
   } catch (error: any) {
     const detail = error?.response?.data;
     const message =
