@@ -40,6 +40,12 @@ import {
   parseOsrmRoutes,
 } from "./multi-stop-routing";
 import { PLATFORM_COMMISSION_RATE, REFERRAL_REWARD_RATE } from "../shared/fare-policy";
+import {
+  buildPasswordResetUrl,
+  createPasswordResetToken,
+  hashPasswordResetToken,
+  validateResetPassword,
+} from "./password-reset";
 
 const RIDE_MATCH_RADIUS_KM = 25;
 const CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
@@ -1321,6 +1327,127 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("[auth/login] error:", error?.message || error);
       return res.status(500).json({ message: error.message || "Login failed" });
+    }
+  });
+
+  app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
+    const responseMessage =
+      "If an A2B LIFT account exists for that email, a password reset link has been sent.";
+    try {
+      const email = String(req.body?.email || req.body?.username || "").trim().toLowerCase();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(202).json({ message: responseMessage });
+      }
+
+      const user = await storage.getUserByUsername(email);
+      if (!user) {
+        return res.status(202).json({ message: responseMessage });
+      }
+
+      const recentRequest = await pool.query(
+        `SELECT 1
+           FROM password_reset_tokens
+          WHERE user_id = $1
+            AND requested_at > now() - interval '60 seconds'
+          LIMIT 1`,
+        [user.id],
+      );
+      if (recentRequest.rowCount) {
+        return res.status(202).json({ message: responseMessage });
+      }
+
+      const reset = createPasswordResetToken();
+      await pool.query(
+        `UPDATE password_reset_tokens
+            SET used_at = now()
+          WHERE user_id = $1 AND used_at IS NULL`,
+        [user.id],
+      );
+      const inserted = await pool.query(
+        `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+         VALUES ($1, $2, $3)
+         RETURNING id`,
+        [user.id, reset.tokenHash, reset.expiresAt],
+      );
+
+      const resetUrl = buildPasswordResetUrl(reset.token);
+      const emailResult = await sendEmail({
+        to: user.username,
+        subject: "Reset your A2B LIFT password",
+        html: renderBrandedEmail({
+          heading: "Reset your password",
+          bodyHtml:
+            `<p>We received a request to reset the password for your A2B LIFT account.</p>` +
+            `<p>This secure link expires in 30 minutes and can only be used once. If you did not request this, you can safely ignore this email.</p>`,
+          ctaLabel: "Reset password",
+          ctaUrl: resetUrl,
+        }),
+        text:
+          `Reset your A2B LIFT password using this link (valid for 30 minutes): ${resetUrl}\n\n` +
+          "If you did not request this, you can ignore this email.",
+        replyTo: "support@a2blift.com",
+      });
+
+      if (emailResult.status !== "sent") {
+        await pool.query(
+          "UPDATE password_reset_tokens SET used_at = now() WHERE id = $1",
+          [inserted.rows[0]?.id],
+        );
+        console.error("[auth/forgot-password] email delivery failed:", emailResult.error || emailResult.status);
+      }
+
+      return res.status(202).json({ message: responseMessage });
+    } catch (error: any) {
+      console.error("[auth/forgot-password] error:", error?.message || error);
+      return res.status(202).json({ message: responseMessage });
+    }
+  });
+
+  app.post("/api/auth/reset-password", async (req: Request, res: Response) => {
+    const token = String(req.body?.token || "");
+    const password = req.body?.password;
+    const passwordError = validateResetPassword(password);
+    if (!token || passwordError) {
+      return res.status(400).json({ message: passwordError || "This reset link is invalid." });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const tokenResult = await client.query(
+        `SELECT id, user_id
+           FROM password_reset_tokens
+          WHERE token_hash = $1
+            AND used_at IS NULL
+            AND expires_at > now()
+          FOR UPDATE`,
+        [hashPasswordResetToken(token)],
+      );
+      const resetToken = tokenResult.rows[0];
+      if (!resetToken) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          message: "This reset link is invalid or has expired. Request a new link from the app.",
+        });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      await client.query("UPDATE users SET password = $1 WHERE id = $2", [
+        hashedPassword,
+        resetToken.user_id,
+      ]);
+      await client.query(
+        "UPDATE password_reset_tokens SET used_at = now() WHERE user_id = $1 AND used_at IS NULL",
+        [resetToken.user_id],
+      );
+      await client.query("COMMIT");
+      return res.json({ message: "Your password has been updated." });
+    } catch (error: any) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      console.error("[auth/reset-password] error:", error?.message || error);
+      return res.status(500).json({ message: "Unable to reset password. Please try again." });
+    } finally {
+      client.release();
     }
   });
 

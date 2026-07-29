@@ -297,6 +297,9 @@ async function configureExpoAndLanding(app: express.Application) {
   const adminTemplatePath =
     resolveExistingFile("server", "templates", "admin.html") ||
     resolveProjectPath("server", "templates", "admin.html");
+  const passwordResetTemplatePath =
+    resolveExistingFile("server", "templates", "password-reset.html") ||
+    resolveProjectPath("server", "templates", "password-reset.html");
   const adminTemplate = fs.readFileSync(adminTemplatePath, "utf-8");
   const assetsRoot =
     resolveExistingDirectory("assets") || resolveProjectPath("assets");
@@ -343,6 +346,11 @@ async function configureExpoAndLanding(app: express.Application) {
   };
   app.get("/admin", serveAdmin);
   app.get("/a2b-admin", serveAdmin);
+  app.get("/reset-password", (_req: Request, res: Response) => {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.status(200).send(fs.readFileSync(passwordResetTemplatePath, "utf-8"));
+  });
 
   // Short link used in driver SMS/emails so the message fits one SMS.
   // /driver → the driver app store listing.

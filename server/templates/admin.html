@@ -627,7 +627,20 @@ async function requestAdminPasswordReset() {
   errEl.textContent = '';
   if (!u) { errEl.textContent = 'Enter your email first, then click Forgot password.'; return; }
   errEl.style.color = '#b7791f';
-  errEl.textContent = 'Ask another A2B administrator to set your password from the All Users screen.';
+  errEl.textContent = 'Sending reset link...';
+  try {
+    const response = await fetch(API + '/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: u }),
+    });
+    const data = await response.json();
+    errEl.style.color = '#2f855a';
+    errEl.textContent = data.message || 'Check your email for a password reset link.';
+  } catch(e) {
+    errEl.style.color = '#c53030';
+    errEl.textContent = 'Unable to request a reset link. Please try again.';
+  }
 }
 
 async function doLogout() {

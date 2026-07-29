@@ -31,6 +31,7 @@ export default function LoginScreen() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
   const [resetMessage, setResetMessage] = useState("");
@@ -110,7 +111,17 @@ export default function LoginScreen() {
       return;
     }
     setError("");
-    setResetMessage("Password resets are handled by A2B support while email delivery is being set up.");
+    setResetMessage("");
+    setResetLoading(true);
+    try {
+      const response = await apiRequest("POST", "/api/auth/forgot-password", { email });
+      const result = await response.json();
+      setResetMessage(result.message || "Check your email for a password reset link.");
+    } catch {
+      setError("Unable to request a password reset. Please try again.");
+    } finally {
+      setResetLoading(false);
+    }
   }
 
   async function handleGoogleSignIn() {
@@ -219,8 +230,10 @@ export default function LoginScreen() {
           <View style={styles.inputGroup}>
             <View style={styles.passwordLabelRow}>
               <Text style={styles.label}>Password</Text>
-              <Pressable onPress={handlePasswordResetRequest} hitSlop={8}>
-                <Text style={styles.forgotLink}>Forgot password?</Text>
+              <Pressable onPress={handlePasswordResetRequest} disabled={resetLoading} hitSlop={8}>
+                <Text style={[styles.forgotLink, resetLoading && styles.forgotLinkDisabled]}>
+                  {resetLoading ? "Sending..." : "Forgot password?"}
+                </Text>
               </Pressable>
             </View>
             <View style={styles.inputWrapper}>
@@ -304,6 +317,7 @@ const styles = StyleSheet.create({
   passwordLabelRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   label: { fontSize: 12, fontFamily: "Inter_500Medium", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 1 },
   forgotLink: { fontSize: 12, fontFamily: "Inter_600SemiBold", color: Colors.white },
+  forgotLinkDisabled: { opacity: 0.6 },
   inputWrapper: { flexDirection: "row", alignItems: "center", backgroundColor: Colors.card, borderRadius: 12, paddingHorizontal: 16, gap: 12, borderWidth: 1, borderColor: Colors.border },
   input: { flex: 1, paddingVertical: 15, fontSize: 15, fontFamily: "Inter_400Regular", color: Colors.white },
   loginBtn: { backgroundColor: Colors.white, paddingVertical: 15, borderRadius: 14, alignItems: "center", marginTop: 4 },

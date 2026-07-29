@@ -35,7 +35,7 @@ var import_node_http = require("node:http");
 var import_socket = require("socket.io");
 var import_axios2 = __toESM(require("axios"));
 var import_bcryptjs = __toESM(require("bcryptjs"));
-var import_node_crypto = __toESM(require("node:crypto"));
+var import_node_crypto2 = __toESM(require("node:crypto"));
 
 // server/storage.ts
 var import_node_postgres = require("drizzle-orm/node-postgres");
@@ -2213,6 +2213,38 @@ function combineDirectionSegments(segments) {
   };
 }
 
+// server/password-reset.ts
+var import_node_crypto = __toESM(require("node:crypto"));
+var PASSWORD_RESET_TOKEN_TTL_MS = 30 * 60 * 1e3;
+var PASSWORD_RESET_MIN_LENGTH = 8;
+function createPasswordResetToken() {
+  const token = import_node_crypto.default.randomBytes(32).toString("base64url");
+  return {
+    token,
+    tokenHash: hashPasswordResetToken(token),
+    expiresAt: new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_MS)
+  };
+}
+function hashPasswordResetToken(token) {
+  return import_node_crypto.default.createHash("sha256").update(token).digest("hex");
+}
+function buildPasswordResetUrl(token, baseUrl) {
+  const url = new URL(
+    baseUrl || process.env.PASSWORD_RESET_URL || "https://a2blift.com/reset-password"
+  );
+  url.searchParams.set("token", token);
+  return url.toString();
+}
+function validateResetPassword(password) {
+  if (typeof password !== "string" || password.length < PASSWORD_RESET_MIN_LENGTH) {
+    return `Password must be at least ${PASSWORD_RESET_MIN_LENGTH} characters.`;
+  }
+  if (password.length > 128) {
+    return "Password must be 128 characters or fewer.";
+  }
+  return null;
+}
+
 // server/routes.ts
 var RIDE_MATCH_RADIUS_KM = 25;
 var CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1e3;
@@ -3207,6 +3239,114 @@ async function registerRoutes(app2) {
       return res.status(500).json({ message: error.message || "Login failed" });
     }
   });
+  app2.post("/api/auth/forgot-password", async (req, res) => {
+    const responseMessage = "If an A2B LIFT account exists for that email, a password reset link has been sent.";
+    try {
+      const email = String(req.body?.email || req.body?.username || "").trim().toLowerCase();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(202).json({ message: responseMessage });
+      }
+      const user = await storage.getUserByUsername(email);
+      if (!user) {
+        return res.status(202).json({ message: responseMessage });
+      }
+      const recentRequest = await pool2.query(
+        `SELECT 1
+           FROM password_reset_tokens
+          WHERE user_id = $1
+            AND requested_at > now() - interval '60 seconds'
+          LIMIT 1`,
+        [user.id]
+      );
+      if (recentRequest.rowCount) {
+        return res.status(202).json({ message: responseMessage });
+      }
+      const reset = createPasswordResetToken();
+      await pool2.query(
+        `UPDATE password_reset_tokens
+            SET used_at = now()
+          WHERE user_id = $1 AND used_at IS NULL`,
+        [user.id]
+      );
+      const inserted = await pool2.query(
+        `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+         VALUES ($1, $2, $3)
+         RETURNING id`,
+        [user.id, reset.tokenHash, reset.expiresAt]
+      );
+      const resetUrl = buildPasswordResetUrl(reset.token);
+      const emailResult = await sendEmail({
+        to: user.username,
+        subject: "Reset your A2B LIFT password",
+        html: renderBrandedEmail({
+          heading: "Reset your password",
+          bodyHtml: `<p>We received a request to reset the password for your A2B LIFT account.</p><p>This secure link expires in 30 minutes and can only be used once. If you did not request this, you can safely ignore this email.</p>`,
+          ctaLabel: "Reset password",
+          ctaUrl: resetUrl
+        }),
+        text: `Reset your A2B LIFT password using this link (valid for 30 minutes): ${resetUrl}
+
+If you did not request this, you can ignore this email.`,
+        replyTo: "support@a2blift.com"
+      });
+      if (emailResult.status !== "sent") {
+        await pool2.query(
+          "UPDATE password_reset_tokens SET used_at = now() WHERE id = $1",
+          [inserted.rows[0]?.id]
+        );
+        console.error("[auth/forgot-password] email delivery failed:", emailResult.error || emailResult.status);
+      }
+      return res.status(202).json({ message: responseMessage });
+    } catch (error) {
+      console.error("[auth/forgot-password] error:", error?.message || error);
+      return res.status(202).json({ message: responseMessage });
+    }
+  });
+  app2.post("/api/auth/reset-password", async (req, res) => {
+    const token = String(req.body?.token || "");
+    const password = req.body?.password;
+    const passwordError = validateResetPassword(password);
+    if (!token || passwordError) {
+      return res.status(400).json({ message: passwordError || "This reset link is invalid." });
+    }
+    const client = await pool2.connect();
+    try {
+      await client.query("BEGIN");
+      const tokenResult = await client.query(
+        `SELECT id, user_id
+           FROM password_reset_tokens
+          WHERE token_hash = $1
+            AND used_at IS NULL
+            AND expires_at > now()
+          FOR UPDATE`,
+        [hashPasswordResetToken(token)]
+      );
+      const resetToken = tokenResult.rows[0];
+      if (!resetToken) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          message: "This reset link is invalid or has expired. Request a new link from the app."
+        });
+      }
+      const hashedPassword = await import_bcryptjs.default.hash(password, 10);
+      await client.query("UPDATE users SET password = $1 WHERE id = $2", [
+        hashedPassword,
+        resetToken.user_id
+      ]);
+      await client.query(
+        "UPDATE password_reset_tokens SET used_at = now() WHERE user_id = $1 AND used_at IS NULL",
+        [resetToken.user_id]
+      );
+      await client.query("COMMIT");
+      return res.json({ message: "Your password has been updated." });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => void 0);
+      console.error("[auth/reset-password] error:", error?.message || error);
+      return res.status(500).json({ message: "Unable to reset password. Please try again." });
+    } finally {
+      client.release();
+    }
+  });
   app2.post("/api/auth/logout", async (_req, res) => {
     res.clearCookie("a2b_token", { path: "/" });
     return res.json({ ok: true });
@@ -3248,7 +3388,7 @@ async function registerRoutes(app2) {
         return res.status(409).json({ message: "Please complete or cancel any active trip before deleting your account." });
       }
       const deletedEmail = `deleted-${userId}@deleted.a2b.local`;
-      const deletedPassword = await import_bcryptjs.default.hash(import_node_crypto.default.randomBytes(32).toString("hex"), 10);
+      const deletedPassword = await import_bcryptjs.default.hash(import_node_crypto2.default.randomBytes(32).toString("hex"), 10);
       await client.query("BEGIN");
       await maybeQuery("DELETE FROM notifications WHERE user_id = $1", [userId]);
       await maybeQuery("DELETE FROM saved_cards WHERE user_id = $1", [userId]);
@@ -7973,7 +8113,7 @@ async function registerRoutes(app2) {
       }
       const rawBody = req.rawBody;
       const raw = typeof rawBody === "string" ? rawBody : Buffer.isBuffer(rawBody) ? rawBody : JSON.stringify(req.body);
-      const hash = import_node_crypto.default.createHmac("sha512", secret).update(raw).digest("hex");
+      const hash = import_node_crypto2.default.createHmac("sha512", secret).update(raw).digest("hex");
       if (hash !== signature) {
         console.warn("Invalid Paystack webhook signature");
         return res.status(401).json({ message: "Invalid signature" });
@@ -10074,7 +10214,7 @@ async function registerRoutes(app2) {
   });
   app2.post("/api/payments/webhook", async (req, res) => {
     try {
-      const hash = import_node_crypto.default.createHmac("sha512", PAYSTACK_SECRET).update(JSON.stringify(req.body)).digest("hex");
+      const hash = import_node_crypto2.default.createHmac("sha512", PAYSTACK_SECRET).update(JSON.stringify(req.body)).digest("hex");
       if (hash !== req.headers["x-paystack-signature"]) {
         return res.status(401).json({ message: "Invalid signature" });
       }
@@ -10475,6 +10615,7 @@ async function configureExpoAndLanding(app2) {
   const appPort = Number.parseInt(process.env.PORT || "", 10);
   let allowMetroProxy = !isProductionRuntime;
   const adminTemplatePath = resolveExistingFile("server", "templates", "admin.html") || resolveProjectPath("server", "templates", "admin.html");
+  const passwordResetTemplatePath = resolveExistingFile("server", "templates", "password-reset.html") || resolveProjectPath("server", "templates", "password-reset.html");
   const adminTemplate = fs.readFileSync(adminTemplatePath, "utf-8");
   const assetsRoot = resolveExistingDirectory("assets") || resolveProjectPath("assets");
   const staticBuildRoot = resolveExistingDirectory("static-build") || resolveProjectPath("static-build");
@@ -10510,6 +10651,11 @@ async function configureExpoAndLanding(app2) {
   };
   app2.get("/admin", serveAdmin);
   app2.get("/a2b-admin", serveAdmin);
+  app2.get("/reset-password", (_req, res) => {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.status(200).send(fs.readFileSync(passwordResetTemplatePath, "utf-8"));
+  });
   app2.get("/driver", (_req, res) => {
     res.redirect(302, process.env.DRIVER_APP_STORE_URL || "https://play.google.com/store/apps/details?id=com.a2blift");
   });
