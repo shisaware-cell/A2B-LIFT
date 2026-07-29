@@ -1940,6 +1940,7 @@ var externalApiService = new ExternalApiService();
 var import_axios = __toESM(require("axios"));
 var RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 var RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "A2B LIFT <no-reply@a2blift.com>";
+var EMAIL_LOGO_URL = process.env.EMAIL_LOGO_URL || "https://a2blift.com/assets/images/icon.png";
 var BULKSMS_TOKEN_ID = process.env.BULKSMS_TOKEN_ID || "";
 var BULKSMS_TOKEN_SECRET = process.env.BULKSMS_TOKEN_SECRET || "";
 var BULKSMS_USERNAME = process.env.BULKSMS_USERNAME || "";
@@ -2045,7 +2046,16 @@ function renderBrandedEmail(opts) {
   const cta = opts.ctaLabel && opts.ctaUrl ? `<a href="${opts.ctaUrl}" style="display:inline-block;margin-top:20px;padding:12px 22px;background:#0b0b0f;color:#ffffff;border-radius:10px;text-decoration:none;font-weight:600;font-family:Arial,sans-serif;">${opts.ctaLabel}</a>` : "";
   return `<!DOCTYPE html><html><body style="margin:0;background:#f4f4f6;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;">
   <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #ececf1;">
-    <div style="background:#0b0b0f;padding:20px 24px;color:#ffffff;font-size:20px;font-weight:700;">A2B&nbsp;LIFT</div>
+    <div style="background:#0b0b0f;padding:16px 24px;color:#ffffff;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+        <tr>
+          <td style="vertical-align:middle;padding-right:12px;">
+            <img src="${EMAIL_LOGO_URL}" width="44" height="44" alt="A2B LIFT" style="display:block;width:44px;height:44px;border:0;border-radius:10px;" />
+          </td>
+          <td style="vertical-align:middle;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:700;">A2B&nbsp;LIFT</td>
+        </tr>
+      </table>
+    </div>
     <div style="padding:24px;">
       <h1 style="font-size:20px;margin:0 0 12px;">${opts.heading}</h1>
       <div style="font-size:15px;line-height:1.6;color:#333;">${opts.bodyHtml}</div>
