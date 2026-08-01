@@ -17,6 +17,8 @@ test("shows every vehicle category with route-specific pricing", () => {
   assert.match(clientSource, /categoryPricing\[vehicle\.id\]\?\.\[routeId\]/);
   assert.match(clientSource, /Choose your ride/);
   assert.match(routesSource, /app\.post\("\/api\/pricing\/options"/);
+  assert.ok(clientSource.indexOf('id: "luxury_van"') < clientSource.indexOf('id: "a2b_lite"'));
+  assert.ok(clientSource.indexOf('id: "a2b_lite"') < clientSource.indexOf('id: "budget"'));
 });
 
 test("emits rider cancellations before slow refund processing", () => {
@@ -43,7 +45,7 @@ test("driver closes cancelled trips and shows any earnings due", () => {
   assert.match(driverSource, /setInterval\(checkRideStatus, 4000\)/);
 });
 
-test("driver fare screens show full cash fares and net digital payouts", () => {
+test("driver offers show net earnings and the completed popup shows trip total", () => {
   const driverSource = readProjectFile("app/chauffeur/index.tsx");
   const completedPopupStart = driverSource.indexOf("Post-trip payment popup");
   const completedPopupEnd = driverSource.indexOf(
@@ -55,9 +57,10 @@ test("driver fare screens show full cash fares and net digital payouts", () => {
 
   assert.match(completedPopup, /Cash Fare/);
   assert.match(completedPopup, /The full cash fare is/);
-  assert.match(completedPopup, /Your Trip Earnings/);
+  assert.match(completedPopup, /Trip Total/);
+  assert.match(completedPopup, /getRideClientFare\(completedTrip\)/);
   assert.match(driverSource, /getDriverDisplayFare/);
-  assert.match(driverSource, /incomingRide\.paymentMethod[\s\S]*?"Cash fare" : "You earn"/);
+  assert.match(driverSource, /getIncomingRideFare\(incomingRide\)/);
   assert.doesNotMatch(completedPopup, /platform commission/i);
   assert.match(rideHistorySource, /"Cash Collected" : "Your Earnings"/);
   assert.match(rideHistorySource, /getDriverDisplayFare/);
@@ -148,6 +151,15 @@ test("locks the commission rate onto each new ride", () => {
   const routesSource = readProjectFile("server/routes.ts");
 
   assert.match(schemaSource, /commissionRate: real\("commission_rate"\)/);
-  assert.match(routesSource, /commissionRate: PLATFORM_COMMISSION_RATE/);
+  assert.match(routesSource, /commissionRate: getVehicleCategoryCommissionRate\(categoryId\)/);
   assert.match(routesSource, /calculateChauffeurEarnings\(ride\.price, ride\.commissionRate\)/);
+});
+
+test("lets drivers select every approved owned or assigned fleet vehicle", () => {
+  const routesSource = readProjectFile("server/routes.ts");
+  const vehiclesSource = readProjectFile("app/chauffeur/vehicles.tsx");
+
+  assert.match(routesSource, /const ownsVehicle = vehicle\.ownerOperatorProfileId === profile\.id/);
+  assert.match(routesSource, /previousAssignment[\s\S]*?status: "active"/);
+  assert.match(vehiclesSource, /\(assigned \|\| ownsVehicle\)/);
 });

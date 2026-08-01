@@ -148,7 +148,7 @@ var rides = (0, import_pg_core.pgTable)("rides", {
   price: (0, import_pg_core.real)("price"),
   pricePerKm: (0, import_pg_core.real)("price_per_km"),
   baseFare: (0, import_pg_core.real)("base_fare"),
-  commissionRate: (0, import_pg_core.real)("commission_rate").notNull().default(0.25),
+  commissionRate: (0, import_pg_core.real)("commission_rate").notNull().default(0.3),
   distanceKm: (0, import_pg_core.real)("distance_km"),
   durationMin: (0, import_pg_core.real)("duration_min"),
   vehicleType: (0, import_pg_core.text)("vehicle_type"),
@@ -1586,15 +1586,27 @@ async function getAdminSignedUrl(bucket, storagePath, expiresInSeconds = 3600) {
 
 // shared/fare-policy.ts
 var PLATFORM_COMMISSION_RATE = 0.3;
+var A2B_LITE_COMMISSION_RATE = 0.1;
 var DRIVER_SHARE_RATE = 1 - PLATFORM_COMMISSION_RATE;
 var REFERRAL_REWARD_RATE = 0.025;
 var VEHICLE_CATEGORY_PRICING = {
-  budget: { pricePerKm: 8.5, baseFare: 50 },
-  luxury: { pricePerKm: 14.5, baseFare: 100 },
-  business: { pricePerKm: 35, baseFare: 150 },
-  van: { pricePerKm: 15, baseFare: 120 },
-  luxury_van: { pricePerKm: 35, baseFare: 200 }
+  a2b_lite: { pricePerKm: 5, baseFare: 50, includedKm: 1 },
+  budget: { pricePerKm: 8.5, baseFare: 50, includedKm: 0 },
+  luxury: { pricePerKm: 14.5, baseFare: 100, includedKm: 0 },
+  business: { pricePerKm: 35, baseFare: 150, includedKm: 0 },
+  van: { pricePerKm: 15, baseFare: 120, includedKm: 0 },
+  luxury_van: { pricePerKm: 35, baseFare: 200, includedKm: 0 }
 };
+function getBillableDistanceKm(distanceKm, includedKm = 0) {
+  const distance = Number(distanceKm);
+  const included = Number(includedKm);
+  if (!Number.isFinite(distance) || distance <= 0) return 0;
+  return Math.max(0, distance - (Number.isFinite(included) ? Math.max(0, included) : 0));
+}
+function getVehicleCategoryCommissionRate(vehicleType) {
+  const normalized = String(vehicleType || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return normalized === "a2b_lite" || normalized === "lite" ? A2B_LITE_COMMISSION_RATE : PLATFORM_COMMISSION_RATE;
+}
 function roundCurrency(amount) {
   return Math.round(amount * 100) / 100;
 }
@@ -1615,15 +1627,16 @@ function getPlatformCommission(grossFare, commissionRate = PLATFORM_COMMISSION_R
 
 // server/luxuryPricingEngine.ts
 var VEHICLE_CATEGORIES = {
-  budget: { name: "Budget", ...VEHICLE_CATEGORY_PRICING.budget, examples: "Toyota Corolla, Toyota Quest" },
-  luxury: { name: "Luxury", ...VEHICLE_CATEGORY_PRICING.luxury, examples: "BMW 3 Series, Mercedes C Class" },
-  business: { name: "Business Class", ...VEHICLE_CATEGORY_PRICING.business, examples: "BMW 5 Series, Mercedes E Class" },
-  van: { name: "Van", ...VEHICLE_CATEGORY_PRICING.van, examples: "Hyundai H1, Mercedes Vito, Staria" },
-  luxury_van: { name: "Luxury Van", ...VEHICLE_CATEGORY_PRICING.luxury_van, examples: "Mercedes V Class" }
+  a2b_lite: { name: "A2B Lite", ...VEHICLE_CATEGORY_PRICING.a2b_lite, commissionRate: getVehicleCategoryCommissionRate("a2b_lite"), examples: "Hyundai i10 and similar compact cars" },
+  budget: { name: "Budget", ...VEHICLE_CATEGORY_PRICING.budget, commissionRate: getVehicleCategoryCommissionRate("budget"), examples: "Toyota Corolla, Toyota Quest" },
+  luxury: { name: "Luxury", ...VEHICLE_CATEGORY_PRICING.luxury, commissionRate: getVehicleCategoryCommissionRate("luxury"), examples: "BMW 3 Series, Mercedes C Class" },
+  business: { name: "Business Class", ...VEHICLE_CATEGORY_PRICING.business, commissionRate: getVehicleCategoryCommissionRate("business"), examples: "BMW 5 Series, Mercedes E Class" },
+  van: { name: "Van", ...VEHICLE_CATEGORY_PRICING.van, commissionRate: getVehicleCategoryCommissionRate("van"), examples: "Hyundai H1, Mercedes Vito, Staria" },
+  luxury_van: { name: "Luxury Van", ...VEHICLE_CATEGORY_PRICING.luxury_van, commissionRate: getVehicleCategoryCommissionRate("luxury_van"), examples: "Mercedes V Class" }
 };
 var PRICING_CONFIG = {
   lateNightPremiumMultiplier: 1.3,
-  platformFeeRate: 0.25,
+  platformFeeRate: PLATFORM_COMMISSION_RATE,
   driverAnnualShareRate: 0.05,
   maxSurgeMultiplier: 1.5,
   // Surge only kicks in once there is genuine, sustained demand — not just
@@ -1655,7 +1668,8 @@ function calculateSurgeMultiplier(input) {
 function calculatePrice(distanceKm, categoryId, options) {
   const category = VEHICLE_CATEGORIES[categoryId] || VEHICLE_CATEGORIES.budget;
   const baseFare = category.baseFare;
-  const distanceFare = distanceKm * category.pricePerKm;
+  const includedKm = category.includedKm || 0;
+  const distanceFare = getBillableDistanceKm(distanceKm, includedKm) * category.pricePerKm;
   let subtotal = baseFare + distanceFare;
   let lateNightPremium = 0;
   if (options?.isLateNight) {
@@ -1684,7 +1698,8 @@ function calculatePrice(distanceKm, categoryId, options) {
     surgeReason: surgeMultiplier > 1 ? options?.surgeReason || "High demand" : null,
     highDemand: surgeMultiplier > 1,
     estimatedDurationMin: typeof options?.estimatedDurationMin === "number" ? Math.max(0, Math.round(options.estimatedDurationMin * 10) / 10) : null,
-    perMinuteRate: PRICING_CONFIG.perMinuteAdjustmentRate
+    perMinuteRate: PRICING_CONFIG.perMinuteAdjustmentRate,
+    includedKm
   };
 }
 function calculatePerMinuteAdjustment(estimatedDurationMin, actualDurationMin, ratePerMinute = PRICING_CONFIG.perMinuteAdjustmentRate) {
@@ -1699,7 +1714,7 @@ function calculatePerMinuteAdjustment(estimatedDurationMin, actualDurationMin, r
 }
 function calculateChauffeurEarnings(totalPrice, commissionRate = PLATFORM_COMMISSION_RATE) {
   const commission = getPlatformCommission(totalPrice, commissionRate);
-  const platformFee = totalPrice * PRICING_CONFIG.platformFeeRate;
+  const platformFee = commission;
   const driverAnnualShare = totalPrice * PRICING_CONFIG.driverAnnualShareRate;
   const chauffeurEarnings = getDriverNetFare(totalPrice, commissionRate);
   return {
@@ -1720,21 +1735,34 @@ function getPricingConfig() {
 // server/rideOperations.ts
 var RIDE_OFFER_WINDOW_MS = 45e3;
 var CATEGORY_ALIASES = {
+  a2b_lite: "a2b_lite",
+  "a2b-lite": "a2b_lite",
+  lite: "a2b_lite",
+  economy_lite: "a2b_lite",
   budget: "budget",
+  budget_car: "budget",
+  economy_car: "budget",
+  compact: "budget",
   economy: "budget",
   standard: "budget",
   sedan: "budget",
   luxury: "luxury",
+  luxury_car: "luxury",
+  premium: "luxury",
   business: "business",
   business_class: "business",
   van: "van",
+  minivan: "van",
   luxury_van: "luxury_van",
   vclass: "luxury_van",
   v_class: "luxury_van",
   "v-class": "luxury_van"
 };
 var MULTI_CATEGORY_MATCHES = {
-  executive: ["business", "luxury", "luxury_van"],
+  budget: ["a2b_lite"],
+  luxury: ["budget", "a2b_lite"],
+  business: ["luxury", "budget", "a2b_lite"],
+  executive: ["business", "luxury", "budget", "a2b_lite", "luxury_van"],
   luxury_van: ["van"]
 };
 function normalizeVehicleType(vehicleType) {
@@ -2583,7 +2611,8 @@ async function registerRoutes(app2) {
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS trip_started_at timestamp");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancelled_by text");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancellation_fee real DEFAULT 0");
-    await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS commission_rate real NOT NULL DEFAULT 0.25");
+    await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS commission_rate real NOT NULL DEFAULT 0.3");
+    await pool2.query("ALTER TABLE rides ALTER COLUMN commission_rate SET DEFAULT 0.3");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS stops jsonb NOT NULL DEFAULT '[]'::jsonb");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS completed_stop_count integer NOT NULL DEFAULT 0");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS surge_multiplier real DEFAULT 1");
@@ -5331,7 +5360,7 @@ If you did not request this, you can ignore this email.`,
         vehicleModel: String(chauffeur.vehicleModel || "Vehicle").trim(),
         vehicleYear,
         plateNumber: String(chauffeur.plateNumber || `LEGACY-${chauffeur.id.slice(0, 6)}`).trim().toUpperCase(),
-        vehicleType: String(chauffeur.vehicleType || "budget").trim(),
+        vehicleType: normalizeVehicleType(chauffeur.vehicleType || "budget"),
         carColor: String(chauffeur.carColor || "Unknown").trim(),
         passengerCapacity: chauffeur.passengerCapacity || 4,
         luggageCapacity: chauffeur.luggageCapacity || 2
@@ -5525,6 +5554,10 @@ If you did not request this, you can ignore this email.`,
       if (!Number.isFinite(vehicleYear) || vehicleYear < 2015 || vehicleYear > currentYear + 1) {
         return res.status(400).json({ message: `Please enter a vehicle model year between 2015 and ${currentYear + 1}.` });
       }
+      const vehicleType = normalizeVehicleType(requireStringField(req.body, "vehicleType"));
+      if (!getVehicleCategories()[vehicleType]) {
+        return res.status(400).json({ message: "Select a valid vehicle category." });
+      }
       const vehicle = await storage.createVehicle({
         ownerOperatorProfileId: profile.id,
         status: req.body.submit ? "pending" : "draft",
@@ -5533,7 +5566,7 @@ If you did not request this, you can ignore this email.`,
         vehicleModel: requireStringField(req.body, "vehicleModel"),
         vehicleYear,
         plateNumber: requireStringField(req.body, "plateNumber").toUpperCase(),
-        vehicleType: requireStringField(req.body, "vehicleType"),
+        vehicleType,
         carColor: requireStringField(req.body, "carColor"),
         passengerCapacity: Number.parseInt(String(req.body.passengerCapacity || "4"), 10) || 4,
         luggageCapacity: Number.parseInt(String(req.body.luggageCapacity || "2"), 10) || 2
@@ -5581,8 +5614,15 @@ If you did not request this, you can ignore this email.`,
         return res.status(400).json({ message: "Approved vehicles cannot be edited from the app. Contact support." });
       }
       const update = {};
-      for (const field of ["carMake", "vehicleModel", "plateNumber", "vehicleType", "carColor"]) {
+      for (const field of ["carMake", "vehicleModel", "plateNumber", "carColor"]) {
         if (req.body[field] !== void 0) update[field] = String(req.body[field]).trim();
+      }
+      if (req.body.vehicleType !== void 0) {
+        const vehicleType = normalizeVehicleType(req.body.vehicleType);
+        if (!getVehicleCategories()[vehicleType]) {
+          return res.status(400).json({ message: "Select a valid vehicle category." });
+        }
+        update.vehicleType = vehicleType;
       }
       if (req.body.vehicleYear !== void 0) update.vehicleYear = Number.parseInt(String(req.body.vehicleYear), 10);
       if (req.body.passengerCapacity !== void 0) update.passengerCapacity = Number.parseInt(String(req.body.passengerCapacity), 10) || 4;
@@ -5660,7 +5700,21 @@ If you did not request this, you can ignore this email.`,
       if (vehicle.status !== "approved") {
         return res.status(400).json({ message: "Select an approved vehicle before going online." });
       }
-      const assignment = await storage.getActiveVehicleAssignment(vehicle.id, profile.id);
+      let assignment = await storage.getActiveVehicleAssignment(vehicle.id, profile.id);
+      const ownsVehicle = vehicle.ownerOperatorProfileId === profile.id;
+      if (!assignment && ownsVehicle) {
+        const previousAssignments = await storage.getVehicleAssignments({
+          vehicleId: vehicle.id,
+          driverOperatorProfileId: profile.id
+        });
+        const previousAssignment = previousAssignments[0];
+        assignment = previousAssignment ? await storage.updateVehicleAssignment(previousAssignment.id, { status: "active", removedAt: null }) : await storage.createVehicleAssignment({
+          vehicleId: vehicle.id,
+          driverOperatorProfileId: profile.id,
+          assignedByOperatorProfileId: profile.id,
+          status: "active"
+        });
+      }
       if (!assignment) {
         return res.status(403).json({ message: "This vehicle is no longer approved or assigned to you." });
       }
@@ -7898,7 +7952,10 @@ If you did not request this, you can ignore this email.`,
           }
         }
       }
-      const categoryId = rideData.vehicleType || "budget";
+      const categoryId = normalizeVehicleType(rideData.vehicleType || "budget");
+      if (!getVehicleCategories()[categoryId]) {
+        return res.status(400).json({ success: false, message: "Select a valid vehicle category." });
+      }
       const normalizedDistanceKm = Number(rideData.selectedRouteDistanceKm ?? distanceKm ?? 10);
       let safeDistanceKm = Number.isFinite(normalizedDistanceKm) && normalizedDistanceKm > 0 ? normalizedDistanceKm : 10;
       const normalizedDurationMin = Number(rideData.durationMin ?? 0);
@@ -7972,7 +8029,7 @@ If you did not request this, you can ignore this email.`,
         dropoffLng: rideData.dropoffLng,
         dropoffAddress: rideData.dropoffAddress || null,
         stops,
-        vehicleType: rideData.vehicleType || "budget",
+        vehicleType: categoryId,
         paymentMethod: rideData.paymentMethod || "cash",
         price: safeFare,
         distanceKm: safeDistanceKm,
@@ -7980,7 +8037,7 @@ If you did not request this, you can ignore this email.`,
         estimatedDurationMin: safeDurationMin,
         pricePerKm: priceEstimate.pricePerKm,
         baseFare: priceEstimate.baseFare,
-        commissionRate: PLATFORM_COMMISSION_RATE,
+        commissionRate: getVehicleCategoryCommissionRate(categoryId),
         surgeMultiplier: priceEstimate.surgeMultiplier,
         demandMultiplier: priceEstimate.demandMultiplier,
         surgeReason: priceEstimate.surgeReason,
@@ -8467,7 +8524,8 @@ If you did not request this, you can ignore this email.`,
           const arrivedAt = existingRide.arrivedAt;
           const waitingFeeCents = arrivedAt ? calculateWaitingFee(Math.max(0, (now.getTime() - new Date(arrivedAt).getTime()) / 6e4)) : 0;
           const baseFare = Math.max(0, Number(existingRide.baseFare || 0));
-          const unadjustedFare = baseFare + Math.max(0, Number(existingRide.distanceKm || 0)) * Math.max(0, Number(existingRide.pricePerKm || 0));
+          const category = getVehicleCategories()[normalizeVehicleType(existingRide.vehicleType || "budget")];
+          const unadjustedFare = baseFare + getBillableDistanceKm(existingRide.distanceKm, category?.includedKm || 0) * Math.max(0, Number(existingRide.pricePerKm || 0));
           const lockedFare = Math.max(
             0,
             Number(existingRide.quotedFare || existingRide.price || 0)

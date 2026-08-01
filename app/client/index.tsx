@@ -39,14 +39,16 @@ import { uploadDocument } from "@/lib/supabase-storage";
 import Colors from "@/constants/colors";
 import A2BMap from "@/components/A2BMap";
 import LivenessCamera, { type LivenessChallenge, type LivenessCaptureResult } from "@/components/LivenessCamera";
-import { VEHICLE_CATEGORY_PRICING } from "@shared/fare-policy";
+import { VEHICLE_CATEGORY_PRICING, getBillableDistanceKm } from "@shared/fare-policy";
 import { encodeStopsQuery, normalizeRideStops, type RideStop } from "@shared/ride-stops";
 
 const CATEGORY_SEDAN_ART = require("../../assets/images/nearby-car-marker.png");
 const CATEGORY_VAN_ART = require("../../assets/images/category-van.png");
+const CATEGORY_A2B_LITE_ART = require("../../assets/images/category-a2b-lite.png");
 
 const VEHICLE_TYPES = [
   { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury_van, badge: "recommended" },
+  { id: "a2b_lite", name: "A2B Lite", desc: "Hyundai i10 and similar compact cars", artwork: CATEGORY_A2B_LITE_ART, ...VEHICLE_CATEGORY_PRICING.a2b_lite },
   { id: "budget", name: "Budget", desc: "Toyota Corolla, Toyota Quest", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.budget },
   { id: "luxury", name: "Luxury", desc: "BMW 3 Series, Mercedes C Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury },
   { id: "business", name: "Business Class", desc: "BMW 5 Series, Mercedes E Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.business },
@@ -159,6 +161,7 @@ interface RouteChoice extends DirectionRoute {
   highDemand?: boolean;
   surgeAmount?: number;
   perMinuteRate?: number;
+  includedKm?: number;
 }
 
 interface CategoryPriceEstimate {
@@ -172,6 +175,7 @@ interface CategoryPriceEstimate {
   highDemand?: boolean;
   surgeAmount?: number;
   perMinuteRate?: number;
+  includedKm?: number;
 }
 
 type CategoryPricingMatrix = Record<string, Record<string, CategoryPriceEstimate>>;
@@ -265,9 +269,9 @@ function buildRouteChoiceDescriptors(routes: DirectionRoute[]) {
   return selected;
 }
 
-function calculateFallbackEstimate(distanceKm: number, vehicle: { baseFare: number; pricePerKm: number }, isLateNight: boolean) {
+function calculateFallbackEstimate(distanceKm: number, vehicle: { baseFare: number; pricePerKm: number; includedKm?: number }, isLateNight: boolean) {
   const baseFare = Math.round(vehicle.baseFare);
-  const distanceFare = Math.round(distanceKm * vehicle.pricePerKm);
+  const distanceFare = Math.round(getBillableDistanceKm(distanceKm, vehicle.includedKm) * vehicle.pricePerKm);
   let totalPrice = baseFare + distanceFare;
   let lateNightPremium = 0;
   if (isLateNight) {
@@ -281,6 +285,12 @@ function calculateFallbackEstimate(distanceKm: number, vehicle: { baseFare: numb
     lateNightPremium,
     currency: "ZAR",
   };
+}
+
+function formatVehicleRate(vehicle: { baseFare: number; pricePerKm: number; includedKm?: number }) {
+  return vehicle.includedKm
+    ? `R${vehicle.baseFare} for the first ${vehicle.includedKm} km, then R${vehicle.pricePerKm}/km`
+    : `R${vehicle.baseFare} base + R${vehicle.pricePerKm}/km`;
 }
 
 function isLateNightWindow() {
@@ -1886,6 +1896,7 @@ export default function ClientHomeScreen() {
       fare: Number(estimate.totalPrice ?? choice.fare),
       baseFare: Number(estimate.baseFare ?? choice.baseFare),
       pricePerKm: Number(estimate.pricePerKm ?? choice.pricePerKm),
+      includedKm: Number(estimate.includedKm ?? choice.includedKm ?? 0),
       lateNightPremium: Number(estimate.lateNightPremium ?? choice.lateNightPremium),
       currency: estimate.currency || choice.currency,
       surgeMultiplier: Number(estimate.surgeMultiplier || 1),
@@ -2461,7 +2472,10 @@ export default function ClientHomeScreen() {
     if (acceptedAt && elapsedMin >= 3 && baseFare > 0) {
       const unadjustedFare =
         baseFare +
-        Number(currentRide?.distanceKm || 0) * Number(currentRide?.pricePerKm || selectedVehicle.pricePerKm || 0);
+        getBillableDistanceKm(
+          currentRide?.distanceKm,
+          selectedVehicle.includedKm,
+        ) * Number(currentRide?.pricePerKm || selectedVehicle.pricePerKm || 0);
       const lockedFare = Number(currentRide?.quotedFare || currentRide?.price || 0);
       const pricingMultiplier = unadjustedFare > 0 ? Math.max(1, lockedFare / unadjustedFare) : 1;
       const estimatedFee = baseFare * pricingMultiplier;
@@ -2788,7 +2802,7 @@ export default function ClientHomeScreen() {
               />
               <View style={{ flex: 1 }}>
                 <Text style={styles.vehicleName}>{selectedVehicle.name}</Text>
-                <Text style={styles.vehiclePrice}>R{selectedVehicle.baseFare} base + R{selectedVehicle.pricePerKm}/km</Text>
+                <Text style={styles.vehiclePrice}>{formatVehicleRate(selectedVehicle)}</Text>
               </View>
               <Ionicons name="chevron-down" size={16} color={Colors.textMuted} />
             </Pressable>
@@ -2877,7 +2891,7 @@ export default function ClientHomeScreen() {
                         ) : null}
                       </View>
                       <Text style={styles.categoryFareMeta} numberOfLines={1}>
-                        {vehicle.desc} · R{vehicle.pricePerKm}/km
+                        {vehicle.desc} · {formatVehicleRate(vehicle)}
                       </Text>
                     </View>
                     <View style={styles.categoryFarePriceWrap}>
@@ -2929,8 +2943,8 @@ export default function ClientHomeScreen() {
                 <Text style={styles.fareValue}>R {selectedRouteChoice?.baseFare ?? selectedVehicle.baseFare}</Text>
               </View>
               <View style={styles.fareRow}>
-                <Text style={styles.fareLabel}>Distance ({estimatedDistance} km × R{selectedRouteChoice?.pricePerKm ?? selectedVehicle.pricePerKm})</Text>
-                <Text style={styles.fareValue}>R {Math.round((estimatedDistance || 0) * (selectedRouteChoice?.pricePerKm ?? selectedVehicle.pricePerKm))}</Text>
+                <Text style={styles.fareLabel}>Chargeable distance ({getBillableDistanceKm(estimatedDistance, selectedRouteChoice?.includedKm ?? selectedVehicle.includedKm).toFixed(1)} km × R{selectedRouteChoice?.pricePerKm ?? selectedVehicle.pricePerKm})</Text>
+                <Text style={styles.fareValue}>R {Math.round(getBillableDistanceKm(estimatedDistance, selectedRouteChoice?.includedKm ?? selectedVehicle.includedKm) * (selectedRouteChoice?.pricePerKm ?? selectedVehicle.pricePerKm))}</Text>
               </View>
               {lateNightPremium > 0 && (
                 <View style={styles.fareRow}>
@@ -3960,7 +3974,7 @@ export default function ClientHomeScreen() {
                     {"badge" in vt && vt.badge ? <Text style={styles.vehicleOptionBadge}>{vt.badge}</Text> : null}
                   </View>
                   <Text style={styles.vehicleOptionDesc}>{vt.desc}</Text>
-                  <Text style={styles.vehicleOptionPrice}>R{vt.baseFare} + R{vt.pricePerKm}/km</Text>
+                  <Text style={styles.vehicleOptionPrice}>{formatVehicleRate(vt)}</Text>
                 </View>
                 {selectedVehicle.id === vt.id && (
                   <Ionicons name="checkmark-circle" size={22} color={Colors.white} />

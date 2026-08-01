@@ -1,21 +1,24 @@
 import {
   PLATFORM_COMMISSION_RATE,
   VEHICLE_CATEGORY_PRICING,
+  getBillableDistanceKm,
+  getVehicleCategoryCommissionRate,
   getDriverNetFare,
   getPlatformCommission,
 } from "../shared/fare-policy";
 
-export const VEHICLE_CATEGORIES: Record<string, { name: string; pricePerKm: number; baseFare: number; examples: string }> = {
-  budget: { name: "Budget", ...VEHICLE_CATEGORY_PRICING.budget, examples: "Toyota Corolla, Toyota Quest" },
-  luxury: { name: "Luxury", ...VEHICLE_CATEGORY_PRICING.luxury, examples: "BMW 3 Series, Mercedes C Class" },
-  business: { name: "Business Class", ...VEHICLE_CATEGORY_PRICING.business, examples: "BMW 5 Series, Mercedes E Class" },
-  van: { name: "Van", ...VEHICLE_CATEGORY_PRICING.van, examples: "Hyundai H1, Mercedes Vito, Staria" },
-  luxury_van: { name: "Luxury Van", ...VEHICLE_CATEGORY_PRICING.luxury_van, examples: "Mercedes V Class" },
+export const VEHICLE_CATEGORIES: Record<string, { name: string; pricePerKm: number; baseFare: number; includedKm: number; commissionRate: number; examples: string }> = {
+  a2b_lite: { name: "A2B Lite", ...VEHICLE_CATEGORY_PRICING.a2b_lite, commissionRate: getVehicleCategoryCommissionRate("a2b_lite"), examples: "Hyundai i10 and similar compact cars" },
+  budget: { name: "Budget", ...VEHICLE_CATEGORY_PRICING.budget, commissionRate: getVehicleCategoryCommissionRate("budget"), examples: "Toyota Corolla, Toyota Quest" },
+  luxury: { name: "Luxury", ...VEHICLE_CATEGORY_PRICING.luxury, commissionRate: getVehicleCategoryCommissionRate("luxury"), examples: "BMW 3 Series, Mercedes C Class" },
+  business: { name: "Business Class", ...VEHICLE_CATEGORY_PRICING.business, commissionRate: getVehicleCategoryCommissionRate("business"), examples: "BMW 5 Series, Mercedes E Class" },
+  van: { name: "Van", ...VEHICLE_CATEGORY_PRICING.van, commissionRate: getVehicleCategoryCommissionRate("van"), examples: "Hyundai H1, Mercedes Vito, Staria" },
+  luxury_van: { name: "Luxury Van", ...VEHICLE_CATEGORY_PRICING.luxury_van, commissionRate: getVehicleCategoryCommissionRate("luxury_van"), examples: "Mercedes V Class" },
 };
 
 const PRICING_CONFIG = {
   lateNightPremiumMultiplier: 1.3,
-  platformFeeRate: 0.25,
+  platformFeeRate: PLATFORM_COMMISSION_RATE,
   driverAnnualShareRate: 0.05,
   maxSurgeMultiplier: 1.5,
   // Surge only kicks in once there is genuine, sustained demand — not just
@@ -42,6 +45,7 @@ export interface PriceEstimate {
   highDemand: boolean;
   estimatedDurationMin: number | null;
   perMinuteRate: number;
+  includedKm: number;
 }
 
 export interface SurgeInput {
@@ -99,7 +103,8 @@ export function calculatePrice(
 ): PriceEstimate {
   const category = VEHICLE_CATEGORIES[categoryId] || VEHICLE_CATEGORIES.budget;
   const baseFare = category.baseFare;
-  const distanceFare = distanceKm * category.pricePerKm;
+  const includedKm = category.includedKm || 0;
+  const distanceFare = getBillableDistanceKm(distanceKm, includedKm) * category.pricePerKm;
 
   let subtotal = baseFare + distanceFare;
 
@@ -136,6 +141,7 @@ export function calculatePrice(
         ? Math.max(0, Math.round(options.estimatedDurationMin * 10) / 10)
         : null,
     perMinuteRate: PRICING_CONFIG.perMinuteAdjustmentRate,
+    includedKm,
   };
 }
 
@@ -187,7 +193,7 @@ export function calculateChauffeurEarnings(
   commissionRate = PLATFORM_COMMISSION_RATE,
 ) {
   const commission = getPlatformCommission(totalPrice, commissionRate);
-  const platformFee = totalPrice * PRICING_CONFIG.platformFeeRate;
+  const platformFee = commission;
   const driverAnnualShare = totalPrice * PRICING_CONFIG.driverAnnualShareRate;
   const chauffeurEarnings = getDriverNetFare(totalPrice, commissionRate);
   return {

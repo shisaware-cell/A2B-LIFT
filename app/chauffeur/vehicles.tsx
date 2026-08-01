@@ -15,6 +15,7 @@ const VEHICLE_DOCS = [
   { id: "vehicle:dekra_report", label: "Dekra Report" },
 ];
 const VEHICLE_CATEGORIES = [
+  { id: "a2b_lite", label: "A2B Lite", desc: "Hyundai i10 and similar compact cars" },
   { id: "budget", label: "Budget", desc: "Toyota Corolla, Toyota Quest" },
   { id: "luxury", label: "Luxury", desc: "BMW 3 Series, Mercedes C Class" },
   { id: "business", label: "Business Class", desc: "BMW 5 Series, Mercedes E Class" },
@@ -229,7 +230,6 @@ export default function VehiclesScreen() {
         {vehicles.length === 0 ? (
           <Text style={styles.emptyText}>No vehicles yet.</Text>
         ) : vehicles.map((vehicle) => {
-          const assigned = assignments.some((assignment) => assignment.vehicleId === vehicle.id && assignment.status === "active");
           const vehicleData = vehicle.vehicle || vehicle;
           const docs = Array.isArray(vehicle.documents) ? vehicle.documents : [];
           const uploadedTypes = new Set(docs.map((doc: any) => doc.type));
@@ -237,6 +237,7 @@ export default function VehiclesScreen() {
           const unapprovedDocs = VEHICLE_DOCS.filter((doc) => docs.find((uploaded: any) => uploaded.type === doc.id)?.status !== "approved");
           const isSubmitting = !!submittingVehicles[vehicleData.id] || vehicleData.status === "pending";
           const ownsVehicle = vehicleData.ownerOperatorProfileId === operatorProfile?.id;
+          const assigned = assignments.some((assignment) => assignment.vehicleId === vehicleData.id && assignment.status === "active");
           const isActiveVehicle = activeVehicleId === vehicleData.id;
           const isSelectingVehicle = selectingVehicleId === vehicleData.id;
           return (
@@ -290,7 +291,7 @@ export default function VehiclesScreen() {
 
               {vehicleData.status === "approved" && (
                 <View style={styles.actionRow}>
-                  {operatorProfile?.type === "driver" && assigned && (
+                  {operatorProfile?.type === "driver" && (assigned || ownsVehicle) && (
                     <Pressable
                       style={[styles.selectBtn, isActiveVehicle && styles.selectBtnActive]}
                       onPress={() => selectVehicle(vehicleData.id)}

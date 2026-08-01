@@ -42,7 +42,7 @@ import {
 } from "@/lib/google-navigation";
 import Colors from "@/constants/colors";
 import A2BMap from "@/components/A2BMap";
-import { VEHICLE_CATEGORY_PRICING, getDriverDisplayFare } from "@shared/fare-policy";
+import { VEHICLE_CATEGORY_PRICING, getDriverDisplayFare, getDriverNetFare } from "@shared/fare-policy";
 import { normalizeRideStops } from "@shared/ride-stops";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -419,6 +419,10 @@ export default function ChauffeurDashboard() {
       ride?.paymentMethod,
       ride?.commissionRate,
     );
+  }
+
+  function getIncomingRideFare(ride: any) {
+    return getDriverNetFare(getRideClientFare(ride), ride?.commissionRate);
   }
 
   async function getClientSummary(clientId?: string): Promise<ClientSummary | null> {
@@ -2410,12 +2414,12 @@ export default function ChauffeurDashboard() {
               <View style={styles.offerTimerPill}>
                 <Text style={styles.offerTimerText}>{incomingOfferSeconds}s</Text>
               </View>
-              {getRideFare(incomingRide) ? (
+              {getIncomingRideFare(incomingRide) ? (
                 <View style={styles.incomingEarnBox}>
                   <Text style={styles.incomingEarnLabel}>
-                    {(incomingRide.paymentMethod || "cash") === "cash" ? "Cash fare" : "You earn"}
+                    You earn
                   </Text>
-                  <Text style={styles.incomingPrice}>R {getRideFare(incomingRide).toFixed(0)}</Text>
+                  <Text style={styles.incomingPrice}>R {getIncomingRideFare(incomingRide).toFixed(0)}</Text>
                 </View>
               ) : null}
             </View>
@@ -2601,10 +2605,10 @@ export default function ChauffeurDashboard() {
                 <View style={styles.payPopupIconWrap}>
                   <Text style={{ fontSize: 40 }}>💳</Text>
                 </View>
-                <Text style={styles.payPopupTitle}>Your Trip Earnings</Text>
-                <Text style={styles.payPopupAmount}>R {getRideFare(completedTrip).toFixed(0)}</Text>
+                <Text style={styles.payPopupTitle}>Trip Total</Text>
+                <Text style={styles.payPopupAmount}>R {getRideClientFare(completedTrip).toFixed(0)}</Text>
                 <Text style={styles.payPopupBody}>
-                  R {getRideFare(completedTrip).toFixed(0)} has been added to your earnings and will reflect in your wallet shortly.
+                  The rider paid R {getRideClientFare(completedTrip).toFixed(0)} for this trip. Your category commission is reflected in your earnings and wallet.
                 </Text>
               </>
             )}

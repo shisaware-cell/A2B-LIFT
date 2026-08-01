@@ -1,14 +1,24 @@
 export const RIDE_OFFER_WINDOW_MS = 45_000;
 
 const CATEGORY_ALIASES: Record<string, string> = {
+  a2b_lite: "a2b_lite",
+  "a2b-lite": "a2b_lite",
+  lite: "a2b_lite",
+  economy_lite: "a2b_lite",
   budget: "budget",
+  budget_car: "budget",
+  economy_car: "budget",
+  compact: "budget",
   economy: "budget",
   standard: "budget",
   sedan: "budget",
   luxury: "luxury",
+  luxury_car: "luxury",
+  premium: "luxury",
   business: "business",
   business_class: "business",
   van: "van",
+  minivan: "van",
   luxury_van: "luxury_van",
   vclass: "luxury_van",
   v_class: "luxury_van",
@@ -18,7 +28,10 @@ const CATEGORY_ALIASES: Record<string, string> = {
 // Vehicle categories that are eligible for MULTIPLE request categories.
 // e.g. an "executive" vehicle can serve both business and luxury requests.
 const MULTI_CATEGORY_MATCHES: Record<string, string[]> = {
-  executive: ["business", "luxury", "luxury_van"],
+  budget: ["a2b_lite"],
+  luxury: ["budget", "a2b_lite"],
+  business: ["luxury", "budget", "a2b_lite"],
+  executive: ["business", "luxury", "budget", "a2b_lite", "luxury_van"],
   luxury_van: ["van"],
 };
 

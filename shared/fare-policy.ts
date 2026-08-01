@@ -1,14 +1,33 @@
 export const PLATFORM_COMMISSION_RATE = 0.3;
+export const A2B_LITE_COMMISSION_RATE = 0.1;
 export const DRIVER_SHARE_RATE = 1 - PLATFORM_COMMISSION_RATE;
 export const REFERRAL_REWARD_RATE = 0.025;
 
 export const VEHICLE_CATEGORY_PRICING = {
-  budget: { pricePerKm: 8.5, baseFare: 50 },
-  luxury: { pricePerKm: 14.5, baseFare: 100 },
-  business: { pricePerKm: 35, baseFare: 150 },
-  van: { pricePerKm: 15, baseFare: 120 },
-  luxury_van: { pricePerKm: 35, baseFare: 200 },
+  a2b_lite: { pricePerKm: 5, baseFare: 50, includedKm: 1 },
+  budget: { pricePerKm: 8.5, baseFare: 50, includedKm: 0 },
+  luxury: { pricePerKm: 14.5, baseFare: 100, includedKm: 0 },
+  business: { pricePerKm: 35, baseFare: 150, includedKm: 0 },
+  van: { pricePerKm: 15, baseFare: 120, includedKm: 0 },
+  luxury_van: { pricePerKm: 35, baseFare: 200, includedKm: 0 },
 } as const;
+
+export function getBillableDistanceKm(distanceKm: unknown, includedKm: unknown = 0) {
+  const distance = Number(distanceKm);
+  const included = Number(includedKm);
+  if (!Number.isFinite(distance) || distance <= 0) return 0;
+  return Math.max(0, distance - (Number.isFinite(included) ? Math.max(0, included) : 0));
+}
+
+export function getVehicleCategoryCommissionRate(vehicleType: unknown) {
+  const normalized = String(vehicleType || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  return normalized === "a2b_lite" || normalized === "lite"
+    ? A2B_LITE_COMMISSION_RATE
+    : PLATFORM_COMMISSION_RATE;
+}
 
 function roundCurrency(amount: number) {
   return Math.round(amount * 100) / 100;

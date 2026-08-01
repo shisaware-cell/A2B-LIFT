@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   PLATFORM_COMMISSION_RATE,
+  A2B_LITE_COMMISSION_RATE,
   REFERRAL_REWARD_RATE,
   VEHICLE_CATEGORY_PRICING,
   getDriverDisplayFare,
   getDriverNetFare,
   getPlatformCommission,
+  getBillableDistanceKm,
+  getVehicleCategoryCommissionRate,
 } from "../shared/fare-policy";
+import { calculatePrice } from "./luxuryPricingEngine";
 
 test("deducts 30% commission from the rider fare", () => {
   assert.equal(getDriverNetFare(100), 70);
@@ -42,6 +46,12 @@ test("rejects invalid and negative fare values", () => {
 });
 
 test("uses the requested kilometre rates for rider categories", () => {
+  assert.equal(VEHICLE_CATEGORY_PRICING.a2b_lite.pricePerKm, 5);
+  assert.equal(VEHICLE_CATEGORY_PRICING.a2b_lite.baseFare, 50);
+  assert.equal(getBillableDistanceKm(1, VEHICLE_CATEGORY_PRICING.a2b_lite.includedKm), 0);
+  assert.equal(getBillableDistanceKm(3, VEHICLE_CATEGORY_PRICING.a2b_lite.includedKm), 2);
+  assert.equal(calculatePrice(1, "a2b_lite").totalPrice, 50);
+  assert.equal(calculatePrice(3, "a2b_lite").totalPrice, 60);
   assert.equal(VEHICLE_CATEGORY_PRICING.budget.pricePerKm, 8.5);
   assert.equal(VEHICLE_CATEGORY_PRICING.luxury.pricePerKm, 14.5);
   assert.equal(VEHICLE_CATEGORY_PRICING.van.pricePerKm, 15);
@@ -50,4 +60,7 @@ test("uses the requested kilometre rates for rider categories", () => {
 test("keeps referral rewards independent from platform commission", () => {
   assert.equal(REFERRAL_REWARD_RATE, 0.025);
   assert.equal(PLATFORM_COMMISSION_RATE, 0.3);
+  assert.equal(A2B_LITE_COMMISSION_RATE, 0.1);
+  assert.equal(getVehicleCategoryCommissionRate("A2B Lite"), 0.1);
+  assert.equal(getVehicleCategoryCommissionRate("budget"), 0.3);
 });

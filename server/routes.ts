@@ -21,6 +21,7 @@ import {
   getRideOfferExpiresAt,
   isRideOfferActive,
   isVehicleEligibleForRide,
+  normalizeVehicleType,
 } from "./rideOperations";
 import { getReleaseFingerprint } from "./release-info";
 import { validateAdminPassword } from "./admin-password-policy";
@@ -39,7 +40,12 @@ import {
   combineDirectionSegments,
   parseOsrmRoutes,
 } from "./multi-stop-routing";
-import { PLATFORM_COMMISSION_RATE, REFERRAL_REWARD_RATE } from "../shared/fare-policy";
+import {
+  PLATFORM_COMMISSION_RATE,
+  REFERRAL_REWARD_RATE,
+  getBillableDistanceKm,
+  getVehicleCategoryCommissionRate,
+} from "../shared/fare-policy";
 import {
   buildPasswordResetUrl,
   createPasswordResetToken,
@@ -522,7 +528,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS trip_started_at timestamp");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancelled_by text");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancellation_fee real DEFAULT 0");
-    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS commission_rate real NOT NULL DEFAULT 0.25");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS commission_rate real NOT NULL DEFAULT 0.3");
+    await pool.query("ALTER TABLE rides ALTER COLUMN commission_rate SET DEFAULT 0.3");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS stops jsonb NOT NULL DEFAULT '[]'::jsonb");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS completed_stop_count integer NOT NULL DEFAULT 0");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS surge_multiplier real DEFAULT 1");
@@ -3920,7 +3927,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         vehicleModel: String(chauffeur.vehicleModel || "Vehicle").trim(),
         vehicleYear,
         plateNumber: String(chauffeur.plateNumber || `LEGACY-${chauffeur.id.slice(0, 6)}`).trim().toUpperCase(),
-        vehicleType: String(chauffeur.vehicleType || "budget").trim(),
+        vehicleType: normalizeVehicleType(chauffeur.vehicleType || "budget"),
         carColor: String(chauffeur.carColor || "Unknown").trim(),
         passengerCapacity: chauffeur.passengerCapacity || 4,
         luggageCapacity: chauffeur.luggageCapacity || 2,
@@ -4142,6 +4149,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!Number.isFinite(vehicleYear) || vehicleYear < 2015 || vehicleYear > currentYear + 1) {
         return res.status(400).json({ message: `Please enter a vehicle model year between 2015 and ${currentYear + 1}.` });
       }
+      const vehicleType = normalizeVehicleType(requireStringField(req.body, "vehicleType"));
+      if (!getVehicleCategories()[vehicleType]) {
+        return res.status(400).json({ message: "Select a valid vehicle category." });
+      }
       const vehicle = await storage.createVehicle({
         ownerOperatorProfileId: profile.id,
         status: req.body.submit ? "pending" : "draft",
@@ -4150,7 +4161,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         vehicleModel: requireStringField(req.body, "vehicleModel"),
         vehicleYear,
         plateNumber: requireStringField(req.body, "plateNumber").toUpperCase(),
-        vehicleType: requireStringField(req.body, "vehicleType"),
+        vehicleType,
         carColor: requireStringField(req.body, "carColor"),
         passengerCapacity: Number.parseInt(String(req.body.passengerCapacity || "4"), 10) || 4,
         luggageCapacity: Number.parseInt(String(req.body.luggageCapacity || "2"), 10) || 2,
@@ -4204,8 +4215,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Approved vehicles cannot be edited from the app. Contact support." });
       }
       const update: any = {};
-      for (const field of ["carMake", "vehicleModel", "plateNumber", "vehicleType", "carColor"] as const) {
+      for (const field of ["carMake", "vehicleModel", "plateNumber", "carColor"] as const) {
         if (req.body[field] !== undefined) update[field] = String(req.body[field]).trim();
+      }
+      if (req.body.vehicleType !== undefined) {
+        const vehicleType = normalizeVehicleType(req.body.vehicleType);
+        if (!getVehicleCategories()[vehicleType]) {
+          return res.status(400).json({ message: "Select a valid vehicle category." });
+        }
+        update.vehicleType = vehicleType;
       }
       if (req.body.vehicleYear !== undefined) update.vehicleYear = Number.parseInt(String(req.body.vehicleYear), 10);
       if (req.body.passengerCapacity !== undefined) update.passengerCapacity = Number.parseInt(String(req.body.passengerCapacity), 10) || 4;
@@ -4286,7 +4304,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (vehicle.status !== "approved") {
         return res.status(400).json({ message: "Select an approved vehicle before going online." });
       }
-      const assignment = await storage.getActiveVehicleAssignment(vehicle.id, profile.id);
+      let assignment = await storage.getActiveVehicleAssignment(vehicle.id, profile.id);
+      const ownsVehicle = vehicle.ownerOperatorProfileId === profile.id;
+      if (!assignment && ownsVehicle) {
+        const previousAssignments = await storage.getVehicleAssignments({
+          vehicleId: vehicle.id,
+          driverOperatorProfileId: profile.id,
+        });
+        const previousAssignment = previousAssignments[0];
+        assignment = previousAssignment
+          ? await storage.updateVehicleAssignment(previousAssignment.id, { status: "active", removedAt: null })
+          : await storage.createVehicleAssignment({
+              vehicleId: vehicle.id,
+              driverOperatorProfileId: profile.id,
+              assignedByOperatorProfileId: profile.id,
+              status: "active",
+            });
+      }
       if (!assignment) {
         return res.status(403).json({ message: "This vehicle is no longer approved or assigned to you." });
       }
@@ -6894,7 +6928,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      const categoryId = rideData.vehicleType || "budget";
+      const categoryId = normalizeVehicleType(rideData.vehicleType || "budget");
+      if (!getVehicleCategories()[categoryId]) {
+        return res.status(400).json({ success: false, message: "Select a valid vehicle category." });
+      }
       const normalizedDistanceKm = Number(rideData.selectedRouteDistanceKm ?? distanceKm ?? 10);
       let safeDistanceKm = Number.isFinite(normalizedDistanceKm) && normalizedDistanceKm > 0 ? normalizedDistanceKm : 10;
       const normalizedDurationMin = Number(rideData.durationMin ?? 0);
@@ -6982,7 +7019,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dropoffLng: rideData.dropoffLng,
         dropoffAddress: rideData.dropoffAddress || null,
         stops,
-        vehicleType: rideData.vehicleType || "budget",
+        vehicleType: categoryId,
         paymentMethod: rideData.paymentMethod || "cash",
         price: safeFare,
         distanceKm: safeDistanceKm,
@@ -6990,7 +7027,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         estimatedDurationMin: safeDurationMin,
         pricePerKm: priceEstimate.pricePerKm,
         baseFare: priceEstimate.baseFare,
-        commissionRate: PLATFORM_COMMISSION_RATE,
+        commissionRate: getVehicleCategoryCommissionRate(categoryId),
         surgeMultiplier: priceEstimate.surgeMultiplier,
         demandMultiplier: priceEstimate.demandMultiplier,
         surgeReason: priceEstimate.surgeReason,
@@ -7588,9 +7625,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ? calculateWaitingFee(Math.max(0, (now.getTime() - new Date(arrivedAt).getTime()) / 60000))
             : 0;
           const baseFare = Math.max(0, Number(existingRide.baseFare || 0));
+          const category = getVehicleCategories()[normalizeVehicleType(existingRide.vehicleType || "budget")];
           const unadjustedFare =
             baseFare +
-            Math.max(0, Number(existingRide.distanceKm || 0)) *
+            getBillableDistanceKm(existingRide.distanceKm, category?.includedKm || 0) *
               Math.max(0, Number(existingRide.pricePerKm || 0));
           const lockedFare = Math.max(
             0,
