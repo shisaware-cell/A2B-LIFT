@@ -51,7 +51,7 @@ const VEHICLE_TYPES = [
   { id: "a2b_lite", name: "A2B Lite", desc: "Hyundai i10 and similar compact cars", artwork: CATEGORY_A2B_LITE_ART, ...VEHICLE_CATEGORY_PRICING.a2b_lite },
   { id: "budget", name: "Budget", desc: "Toyota Corolla, Toyota Quest", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.budget },
   { id: "luxury", name: "Luxury", desc: "BMW 3 Series, Mercedes C Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury },
-  { id: "business", name: "Business Class", desc: "BMW 5 Series, Mercedes E Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.business },
+  { id: "business", name: "VIP", desc: "BMW 5 Series, Mercedes E Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.business },
   { id: "van", name: "Van", desc: "Hyundai H1, Mercedes Vito, Staria", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.van },
 ];
 
@@ -2802,7 +2802,13 @@ export default function ClientHomeScreen() {
               />
               <View style={{ flex: 1 }}>
                 <Text style={styles.vehicleName}>{selectedVehicle.name}</Text>
-                <Text style={styles.vehiclePrice}>{formatVehicleRate(selectedVehicle)}</Text>
+                <View style={styles.vehicleMetaRow}>
+                  <Text style={styles.vehiclePrice}>{formatVehicleRate(selectedVehicle)}</Text>
+                  <View style={styles.passengerCapacity}>
+                    <Ionicons name="people-outline" size={13} color={Colors.textMuted} />
+                    <Text style={styles.passengerCapacityText}>{selectedVehicle.maxPassengers}</Text>
+                  </View>
+                </View>
               </View>
               <Ionicons name="chevron-down" size={16} color={Colors.textMuted} />
             </Pressable>
@@ -2890,9 +2896,14 @@ export default function ClientHomeScreen() {
                           <Text style={styles.categoryFareBadge}>{vehicle.badge}</Text>
                         ) : null}
                       </View>
-                      <Text style={styles.categoryFareMeta} numberOfLines={1}>
-                        {vehicle.desc} · {formatVehicleRate(vehicle)}
-                      </Text>
+                      <Text style={styles.categoryFareMeta} numberOfLines={1}>{vehicle.desc}</Text>
+                      <View style={styles.categoryFareDetails}>
+                        <View style={styles.passengerCapacity}>
+                          <Ionicons name="people-outline" size={13} color={Colors.textMuted} />
+                          <Text style={styles.passengerCapacityText}>{vehicle.maxPassengers}</Text>
+                        </View>
+                        <Text style={styles.categoryFareRate} numberOfLines={1}>{formatVehicleRate(vehicle)}</Text>
+                      </View>
                     </View>
                     <View style={styles.categoryFarePriceWrap}>
                       <Text style={styles.categoryFarePrice}>R {fare.toFixed(0)}</Text>
@@ -3974,7 +3985,13 @@ export default function ClientHomeScreen() {
                     {"badge" in vt && vt.badge ? <Text style={styles.vehicleOptionBadge}>{vt.badge}</Text> : null}
                   </View>
                   <Text style={styles.vehicleOptionDesc}>{vt.desc}</Text>
-                  <Text style={styles.vehicleOptionPrice}>{formatVehicleRate(vt)}</Text>
+                  <View style={styles.vehicleOptionMetaRow}>
+                    <View style={styles.passengerCapacity}>
+                      <Ionicons name="people-outline" size={13} color={Colors.textMuted} />
+                      <Text style={styles.passengerCapacityText}>{vt.maxPassengers}</Text>
+                    </View>
+                    <Text style={styles.vehicleOptionPrice}>{formatVehicleRate(vt)}</Text>
+                  </View>
                 </View>
                 {selectedVehicle.id === vt.id && (
                   <Ionicons name="checkmark-circle" size={22} color={Colors.white} />
@@ -4481,7 +4498,23 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Inter_400Regular",
     color: Colors.textMuted,
-    marginTop: 1,
+  },
+  vehicleMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 2,
+  },
+  passengerCapacity: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  passengerCapacityText: {
+    fontSize: 11,
+    fontFamily: "Inter_500Medium",
+    color: Colors.textMuted,
   },
   confirmBtn: {
     backgroundColor: Colors.white,
@@ -4652,6 +4685,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Inter_400Regular",
     color: Colors.textMuted,
+  },
+  categoryFareDetails: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    minWidth: 0,
+  },
+  categoryFareRate: {
+    flex: 1,
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textSecondary,
   },
   categoryFarePriceWrap: {
     minWidth: 62,
@@ -5780,6 +5825,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Inter_500Medium",
     color: Colors.textSecondary,
+    flex: 1,
+  },
+  vehicleOptionMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
     marginTop: 2,
   },
   ratingContainer: {

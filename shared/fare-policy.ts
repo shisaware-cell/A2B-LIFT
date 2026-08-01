@@ -4,12 +4,12 @@ export const DRIVER_SHARE_RATE = 1 - PLATFORM_COMMISSION_RATE;
 export const REFERRAL_REWARD_RATE = 0.025;
 
 export const VEHICLE_CATEGORY_PRICING = {
-  a2b_lite: { pricePerKm: 5, baseFare: 50, includedKm: 1 },
-  budget: { pricePerKm: 8.5, baseFare: 50, includedKm: 0 },
-  luxury: { pricePerKm: 14.5, baseFare: 100, includedKm: 0 },
-  business: { pricePerKm: 35, baseFare: 150, includedKm: 0 },
-  van: { pricePerKm: 15, baseFare: 120, includedKm: 0 },
-  luxury_van: { pricePerKm: 35, baseFare: 200, includedKm: 0 },
+  a2b_lite: { pricePerKm: 5, baseFare: 50, includedKm: 1, maxPassengers: 2 },
+  budget: { pricePerKm: 8.5, baseFare: 50, includedKm: 0, maxPassengers: 4 },
+  luxury: { pricePerKm: 14.5, baseFare: 100, includedKm: 0, maxPassengers: 4 },
+  business: { pricePerKm: 35, baseFare: 150, includedKm: 0, maxPassengers: 4 },
+  van: { pricePerKm: 15, baseFare: 120, includedKm: 0, maxPassengers: 8 },
+  luxury_van: { pricePerKm: 35, baseFare: 200, includedKm: 0, maxPassengers: 6 },
 } as const;
 
 export function getBillableDistanceKm(distanceKm: unknown, includedKm: unknown = 0) {

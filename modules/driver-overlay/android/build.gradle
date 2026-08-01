@@ -1,0 +1,13 @@
+apply plugin: "com.android.library"
+apply plugin: "expo-module-gradle-plugin"
+
+group = "expo.modules.driveroverlay"
+version = "0.1.0"
+
+android {
+  namespace "expo.modules.driveroverlay"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+}

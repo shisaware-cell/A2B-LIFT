@@ -44,6 +44,12 @@ import Colors from "@/constants/colors";
 import A2BMap from "@/components/A2BMap";
 import { VEHICLE_CATEGORY_PRICING, getDriverDisplayFare, getDriverNetFare } from "@shared/fare-policy";
 import { normalizeRideStops } from "@shared/ride-stops";
+import {
+  DRIVER_OVERLAY_ENABLED_KEY,
+  hasDriverOverlayPermission,
+  isDriverOverlayAvailable,
+  startDriverOverlay,
+} from "@/lib/driver-overlay";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const ROUTE_REFRESH_MIN_DISTANCE_KM = 0.2;
@@ -660,6 +666,17 @@ export default function ChauffeurDashboard() {
     const interval = setInterval(fetchUnread, 30000);
     return () => clearInterval(interval);
   }, [user]);
+
+  useEffect(() => {
+    if (!isDriverOverlayAvailable()) return;
+    const eventCount = unreadCount + (incomingRide?.id ? 1 : 0);
+    void (async () => {
+      const enabled = await AsyncStorage.getItem(DRIVER_OVERLAY_ENABLED_KEY) === "true";
+      if (enabled && await hasDriverOverlayPermission()) {
+        await startDriverOverlay(eventCount);
+      }
+    })();
+  }, [incomingRide?.id, unreadCount]);
 
   // ─── Socket: incoming ride ────────────────────────────────────────────────
   useEffect(() => {

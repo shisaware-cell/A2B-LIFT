@@ -169,6 +169,7 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
       "expo-router",
       "expo-font",
       "expo-web-browser",
+      ...(config.variant === "client" ? ["./plugins/without-driver-overlay"] : []),
       [
         "expo-build-properties",
         {

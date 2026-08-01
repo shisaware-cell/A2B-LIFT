@@ -19,6 +19,28 @@ test("shows every vehicle category with route-specific pricing", () => {
   assert.match(routesSource, /app\.post\("\/api\/pricing\/options"/);
   assert.ok(clientSource.indexOf('id: "luxury_van"') < clientSource.indexOf('id: "a2b_lite"'));
   assert.ok(clientSource.indexOf('id: "a2b_lite"') < clientSource.indexOf('id: "budget"'));
+  assert.match(clientSource, /name: "VIP"/);
+  assert.match(clientSource, /people-outline/);
+  assert.match(clientSource, /maxPassengers/);
+});
+
+test("offers an Android-only floating driver shortcut with event counts", () => {
+  const settingsSource = readProjectFile("app/chauffeur/settings.tsx");
+  const dashboardSource = readProjectFile("app/chauffeur/index.tsx");
+  const overlaySource = readProjectFile("lib/driver-overlay.ts");
+  const overlayManifest = readProjectFile("modules/driver-overlay/android/src/main/AndroidManifest.xml");
+  const appConfigSource = readProjectFile("app.config.shared.js");
+  const clientManifestGuard = readProjectFile("plugins/without-driver-overlay.js");
+
+  assert.match(settingsSource, /Floating driver shortcut/);
+  assert.match(settingsSource, /isDriverOverlayAvailable\(\)/);
+  assert.match(dashboardSource, /unreadCount \+ \(incomingRide\?\.id \? 1 : 0\)/);
+  assert.match(overlaySource, /Platform\.OS === "android"/);
+  assert.match(overlayManifest, /android\.permission\.SYSTEM_ALERT_WINDOW/);
+  assert.match(overlayManifest, /android:foregroundServiceType="specialUse"/);
+  assert.match(appConfigSource, /config\.variant === "client"/);
+  assert.match(clientManifestGuard, /DriverOverlayService/);
+  assert.match(clientManifestGuard, /tools:node.*remove/);
 });
 
 test("emits rider cancellations before slow refund processing", () => {

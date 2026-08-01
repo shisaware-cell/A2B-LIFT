@@ -7,7 +7,7 @@ import {
   getPlatformCommission,
 } from "../shared/fare-policy";
 
-export const VEHICLE_CATEGORIES: Record<string, { name: string; pricePerKm: number; baseFare: number; includedKm: number; commissionRate: number; examples: string }> = {
+export const VEHICLE_CATEGORIES: Record<string, { name: string; pricePerKm: number; baseFare: number; includedKm: number; maxPassengers: number; commissionRate: number; examples: string }> = {
   a2b_lite: { name: "A2B Lite", ...VEHICLE_CATEGORY_PRICING.a2b_lite, commissionRate: getVehicleCategoryCommissionRate("a2b_lite"), examples: "Hyundai i10 and similar compact cars" },
   budget: { name: "Budget", ...VEHICLE_CATEGORY_PRICING.budget, commissionRate: getVehicleCategoryCommissionRate("budget"), examples: "Toyota Corolla, Toyota Quest" },
   luxury: { name: "Luxury", ...VEHICLE_CATEGORY_PRICING.luxury, commissionRate: getVehicleCategoryCommissionRate("luxury"), examples: "BMW 3 Series, Mercedes C Class" },

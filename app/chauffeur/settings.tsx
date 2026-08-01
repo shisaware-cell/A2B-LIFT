@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, Pressable, Platform, ScrollView, Modal, Alert, ActivityIndicator, Image } from "react-native";
+import { View, Text, StyleSheet, Pressable, Platform, ScrollView, Modal, Alert, ActivityIndicator, Image, Switch, AppState } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -10,6 +10,14 @@ import * as DocumentPicker from "expo-document-picker";
 import { uploadDocument } from "@/lib/supabase-storage";
 import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
+import {
+  DRIVER_OVERLAY_ENABLED_KEY,
+  hasDriverOverlayPermission,
+  isDriverOverlayAvailable,
+  requestDriverOverlayPermission,
+  startDriverOverlay,
+  stopDriverOverlay,
+} from "@/lib/driver-overlay";
 
 interface DriverReview {
   id: string;
@@ -40,6 +48,9 @@ export default function ChauffeurSettingsScreen() {
   const [driverProfile, setDriverProfile] = useState<DriverProfileSummary | null>(null);
   const [driverProfileLoading, setDriverProfileLoading] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [overlayEnabled, setOverlayEnabled] = useState(false);
+  const [overlayPermissionGranted, setOverlayPermissionGranted] = useState(false);
+  const [overlayUpdating, setOverlayUpdating] = useState(false);
 
   // Fetch driver application status
   const { data: application, refetch: refetchApplication } = useQuery({
@@ -56,6 +67,51 @@ export default function ChauffeurSettingsScreen() {
   useEffect(() => {
     loadChauffeur();
   }, []);
+
+  useEffect(() => {
+    if (!isDriverOverlayAvailable()) return;
+
+    async function syncOverlayPreference() {
+      const enabled = await AsyncStorage.getItem(DRIVER_OVERLAY_ENABLED_KEY) === "true";
+      const permitted = await hasDriverOverlayPermission();
+      setOverlayEnabled(enabled);
+      setOverlayPermissionGranted(permitted);
+      if (enabled && permitted) await startDriverOverlay();
+    }
+
+    void syncOverlayPreference();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void syncOverlayPreference();
+    });
+    return () => subscription.remove();
+  }, []);
+
+  async function toggleDriverOverlay(enabled: boolean) {
+    if (overlayUpdating) return;
+    setOverlayUpdating(true);
+    try {
+      setOverlayEnabled(enabled);
+      await AsyncStorage.setItem(DRIVER_OVERLAY_ENABLED_KEY, enabled ? "true" : "false");
+      if (!enabled) {
+        await stopDriverOverlay();
+        return;
+      }
+
+      const permitted = await hasDriverOverlayPermission();
+      setOverlayPermissionGranted(permitted);
+      if (permitted) {
+        await startDriverOverlay();
+      } else {
+        await requestDriverOverlayPermission();
+      }
+    } catch (error: any) {
+      setOverlayEnabled(false);
+      await AsyncStorage.setItem(DRIVER_OVERLAY_ENABLED_KEY, "false");
+      Alert.alert("Floating shortcut unavailable", error?.message || "Please try again.");
+    } finally {
+      setOverlayUpdating(false);
+    }
+  }
 
   async function loadChauffeur() {
     try {
@@ -90,6 +146,7 @@ export default function ChauffeurSettingsScreen() {
   }
 
   async function handleLogout() {
+    await stopDriverOverlay();
     await logout();
   }
 
@@ -292,6 +349,32 @@ export default function ChauffeurSettingsScreen() {
       )}
 
       <View style={styles.menuGroup}>
+        {isDriverOverlayAvailable() ? (
+          <View style={styles.menuItem}>
+            <View style={styles.menuIconCircle}>
+              <Ionicons name="chatbubble-ellipses-outline" size={20} color={Colors.white} />
+            </View>
+            <View style={styles.menuTextBlock}>
+              <Text style={styles.menuText}>Floating driver shortcut</Text>
+              <Text style={styles.menuSubText}>
+                {overlayEnabled && !overlayPermissionGranted
+                  ? "Allow display over other apps to finish setup"
+                  : "Keep A2B available while using other apps"}
+              </Text>
+            </View>
+            {overlayUpdating ? (
+              <ActivityIndicator size="small" color={Colors.white} />
+            ) : (
+              <Switch
+                value={overlayEnabled && overlayPermissionGranted}
+                onValueChange={toggleDriverOverlay}
+                trackColor={{ false: Colors.border, true: Colors.success }}
+                thumbColor={Colors.white}
+              />
+            )}
+          </View>
+        ) : null}
+
         <Pressable style={({ pressed }) => [styles.menuItem, pressed && { opacity: 0.7 }]} onPress={() => setShowVehicle(true)}>
           <View style={styles.menuIconCircle}>
             <Ionicons name="car-outline" size={20} color={Colors.white} />
