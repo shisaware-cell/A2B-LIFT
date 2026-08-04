@@ -814,9 +814,17 @@ function renderChauffeurTable(tableId, data, showActions) {
     <thead><tr><th>Driver</th><th>Vehicle</th><th>Plate</th><th>Type</th><th>Capacity</th><th>Online</th><th>Status</th><th>Actions</th></tr></thead>
     <tbody>${data.map(c => { const st = chaufStatus(c); return `<tr>
       <td>
-        <div style="font-weight:600">${c.userName || '—'}</div>
-        <div style="font-size:11px;color:var(--muted)">${c.userEmail || ''}</div>
-        <div style="font-size:11px;color:var(--muted)">${c.phone || c.userPhone || ''}</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          ${c.profilePhoto
+            ? `<img src="${c.profilePhoto}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;border:1px solid var(--border);flex-shrink:0" onerror="this.style.display='none'" />`
+            : `<div style="width:34px;height:34px;border-radius:50%;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0">🧑‍✈️</div>`}
+          <div>
+            <div style="font-weight:600">${c.userName || '—'}</div>
+            <div style="font-size:11px;color:var(--muted)">${c.userEmail || ''}</div>
+            <div style="font-size:11px;color:var(--muted)">${c.phone || c.userPhone || ''}</div>
+          </div>
+        </div>
+        ${!c.profilePhoto ? `<div style="font-size:11px;color:#9a5b00;margin-top:4px;font-weight:600">⚠ No photo — riders see a blank avatar. Click Edit to add one.</div>` : ''}
         ${c.applicationStatus === 'waitlisted' && c.waitlistReason ? `<div style="font-size:11px;color:#9a5b00;margin-top:4px">Reason: ${escapeHtml(c.waitlistReason)}</div>` : ''}
       </td>
       <td>

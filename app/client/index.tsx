@@ -48,7 +48,7 @@ const CATEGORY_A2B_LITE_ART = require("../../assets/images/category-a2b-lite.png
 
 const VEHICLE_TYPES = [
   { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury_van, badge: "recommended" },
-  { id: "a2b_lite", name: "A2B Lite", desc: "Hyundai i10 and similar compact cars", artwork: CATEGORY_A2B_LITE_ART, ...VEHICLE_CATEGORY_PRICING.a2b_lite },
+  { id: "a2b_lite", name: "A2B Lite", desc: "Hyundai i10 and similar compact cars", artwork: CATEGORY_A2B_LITE_ART, ...VEHICLE_CATEGORY_PRICING.a2b_lite, badge: "cheapest" },
   { id: "budget", name: "Budget", desc: "Toyota Corolla, Toyota Quest", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.budget },
   { id: "luxury", name: "Luxury", desc: "BMW 3 Series, Mercedes C Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury },
   { id: "business", name: "VIP", desc: "BMW 5 Series, Mercedes E Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.business },

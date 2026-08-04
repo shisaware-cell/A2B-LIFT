@@ -2278,7 +2278,13 @@ export default function ChauffeurDashboard() {
           </View>
           <Pressable style={styles.clientInfoButton} onPress={() => openClientProfile(currentRide.clientId)}>
             <View style={styles.addrRow}>
-              <Ionicons name="person-outline" size={13} color={Colors.textMuted} />
+              {currentRide.clientPhoto ? (
+                <Image source={{ uri: currentRide.clientPhoto }} style={styles.ridePartyAvatar} />
+              ) : (
+                <View style={styles.ridePartyAvatarFallback}>
+                  <Ionicons name="person" size={13} color={Colors.textMuted} />
+                </View>
+              )}
               <Text style={[styles.addrText, { color: Colors.white }]}>{clientDisplayName}</Text>
             </View>
             <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
@@ -2423,6 +2429,13 @@ export default function ChauffeurDashboard() {
             <View style={styles.incomingHeader}>
               <Ionicons name="flash" size={18} color={Colors.warning} />
               <Pressable style={styles.incomingClientButton} onPress={() => openClientProfile(incomingRide.clientId)}>
+                {incomingRide.clientPhoto ? (
+                  <Image source={{ uri: incomingRide.clientPhoto }} style={styles.ridePartyAvatar} />
+                ) : (
+                  <View style={styles.ridePartyAvatarFallback}>
+                    <Ionicons name="person" size={13} color={Colors.textMuted} />
+                  </View>
+                )}
                 <Text style={styles.incomingTitle}>
                   {incomingRide.clientFirstName ? `Pickup: ${incomingRide.clientFirstName}` : "New Ride Request"}
                 </Text>
@@ -2793,6 +2806,11 @@ const styles = StyleSheet.create({
   etaText: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textMuted },
   priceText: { fontSize: 20, fontFamily: "Inter_700Bold", color: Colors.white },
   clientInfoButton: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  ridePartyAvatar: { width: 22, height: 22, borderRadius: 11, backgroundColor: Colors.surface },
+  ridePartyAvatarFallback: {
+    width: 22, height: 22, borderRadius: 11, backgroundColor: Colors.surface,
+    alignItems: "center", justifyContent: "center",
+  },
 
   rideActions: { flexDirection: "row", gap: 8 },
   rideSecBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, backgroundColor: "rgba(255,255,255,0.09)", borderRadius: 10, paddingVertical: 9, borderWidth: 1, borderColor: GLASS_BORDER },

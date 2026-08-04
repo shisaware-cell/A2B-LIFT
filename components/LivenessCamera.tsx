@@ -1,11 +1,19 @@
 /**
  * LivenessCamera.tsx
  *
- * Full-screen guided selfie capture with on-device ML Kit face validation.
- * The camera accepts one sufficiently large face completing a random action.
+ * Guided selfie capture with on-device ML Kit face validation.
+ *
+ * Design principles:
+ *  - The requested challenge is respected. "look_straight" means a clear,
+ *    forward-facing profile photo (what riders and drivers actually see) and is
+ *    never silently swapped for a random action.
+ *  - The challenge stays the same across retakes so guidance is predictable.
+ *  - A user is never dead-ended. If ML Kit errors, stalls, or keeps rejecting a
+ *    genuine photo, the capture can still be submitted — flagged with a lower
+ *    confidence score so review can happen server-side.
  */
 
-import React, { useRef, useState, useEffect, useCallback } from "react";
+import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -55,27 +63,46 @@ const OVAL_H = OVAL_W * 1.28;
 const OVAL_X = (SW - OVAL_W) / 2;
 const OVAL_Y = SH * 0.14;
 
+/** After this many rejected attempts the photo can be submitted anyway. */
+const MAX_STRICT_ATTEMPTS = 2;
+/** If ML Kit hasn't answered in this long, stop blocking the user. */
+const DETECTION_TIMEOUT_MS = 8000;
+/** Minimum share of the frame the face must occupy. */
+const MIN_FACE_RATIO = 0.17;
+
 const CHALLENGE_LABELS: Record<LivenessChallenge, string> = {
-  blink:        "Blink slowly",
-  smile:        "Smile naturally",
-  turn_left:    "Turn your head slightly left",
-  turn_right:   "Turn your head slightly right",
+  blink:         "Keep both eyes open",
+  smile:         "Smile naturally",
+  turn_left:     "Turn your head slightly left",
+  turn_right:    "Turn your head slightly right",
   look_straight: "Look straight into the camera",
 };
 
 const CHALLENGE_ICONS: Record<LivenessChallenge, string> = {
-  blink:        "eye-outline",
-  smile:        "happy-outline",
-  turn_left:    "arrow-back-outline",
-  turn_right:   "arrow-forward-outline",
-  look_straight: "radio-button-on-outline",
+  blink:         "eye-outline",
+  smile:         "happy-outline",
+  turn_left:     "arrow-back-outline",
+  turn_right:    "arrow-forward-outline",
+  look_straight: "person-outline",
+};
+
+const CHALLENGE_TIPS: Record<LivenessChallenge, string> = {
+  blink:         "Good lighting • Both eyes open • Face the camera",
+  smile:         "Good lighting • Relaxed natural smile • Face the camera",
+  turn_left:     "Good lighting • Turn your head, not the phone",
+  turn_right:    "Good lighting • Turn your head, not the phone",
+  look_straight: "Good lighting • Face the camera directly • Neutral expression",
 };
 
 const VIGNETTE = "rgba(0,0,0,0.72)";
-const ACTIVE_CHALLENGES: LivenessChallenge[] = ["smile", "turn_left", "turn_right"];
 
-function pickActiveChallenge() {
-  return ACTIVE_CHALLENGES[Math.floor(Math.random() * ACTIVE_CHALLENGES.length)];
+/* ─── validation ─────────────────────────────────────────────────────────── */
+
+type Validation = { passed: boolean; message: string; score: number };
+
+function num(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function validateFace(
@@ -83,36 +110,70 @@ function validateFace(
   faceCount: number,
   challenge: LivenessChallenge,
   photoSize: { width: number; height: number } | null,
-) {
+): Validation {
+  if (faceCount > 1) {
+    return { passed: false, score: 0, message: "Only one person should be in the photo. Ask others to step out of frame." };
+  }
   if (faceCount !== 1 || !face) {
-    return {
-      passed: false,
-      message: faceCount > 1
-        ? "Only one person can be in the selfie."
-        : "No face was detected. Keep your full face inside the oval.",
-    };
+    return { passed: false, score: 0, message: "We couldn't find your face. Hold the phone at eye level with your face inside the oval." };
   }
 
-  if (photoSize) {
-    const widthRatio = Number(face.frame?.size?.x || 0) / photoSize.width;
-    const heightRatio = Number(face.frame?.size?.y || 0) / photoSize.height;
-    if (widthRatio < 0.2 || heightRatio < 0.2) {
-      return { passed: false, message: "Move closer so your face fills the oval." };
+  // Face must fill a reasonable share of the frame.
+  if (photoSize && photoSize.width > 0 && photoSize.height > 0) {
+    const widthRatio = (num(face.frame?.size?.x) || 0) / photoSize.width;
+    const heightRatio = (num(face.frame?.size?.y) || 0) / photoSize.height;
+    if (widthRatio < MIN_FACE_RATIO && heightRatio < MIN_FACE_RATIO) {
+      return { passed: false, score: 0.3, message: "You're too far away. Move closer so your face fills the oval." };
     }
   }
 
-  if (challenge === "smile" && Number(face.smilingProbability ?? 0) < 0.55) {
-    return { passed: false, message: "We could not detect a clear smile. Please retake it." };
+  const yaw = num(face.headEulerAngleY);          // − / + = turned left / right
+  const roll = num(face.headEulerAngleZ);         // head tilt
+  const smile = num(face.smilingProbability);
+  const leftEye = num(face.leftEyeOpenProbability);
+  const rightEye = num(face.rightEyeOpenProbability);
+
+  // Eyes closed — only judge when ML Kit actually reported the values.
+  const eyesReported = leftEye !== null && rightEye !== null;
+  const eyesClosed = eyesReported && leftEye < 0.25 && rightEye < 0.25;
+  if (eyesClosed && challenge !== "blink") {
+    return { passed: false, score: 0.4, message: "Your eyes look closed. Keep both eyes open and retake." };
   }
 
-  if (
-    (challenge === "turn_left" || challenge === "turn_right") &&
-    Math.abs(Number(face.headEulerAngleY ?? 0)) < 12
-  ) {
-    return { passed: false, message: "Turn your head more clearly, then retake the selfie." };
+  switch (challenge) {
+    case "smile": {
+      if (smile !== null && smile < 0.5) {
+        return { passed: false, score: 0.45, message: "We couldn't detect a clear smile. Smile a little more and retake." };
+      }
+      break;
+    }
+    case "turn_left":
+    case "turn_right": {
+      if (yaw !== null && Math.abs(yaw) < 12) {
+        return { passed: false, score: 0.45, message: "Turn your head a bit more to the side, then retake." };
+      }
+      break;
+    }
+    case "blink":
+    case "look_straight":
+    default: {
+      // Profile photo: the face should be reasonably square to the camera.
+      if (yaw !== null && Math.abs(yaw) > 25) {
+        return { passed: false, score: 0.5, message: "Face the camera directly — your head is turned too far to the side." };
+      }
+      if (roll !== null && Math.abs(roll) > 25) {
+        return { passed: false, score: 0.5, message: "Hold your head upright and retake." };
+      }
+      break;
+    }
   }
 
-  return { passed: true, message: "" };
+  // Confidence: start high, trim for anything less than ideal.
+  let score = 0.95;
+  if (yaw !== null && Math.abs(yaw) > 15 && challenge === "look_straight") score -= 0.1;
+  if (eyesReported && (leftEye < 0.5 || rightEye < 0.5)) score -= 0.1;
+
+  return { passed: true, score: Math.max(0.6, Math.round(score * 100) / 100), message: "" };
 }
 
 /* ─── component ──────────────────────────────────────────────────────────── */
@@ -123,17 +184,37 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
   const [step, setStep] = useState<"ready" | "capturing" | "review">("ready");
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
   const [photoSize, setPhotoSize] = useState<{ width: number; height: number } | null>(null);
-  const [activeChallenge, setActiveChallenge] = useState<LivenessChallenge>(
-    challenge === "look_straight" ? pickActiveChallenge : challenge,
-  );
+  const [attempts, setAttempts] = useState(0);
+  const [detectionTimedOut, setDetectionTimedOut] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const capturingRef = useRef(false);
+
+  // The challenge never changes for the lifetime of this capture session, so
+  // the on-screen instruction stays consistent between retakes.
+  const activeChallenge = challenge;
+
   const { faces, error: faceDetectionError, status: faceDetectionStatus, clearFaces } =
     useFacesInPhoto(capturedUri || undefined);
-  const faceValidation = validateFace(faces[0], faces.length, activeChallenge, photoSize);
-  const faceCheckComplete = faceDetectionStatus === "done" || faceDetectionStatus === "error";
 
-  // Subtle pulse on the oval border
+  const detectorFinished = faceDetectionStatus === "done" || faceDetectionStatus === "error";
+  const detectorUnavailable = faceDetectionStatus === "error" || !!faceDetectionError || detectionTimedOut;
+  const checkComplete = detectorFinished || detectionTimedOut;
+
+  const validation = useMemo(
+    () => validateFace(faces[0], faces.length, activeChallenge, photoSize),
+    [faces, activeChallenge, photoSize],
+  );
+
+  // If verification can't run, don't hold the user hostage — accept the photo
+  // with a reduced confidence score instead.
+  const verificationUnavailable = detectorUnavailable;
+  const canSubmit =
+    !!capturedUri &&
+    checkComplete &&
+    (validation.passed || verificationUnavailable || attempts >= MAX_STRICT_ATTEMPTS);
+  const submitIsFallback = !!capturedUri && checkComplete && !validation.passed && canSubmit;
+
+  // Animations
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const flashAnim = useRef(new Animated.Value(0)).current;
 
@@ -146,11 +227,19 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
     );
     loop.start();
     return () => loop.stop();
-  }, []);
+  }, [pulseAnim]);
 
   useEffect(() => {
     if (!permission?.granted) requestPermission();
   }, [permission]);
+
+  // Guard against the detector never answering.
+  useEffect(() => {
+    if (!capturedUri || detectorFinished) return;
+    setDetectionTimedOut(false);
+    const timer = setTimeout(() => setDetectionTimedOut(true), DETECTION_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [capturedUri, detectorFinished]);
 
   /* ── capture ── */
   const doCapture = useCallback(async () => {
@@ -158,20 +247,19 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
     capturingRef.current = true;
     setStep("capturing");
 
-    // White flash effect
     Animated.sequence([
       Animated.timing(flashAnim, { toValue: 1, duration: 80,  useNativeDriver: true }),
       Animated.timing(flashAnim, { toValue: 0, duration: 350, useNativeDriver: true }),
     ]).start();
 
     try {
-      await new Promise<void>((r) => setTimeout(r, 120)); // let flash start
+      await new Promise<void>((r) => setTimeout(r, 110));
       const photo = await cameraRef.current?.takePictureAsync({
-        quality: 0.88,
+        quality: 0.85,
         base64: false,
-        skipProcessing: false,
+        skipProcessing: true,
       });
-      if (!photo?.uri) throw new Error("No photo");
+      if (!photo?.uri) throw new Error("No photo captured");
       setPhotoSize(
         Number(photo.width) > 0 && Number(photo.height) > 0
           ? { width: Number(photo.width), height: Number(photo.height) }
@@ -188,14 +276,16 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
 
   /* ── confirm ── */
   const confirmCapture = useCallback(async () => {
-    if (!capturedUri || confirming || !faceCheckComplete || !faceValidation.passed) return;
+    if (!capturedUri || confirming || !canSubmit) return;
     setConfirming(true);
     try {
       const face = faces[0];
       await onCapture({
         uri: capturedUri,
-        passed: true,
-        score: 0.95,
+        passed: validation.passed,
+        // A fallback submission is recorded with lower confidence so it can be
+        // reviewed rather than silently trusted.
+        score: validation.passed ? validation.score : verificationUnavailable ? 0.5 : 0.4,
         challenge: activeChallenge,
         faceData: {
           faceCount: faces.length,
@@ -207,25 +297,21 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
       setConfirming(false);
     }
   }, [
-    activeChallenge,
-    capturedUri,
-    confirming,
-    faceCheckComplete,
-    faceValidation.passed,
-    faces,
-    onCapture,
+    activeChallenge, canSubmit, capturedUri, confirming, faces,
+    onCapture, validation.passed, validation.score, verificationUnavailable,
   ]);
 
   const retake = useCallback(() => {
     clearFaces();
     setCapturedUri(null);
     setPhotoSize(null);
-    setActiveChallenge(pickActiveChallenge());
+    setDetectionTimedOut(false);
+    setAttempts((n) => n + 1);
     capturingRef.current = false;
     setStep("ready");
   }, [clearFaces]);
 
-  /* ── permission screen ── */
+  /* ── permission screens ── */
   if (!permission) {
     return (
       <View style={styles.center}>
@@ -240,7 +326,7 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
         <Ionicons name="camera-outline" size={56} color={Colors.white} />
         <Text style={styles.permissionTitle}>Camera Access Required</Text>
         <Text style={styles.permissionBody}>
-          We need your camera to capture your profile selfie.
+          We need your camera to capture your profile photo.
         </Text>
         <Pressable style={styles.permissionBtn} onPress={requestPermission}>
           <Text style={styles.permissionBtnText}>Allow Camera</Text>
@@ -254,36 +340,59 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
 
   /* ── review screen ── */
   if (capturedUri && step === "review") {
+    const title = !checkComplete
+      ? "Checking your photo…"
+      : validation.passed
+        ? "Looks good"
+        : verificationUnavailable
+          ? "Couldn't auto-verify"
+          : "Let's try that again";
+
+    const body = !checkComplete
+      ? "Making sure your face is clear and well lit."
+      : validation.passed
+        ? "Your face is clear and well positioned. This photo will be shown on your profile."
+        : verificationUnavailable
+          ? "Automatic face checks aren't available right now. You can still use this photo if your face is clear."
+          : validation.message;
+
     return (
       <View style={styles.root}>
         <Image source={{ uri: capturedUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
         <View style={styles.reviewDim} />
         <View style={styles.reviewPanel}>
-          <Text style={styles.reviewTitle}>
-            {!faceCheckComplete
-              ? "Checking your selfie..."
-              : faceValidation.passed
-                ? "Face verified"
-                : "Retake required"}
-          </Text>
-          {!faceCheckComplete ? (
+          <View style={styles.reviewHeader}>
+            {checkComplete && (
+              <Ionicons
+                name={validation.passed ? "checkmark-circle" : "alert-circle"}
+                size={22}
+                color={validation.passed ? Colors.success : Colors.warning}
+              />
+            )}
+            <Text style={styles.reviewTitle}>{title}</Text>
+          </View>
+
+          {!checkComplete ? (
             <View style={styles.verificationRow}>
               <ActivityIndicator size="small" color={Colors.white} />
-              <Text style={styles.reviewBody}>Checking for a real, clearly visible face.</Text>
+              <Text style={styles.reviewBody}>{body}</Text>
             </View>
           ) : (
-            <Text style={styles.reviewBody}>
-              {faceDetectionError ||
-                faceValidation.message ||
-                "Your face and requested action were detected. Drivers will see this photo."}
+            <Text style={styles.reviewBody}>{body}</Text>
+          )}
+
+          {submitIsFallback && !verificationUnavailable && (
+            <Text style={styles.fallbackNote}>
+              You can retake it, or use this photo anyway — our team will review it.
             </Text>
           )}
+
           <View style={styles.reviewActions}>
-            <Pressable style={styles.retakeBtn} onPress={retake}>
+            <Pressable style={styles.retakeBtn} onPress={retake} disabled={confirming}>
               <Ionicons name="refresh" size={18} color={Colors.white} />
               <Text style={styles.retakeBtnText}>Retake</Text>
             </Pressable>
-            {faceCheckComplete && faceValidation.passed && (
+            {canSubmit && (
               <Pressable
                 style={[styles.confirmBtn, confirming && { opacity: 0.7 }]}
                 onPress={confirmCapture}
@@ -293,7 +402,9 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
                   ? <ActivityIndicator size="small" color={Colors.primary} />
                   : <>
                       <Ionicons name="checkmark" size={18} color={Colors.primary} />
-                      <Text style={styles.confirmBtnText}>Use Photo</Text>
+                      <Text style={styles.confirmBtnText}>
+                        {submitIsFallback ? "Use anyway" : "Use Photo"}
+                      </Text>
                     </>
                 }
               </Pressable>
@@ -307,12 +418,7 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
   /* ── camera screen ── */
   return (
     <View style={styles.root}>
-      {/* Live camera feed — NO faceDetectorSettings */}
-      <CameraView
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        facing="front"
-      />
+      <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="front" />
 
       {/* Vignette mask — darkens everything outside the oval */}
       <View style={[styles.vignette, { height: OVAL_Y }]} />
@@ -323,26 +429,19 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
       </View>
       <View style={[styles.vignette, { position: "absolute", top: OVAL_Y + OVAL_H, left: 0, right: 0, bottom: 0 }]} />
 
-      {/* White flash on capture */}
       <Animated.View
         pointerEvents="none"
         style={[StyleSheet.absoluteFill, { backgroundColor: "#fff", opacity: flashAnim }]}
       />
 
-      {/* Oval border */}
       <Animated.View
         pointerEvents="none"
         style={[
           styles.oval,
-          {
-            left: OVAL_X, top: OVAL_Y,
-            width: OVAL_W, height: OVAL_H,
-            transform: [{ scale: pulseAnim }],
-          },
+          { left: OVAL_X, top: OVAL_Y, width: OVAL_W, height: OVAL_H, transform: [{ scale: pulseAnim }] },
         ]}
       />
 
-      {/* Corner accent marks */}
       {(["tl","tr","bl","br"] as const).map((pos) => (
         <View
           key={pos}
@@ -361,31 +460,25 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
         />
       ))}
 
-      {/* Top bar */}
       <View style={styles.topBar}>
         <Pressable onPress={onCancel} style={styles.closeBtn} hitSlop={12}>
           <Ionicons name="close" size={22} color="#fff" />
         </Pressable>
-        <Text style={styles.topTitle}>Take Selfie</Text>
+        <Text style={styles.topTitle}>Take Photo</Text>
         <View style={{ width: 44 }} />
       </View>
 
-      {/* Challenge pill above oval */}
       <View style={[styles.challengePill, { top: OVAL_Y - 56 }]}>
         <Ionicons name={CHALLENGE_ICONS[activeChallenge] as any} size={15} color="#FFE066" />
         <Text style={styles.challengeText}>{CHALLENGE_LABELS[activeChallenge]}</Text>
       </View>
 
-      {/* Bottom instructions + capture button */}
       <View style={styles.bottomArea}>
         <Text style={styles.instruction}>
           {step === "capturing" ? "Hold still…" : "Position your face in the oval"}
         </Text>
-        <Text style={styles.tip}>
-          Good lighting • Face the camera directly • Chin slightly down
-        </Text>
+        <Text style={styles.tip}>{CHALLENGE_TIPS[activeChallenge]}</Text>
 
-        {/* THE CAPTURE BUTTON — always enabled */}
         <Pressable
           style={[styles.captureBtn, step === "capturing" && { opacity: 0.6 }]}
           onPress={doCapture}
@@ -395,7 +488,7 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
             ? <ActivityIndicator size="small" color={Colors.primary} />
             : <>
                 <Ionicons name="camera" size={20} color={Colors.primary} style={{ marginRight: 8 }} />
-                <Text style={styles.captureBtnText}>Capture Selfie</Text>
+                <Text style={styles.captureBtnText}>Capture Photo</Text>
               </>
           }
         </Pressable>
@@ -455,10 +548,7 @@ const styles = StyleSheet.create({
     paddingBottom: 52, paddingHorizontal: 24,
     alignItems: "center", gap: 10,
   },
-  instruction: {
-    fontSize: 20, fontFamily: "Inter_700Bold",
-    color: "#fff", textAlign: "center",
-  },
+  instruction: { fontSize: 20, fontFamily: "Inter_700Bold", color: "#fff", textAlign: "center" },
   tip: {
     fontSize: 12, fontFamily: "Inter_400Regular",
     color: "rgba(255,255,255,0.45)", textAlign: "center", lineHeight: 18,
@@ -481,8 +571,10 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: "rgba(255,255,255,0.1)",
     gap: 12,
   },
-  reviewTitle: { fontSize: 20, fontFamily: "Inter_700Bold", color: "#fff" },
-  reviewBody:  { fontSize: 14, fontFamily: "Inter_400Regular", color: "rgba(255,255,255,0.7)", lineHeight: 20 },
+  reviewHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  reviewTitle: { fontSize: 20, fontFamily: "Inter_700Bold", color: "#fff", flexShrink: 1 },
+  reviewBody:  { fontSize: 14, fontFamily: "Inter_400Regular", color: "rgba(255,255,255,0.7)", lineHeight: 20, flexShrink: 1 },
+  fallbackNote: { fontSize: 12, fontFamily: "Inter_400Regular", color: "rgba(255,255,255,0.45)", lineHeight: 18 },
   verificationRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   reviewActions: { flexDirection: "row", gap: 10, marginTop: 4 },
   retakeBtn: {
@@ -491,7 +583,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.09)",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
   },
-  retakeBtnText:   { color: "#fff",        fontSize: 15, fontFamily: "Inter_600SemiBold" },
+  retakeBtnText:   { color: "#fff", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   confirmBtn: {
     flex: 1.2, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
     minHeight: 52, borderRadius: 14,

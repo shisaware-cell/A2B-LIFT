@@ -890,13 +890,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } as any);
 
     let clientFirstName = "Rider";
+    let clientPhoto: string | null = null;
     try {
       const client = await storage.getUser(latestRide.clientId);
       clientFirstName = getUserFirstName(client, "Rider");
+      clientPhoto = client?.profilePhoto || null;
     } catch {}
     const offerPayload = {
       ...(updated || latestRide),
       clientFirstName,
+      clientPhoto,
       distanceToPickup: offered.distKm,
       currentOfferExpiresAt: expiresAt,
       assignedVehicleType: offered.activeVehicle?.vehicleType || null,
@@ -7052,11 +7055,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Enrich ride with client first name for driver display
       let clientFirstName = "Rider";
+      let clientPhoto: string | null = null;
       try {
         const clientUser = await storage.getUser(clientId);
         clientFirstName = getUserFirstName(clientUser, "Rider");
+        clientPhoto = clientUser?.profilePhoto || null;
       } catch {}
-      const enrichedRide = { ...ride, clientFirstName };
+      const enrichedRide = { ...ride, clientFirstName, clientPhoto };
 
       // Reserved rides are NOT dispatched now — the dispatch pump promotes them
       // to "searching" shortly before their scheduled time.
@@ -7294,11 +7299,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ride = await storage.getRide(req.params.id);
       if (!ride) return res.status(404).json({ message: "Ride not found" });
       let clientFirstName = "Client";
+      let clientPhoto: string | null = null;
       try {
         const client = await storage.getUser(ride.clientId);
         clientFirstName = getUserFirstName(client, "Client");
+        clientPhoto = client?.profilePhoto || null;
       } catch {}
-      return res.json({ ...ride, clientFirstName });
+      return res.json({ ...ride, clientFirstName, clientPhoto });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }

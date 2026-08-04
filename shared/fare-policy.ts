@@ -4,7 +4,10 @@ export const DRIVER_SHARE_RATE = 1 - PLATFORM_COMMISSION_RATE;
 export const REFERRAL_REWARD_RATE = 0.025;
 
 export const VEHICLE_CATEGORY_PRICING = {
-  a2b_lite: { pricePerKm: 5, baseFare: 50, includedKm: 1, maxPassengers: 2 },
+  // A2B Lite — the cheapest category. R50 covers the first 2km, then R6/km
+  // beyond that. Deliberately tiered (rather than base+per-km from 0km) so a
+  // slightly longer trip can never cost less than a shorter one.
+  a2b_lite: { pricePerKm: 6, baseFare: 50, includedKm: 2, maxPassengers: 2 },
   budget: { pricePerKm: 8.5, baseFare: 50, includedKm: 0, maxPassengers: 4 },
   luxury: { pricePerKm: 14.5, baseFare: 100, includedKm: 0, maxPassengers: 4 },
   business: { pricePerKm: 35, baseFare: 150, includedKm: 0, maxPassengers: 4 },
