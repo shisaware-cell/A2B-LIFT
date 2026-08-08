@@ -185,3 +185,19 @@ test("lets drivers select every approved owned or assigned fleet vehicle", () =>
   assert.match(routesSource, /previousAssignment[\s\S]*?status: "active"/);
   assert.match(vehiclesSource, /\(assigned \|\| ownsVehicle\)/);
 });
+
+test("shows driver photos to riders from either driver profile record", () => {
+  const routesSource = readProjectFile("server/routes.ts");
+  const clientSource = readProjectFile("app/client/index.tsx");
+
+  const detailsStart = routesSource.indexOf('app.get("/api/chauffeurs/:id/details"');
+  const profileStart = routesSource.indexOf('app.get("/api/chauffeurs/:id/profile"');
+  const clientProfileStart = routesSource.indexOf('app.get("/api/clients/:id/profile"');
+  const detailsSource = routesSource.slice(detailsStart, profileStart);
+  const profileSource = routesSource.slice(profileStart, clientProfileStart);
+
+  assert.match(detailsSource, /profilePhoto: chauffeur\.profilePhoto \|\| user\?\.profilePhoto \|\| null/);
+  assert.match(profileSource, /profilePhoto: chauffeur\.profilePhoto \|\| user\?\.profilePhoto \|\| null/);
+  assert.match(clientSource, /source=\{\{ uri: chauffeurDetails\.profilePhoto \}\}/);
+  assert.match(clientSource, /source=\{\{ uri: driverProfile\.profilePhoto \}\}/);
+});

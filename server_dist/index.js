@@ -6147,7 +6147,8 @@ If you did not request this, you can ignore this email.`,
         driverName: user?.name || "Chauffeur",
         driverPhone: chauffeur.phone || user?.phone || null,
         driverRating: avgRating,
-        totalRatings: ratings.length
+        totalRatings: ratings.length,
+        profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null
       });
     } catch (error) {
       return res.status(500).json({ message: error.message });
@@ -6188,7 +6189,7 @@ If you did not request this, you can ignore this email.`,
         totalRatings: ratings.length,
         completedTrips,
         distribution,
-        profilePhoto: chauffeur.profilePhoto,
+        profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null,
         carMake: chauffeur.carMake,
         vehicleModel: chauffeur.vehicleModel,
         carColor: chauffeur.carColor,

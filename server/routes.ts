@@ -4830,6 +4830,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         driverPhone: chauffeur.phone || user?.phone || null,
         driverRating: avgRating,
         totalRatings: ratings.length,
+        profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null,
       });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -4878,7 +4879,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         totalRatings: ratings.length,
         completedTrips,
         distribution,
-        profilePhoto: chauffeur.profilePhoto,
+        profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null,
         carMake: chauffeur.carMake,
         vehicleModel: chauffeur.vehicleModel,
         carColor: chauffeur.carColor,
