@@ -1590,10 +1590,16 @@ var A2B_LITE_COMMISSION_RATE = 0.1;
 var DRIVER_SHARE_RATE = 1 - PLATFORM_COMMISSION_RATE;
 var REFERRAL_REWARD_RATE = 0.025;
 var VEHICLE_CATEGORY_PRICING = {
-  // A2B Lite — the cheapest category. R50 covers the first 2km, then R6/km
-  // beyond that. Deliberately tiered (rather than base+per-km from 0km) so a
-  // slightly longer trip can never cost less than a shorter one.
-  a2b_lite: { pricePerKm: 6, baseFare: 50, includedKm: 2, maxPassengers: 2 },
+  // A2B Lite: trips up to 2km are R50. From 3km onward the base changes to
+  // R30 and the normal kilometre rate applies to the full route distance.
+  a2b_lite: {
+    pricePerKm: 6,
+    baseFare: 50,
+    includedKm: 2,
+    longTripBaseFare: 30,
+    longTripStartsAtKm: 3,
+    maxPassengers: 2
+  },
   budget: { pricePerKm: 8.5, baseFare: 50, includedKm: 0, maxPassengers: 4 },
   luxury: { pricePerKm: 14.5, baseFare: 100, includedKm: 0, maxPassengers: 4 },
   business: { pricePerKm: 35, baseFare: 150, includedKm: 0, maxPassengers: 4 },
@@ -1670,8 +1676,9 @@ function calculateSurgeMultiplier(input) {
 }
 function calculatePrice(distanceKm, categoryId, options) {
   const category = VEHICLE_CATEGORIES[categoryId] || VEHICLE_CATEGORIES.budget;
-  const baseFare = category.baseFare;
-  const includedKm = category.includedKm || 0;
+  const usesLongTripFare = categoryId === "a2b_lite" && Number(distanceKm) >= Number(category.longTripStartsAtKm || 3);
+  const baseFare = usesLongTripFare ? Number(category.longTripBaseFare || category.baseFare) : category.baseFare;
+  const includedKm = usesLongTripFare ? 0 : category.includedKm || 0;
   const distanceFare = getBillableDistanceKm(distanceKm, includedKm) * category.pricePerKm;
   let subtotal = baseFare + distanceFare;
   let lateNightPremium = 0;
@@ -2276,6 +2283,25 @@ function validateResetPassword(password) {
   return null;
 }
 
+// server/user-identity.ts
+function normalizeEmailIdentity(value) {
+  return String(value || "").trim().toLowerCase();
+}
+function normalizePhoneIdentity(value) {
+  let digits = String(value || "").replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (digits.length === 10 && digits.startsWith("0")) return `27${digits.slice(1)}`;
+  if (digits.length === 9) return `27${digits}`;
+  return digits;
+}
+var UserIdentityConflictError = class extends Error {
+  constructor(field) {
+    super(field === "email" ? "An account with this email already exists" : "An account with this phone number already exists");
+    this.field = field;
+    this.name = "UserIdentityConflictError";
+  }
+};
+
 // server/routes.ts
 var RIDE_MATCH_RADIUS_KM = 25;
 var CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1e3;
@@ -2354,21 +2380,10 @@ async function creditReferralReward(options) {
   }
   const referrer = await storage.getUser(referrerUserId);
   if (!referrer) return;
-  const balanceBefore = Number(referrer.walletBalance || 0);
+  const balanceBefore = Number(referrer.rewardsBalance || 0);
   const balanceAfter = Math.round((balanceBefore + reward) * 100) / 100;
   const reference = `${options.referencePrefix}_${options.rideId || Date.now()}_${referrer.id.slice(0, 6)}`;
-  await storage.updateUser(referrer.id, { walletBalance: balanceAfter });
-  await storage.createWalletTransaction({
-    userId: referrer.id,
-    type: "referral_reward",
-    amount: reward,
-    balanceBefore,
-    balanceAfter,
-    reference,
-    description: options.description,
-    rideId: options.rideId || null,
-    status: "completed"
-  });
+  await storage.updateUser(referrer.id, { rewardsBalance: balanceAfter });
   await storage.createRewardTransaction({
     userId: referrer.id,
     sourceUserId,
@@ -2394,7 +2409,7 @@ async function creditReferralReward(options) {
   await storage.createNotification({
     userId: referrer.id,
     title: "Reward Earnings",
-    body: `${options.notificationBody.replace("{amount}", reward.toFixed(2))} It's been added to your wallet \u2014 withdraw it anytime.`,
+    body: `${options.notificationBody.replace("{amount}", reward.toFixed(2))} It is in your reward balance. Activate Lift Club membership to spend or withdraw rewards.`,
     type: "reward"
   });
 }
@@ -3040,6 +3055,59 @@ async function registerRoutes(app2) {
   function normalizeReferralCode(rawValue) {
     return String(rawValue || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   }
+  async function withUserIdentityLocks(identities, action) {
+    const keys = Array.from(new Set(
+      identities.filter(Boolean).map((identity) => `a2b:user-identity:${identity}`)
+    )).sort();
+    if (keys.length === 0) return action();
+    const client = await pool2.connect();
+    try {
+      for (const key of keys) {
+        await client.query("SELECT pg_advisory_lock(hashtext($1))", [key]);
+      }
+      return await action();
+    } finally {
+      for (const key of [...keys].reverse()) {
+        await client.query("SELECT pg_advisory_unlock(hashtext($1))", [key]).catch(() => void 0);
+      }
+      client.release();
+    }
+  }
+  async function assertUserIdentityAvailable(options) {
+    const excludeUserId = options.excludeUserId || null;
+    const email = normalizeEmailIdentity(options.email);
+    if (email) {
+      const emailResult = await pool2.query(
+        `SELECT id FROM users
+         WHERE lower(trim(username)) = $1
+           AND ($2::varchar IS NULL OR id <> $2)
+         LIMIT 1`,
+        [email, excludeUserId]
+      );
+      if (emailResult.rowCount) throw new UserIdentityConflictError("email");
+    }
+    const phone = normalizePhoneIdentity(options.phone);
+    if (phone) {
+      const phoneResult = await pool2.query(
+        `SELECT id
+         FROM users
+         WHERE CASE
+           WHEN regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g') LIKE '00%'
+             THEN substring(regexp_replace(phone, '[^0-9]', '', 'g') FROM 3)
+           WHEN length(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g')) = 10
+             AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE '0%'
+             THEN '27' || substring(regexp_replace(phone, '[^0-9]', '', 'g') FROM 2)
+           WHEN length(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g')) = 9
+             THEN '27' || regexp_replace(phone, '[^0-9]', '', 'g')
+           ELSE regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g')
+         END = $1
+           AND ($2::varchar IS NULL OR id <> $2)
+         LIMIT 1`,
+        [phone, excludeUserId]
+      );
+      if (phoneResult.rowCount) throw new UserIdentityConflictError("phone");
+    }
+  }
   async function generateUniqueReferralCode(name, email) {
     const seed = normalizeReferralCode(name || email || "A2B") || "A2B";
     const base = seed.slice(0, 6);
@@ -3115,6 +3183,16 @@ async function registerRoutes(app2) {
       bankingDetailsUrl: LIFT_CLUB_BANKING_DETAILS_URL
     };
   }
+  async function requireLiftClubRewardAccess(userId, res) {
+    const membership = await storage.getLiftClubMembershipByUser(userId).catch(() => void 0);
+    if (membership?.status === "approved") return membership;
+    res.status(403).json({
+      code: "LIFT_CLUB_MEMBERSHIP_REQUIRED",
+      message: "Approved Lift Club membership is required to spend, transfer, or withdraw rewards.",
+      membership: serializeLiftClubMembership(membership)
+    });
+    return null;
+  }
   async function notifyAdmins(title, body, type = "admin") {
     const admins = (await storage.getAllUsers()).filter((admin) => admin.role === "admin");
     await Promise.all(admins.map((admin) => storage.createNotification({
@@ -3135,22 +3213,11 @@ async function registerRoutes(app2) {
     const referrer = await storage.getUser(referrerUserId);
     if (!referrer) return;
     const reward = LIFT_CLUB_MEMBERSHIP_REFERRAL_BONUS;
-    const balanceBefore = Number(referrer.walletBalance || 0);
+    const balanceBefore = Number(referrer.rewardsBalance || 0);
     const balanceAfter = Math.round((balanceBefore + reward) * 100) / 100;
     const referralEvent = await storage.getReferralEventByReferredUserId(referredUser.id);
     const bonusDescription = `${referredUser.name || "A referred member"} was approved as a Lift Club member after payment review.`;
-    await storage.updateUser(referrer.id, { walletBalance: balanceAfter });
-    await storage.createWalletTransaction({
-      userId: referrer.id,
-      type: "referral_reward",
-      amount: reward,
-      balanceBefore,
-      balanceAfter,
-      reference,
-      description: bonusDescription,
-      rideId: null,
-      status: "completed"
-    });
+    await storage.updateUser(referrer.id, { rewardsBalance: balanceAfter });
     await storage.createRewardTransaction({
       userId: referrer.id,
       referralEventId: referralEvent?.id || null,
@@ -3174,7 +3241,7 @@ async function registerRoutes(app2) {
     await storage.createNotification({
       userId: referrer.id,
       title: "Lift Club Reward",
-      body: `You earned R${reward.toFixed(2)} because your invited member was approved for Lift Club. It's been added to your wallet \u2014 withdraw it anytime.`,
+      body: `You earned R${reward.toFixed(2)} because your invited member was approved for Lift Club. Activate your own Lift Club membership to spend or withdraw it.`,
       type: "reward"
     });
   }
@@ -3188,14 +3255,10 @@ async function registerRoutes(app2) {
       if (!normalizedPhone) {
         return res.status(400).json({ message: "Phone number is required" });
       }
-      const email = username.trim().toLowerCase();
+      const email = normalizeEmailIdentity(username);
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
         return res.status(400).json({ message: "Please enter a valid email address" });
-      }
-      const existing = await storage.getUserByUsername(email);
-      if (existing) {
-        return res.status(400).json({ message: "An account with this email already exists" });
       }
       let referrerUser;
       const normalizedReferralCode = referralCode?.trim().toUpperCase();
@@ -3203,14 +3266,20 @@ async function registerRoutes(app2) {
         referrerUser = await storage.getUserByReferralCode(normalizedReferralCode);
       }
       const hashedPassword = await import_bcryptjs.default.hash(password, 10);
-      const user = await storage.createUser({
-        username: email,
-        password: hashedPassword,
-        name: name.trim(),
-        phone: normalizedPhone,
-        role: role || "client",
-        ...referrerUser ? { referredByUserId: referrerUser.id } : {}
-      });
+      const user = await withUserIdentityLocks(
+        [email, normalizePhoneIdentity(normalizedPhone)],
+        async () => {
+          await assertUserIdentityAvailable({ email, phone: normalizedPhone });
+          return storage.createUser({
+            username: email,
+            password: hashedPassword,
+            name: name.trim(),
+            phone: normalizedPhone,
+            role: role || "client",
+            ...referrerUser ? { referredByUserId: referrerUser.id } : {}
+          });
+        }
+      );
       if (referrerUser) {
         try {
           await storage.createReferralEvent({
@@ -3228,6 +3297,9 @@ async function registerRoutes(app2) {
       const safeUser = await hydrateAuthUser(user);
       return res.json({ user: safeUser, accessToken: token });
     } catch (error) {
+      if (error instanceof UserIdentityConflictError) {
+        return res.status(409).json({ code: `DUPLICATE_${error.field.toUpperCase()}`, message: error.message });
+      }
       if (error.code === "23505") {
         return res.status(400).json({ message: "An account with this email already exists" });
       }
@@ -3608,6 +3680,7 @@ If you did not request this, you can ignore this email.`,
       ).length;
       const referralBase = process.env.EXPO_PUBLIC_REFERRAL_LINK_BASE_URL || process.env.EXPO_PUBLIC_DOMAIN || "https://api.a2blift.com";
       const rewardApp = hydratedUser.role === "chauffeur" ? "driver" : "client";
+      const liftClubMembership = hydratedUser.liftClubMembership || serializeLiftClubMembership(null);
       return res.json({
         referralCode: hydratedUser.referralCode,
         shareUrl: `${String(referralBase).replace(/\/$/, "")}/r/${encodeURIComponent(hydratedUser.referralCode)}?app=${encodeURIComponent(rewardApp)}`,
@@ -3616,6 +3689,8 @@ If you did not request this, you can ignore this email.`,
         rewardedReferrals,
         totalRewardsEarned,
         pendingCashoutAmount,
+        liftClubMembership,
+        rewardAccessUnlocked: liftClubMembership.status === "approved",
         referredPeople,
         transactions,
         cashouts
@@ -3642,6 +3717,7 @@ If you did not request this, you can ignore this email.`,
   });
   app2.post("/api/rewards/cashout", requireAuth, async (req, res) => {
     try {
+      if (!await requireLiftClubRewardAccess(req.auth.sub, res)) return;
       const amount = Number(req.body?.amount || 0);
       if (!Number.isFinite(amount) || amount <= 0) {
         return res.status(400).json({ message: "Invalid amount" });
@@ -3667,6 +3743,7 @@ If you did not request this, you can ignore this email.`,
     }
   });
   app2.post("/api/rewards/transfer-to-wallet", requireAuth, async (req, res) => {
+    if (!await requireLiftClubRewardAccess(req.auth.sub, res)) return;
     const client = await pool2.connect();
     try {
       const userId = req.auth.sub;
@@ -5064,13 +5141,40 @@ If you did not request this, you can ignore this email.`,
       return res.status(500).json({ message: error.message });
     }
   });
-  app2.put("/api/users/:id", async (req, res) => {
+  app2.put("/api/users/:id", requireAuth, async (req, res) => {
     try {
-      const user = await storage.updateUser(req.params.id, req.body);
+      if (req.auth.sub !== req.params.id && req.auth.role !== "admin") {
+        return res.status(403).json({ message: "You can only update your own account" });
+      }
+      const currentUser = await storage.getUser(req.params.id);
+      if (!currentUser) return res.status(404).json({ message: "User not found" });
+      const updates = {};
+      if (typeof req.body?.name === "string" && req.body.name.trim()) {
+        updates.name = req.body.name.trim();
+      }
+      if (typeof req.body?.phone === "string") {
+        const phone = req.body.phone.trim();
+        if (!normalizePhoneIdentity(phone)) {
+          return res.status(400).json({ message: "Please enter a valid phone number" });
+        }
+        updates.phone = phone;
+      }
+      const user = await withUserIdentityLocks(
+        [normalizePhoneIdentity(updates.phone)],
+        async () => {
+          if (updates.phone) {
+            await assertUserIdentityAvailable({ phone: updates.phone, excludeUserId: req.params.id });
+          }
+          return storage.updateUser(req.params.id, updates);
+        }
+      );
       if (!user) return res.status(404).json({ message: "User not found" });
       const { password: _pw, ...safeUser } = user;
       return res.json(safeUser);
     } catch (error) {
+      if (error instanceof UserIdentityConflictError) {
+        return res.status(409).json({ code: `DUPLICATE_${error.field.toUpperCase()}`, message: error.message });
+      }
       return res.status(500).json({ message: error.message });
     }
   });
@@ -5319,71 +5423,82 @@ If you did not request this, you can ignore this email.`,
       return res.status(500).json({ message: error.message || "Google authentication failed" });
     }
   });
-  app2.post("/api/chauffeurs", authOptional, async (req, res) => {
+  app2.post("/api/chauffeurs", requireAuth, async (req, res) => {
     try {
       const userId = req.body.userId;
-      const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
-      const rawVehicleYear = req.body.vehicleYear;
-      if (req.auth && req.auth.role !== "admin" && req.auth.sub !== userId) {
+      if (req.auth.role !== "admin" && req.auth.sub !== userId) {
         return res.status(403).json({ message: "You can only register your own chauffeur profile" });
       }
-      if (userId) {
-        const existingUser = await storage.getUser(userId);
-        if (!existingUser) {
-          const randomPw = Math.random().toString(36).slice(2);
-          await storage.createUser({
-            id: userId,
-            username: `driver_${userId.slice(0, 12)}@a2blift.placeholder`,
-            password: randomPw,
-            name: req.body.name || "A2B Driver",
-            phone: req.body.phone || null,
-            role: "chauffeur"
+      return await withUserIdentityLocks([normalizePhoneIdentity(req.body.phone)], async () => {
+        if (req.body.phone) {
+          await assertUserIdentityAvailable({ phone: req.body.phone, excludeUserId: userId || null });
+        }
+        const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
+        const rawVehicleYear = req.body.vehicleYear;
+        if (userId) {
+          const existingUser = await storage.getUser(userId);
+          if (!existingUser) {
+            const randomPw = Math.random().toString(36).slice(2);
+            await storage.createUser({
+              id: userId,
+              username: `driver_${userId.slice(0, 12)}@a2blift.placeholder`,
+              password: randomPw,
+              name: req.body.name || "A2B Driver",
+              phone: req.body.phone || null,
+              role: "chauffeur"
+            });
+          }
+        }
+        if (!userId) return res.status(400).json({ message: "userId is required" });
+        let chauffeur;
+        const existingChauffeur = await storage.getChauffeurByUserId(userId);
+        const normalizedVehicleYear = rawVehicleYear == null || rawVehicleYear === "" ? existingChauffeur?.vehicleYear ?? null : Number.parseInt(String(rawVehicleYear), 10);
+        if (!Number.isFinite(normalizedVehicleYear) || normalizedVehicleYear == null) {
+          return res.status(400).json({ message: "Please add your vehicle model year before continuing." });
+        }
+        if (normalizedVehicleYear < 2015 || normalizedVehicleYear > currentYear + 1) {
+          return res.status(400).json({ message: `Please enter a vehicle model year between 2015 and ${currentYear + 1}.` });
+        }
+        if (existingChauffeur) {
+          chauffeur = await storage.updateChauffeur(existingChauffeur.id, {
+            carMake: req.body.carMake || existingChauffeur.carMake,
+            vehicleModel: req.body.vehicleModel || existingChauffeur.vehicleModel,
+            vehicleYear: normalizedVehicleYear,
+            plateNumber: req.body.plateNumber || existingChauffeur.plateNumber,
+            vehicleType: req.body.vehicleType || existingChauffeur.vehicleType,
+            carColor: req.body.carColor || existingChauffeur.carColor,
+            phone: req.body.phone || existingChauffeur.phone,
+            passengerCapacity: req.body.passengerCapacity || existingChauffeur.passengerCapacity,
+            luggageCapacity: req.body.luggageCapacity || existingChauffeur.luggageCapacity,
+            profilePhoto: req.body.profilePhoto || existingChauffeur.profilePhoto
+          });
+        } else {
+          chauffeur = await storage.createChauffeur({
+            ...req.body,
+            vehicleYear: normalizedVehicleYear
           });
         }
-      }
-      if (!userId) return res.status(400).json({ message: "userId is required" });
-      let chauffeur;
-      const existingChauffeur = await storage.getChauffeurByUserId(userId);
-      const normalizedVehicleYear = rawVehicleYear == null || rawVehicleYear === "" ? existingChauffeur?.vehicleYear ?? null : Number.parseInt(String(rawVehicleYear), 10);
-      if (!Number.isFinite(normalizedVehicleYear) || normalizedVehicleYear == null) {
-        return res.status(400).json({ message: "Please add your vehicle model year before continuing." });
-      }
-      if (normalizedVehicleYear < 2015 || normalizedVehicleYear > currentYear + 1) {
-        return res.status(400).json({ message: `Please enter a vehicle model year between 2015 and ${currentYear + 1}.` });
-      }
-      if (existingChauffeur) {
-        chauffeur = await storage.updateChauffeur(existingChauffeur.id, {
-          carMake: req.body.carMake || existingChauffeur.carMake,
-          vehicleModel: req.body.vehicleModel || existingChauffeur.vehicleModel,
-          vehicleYear: normalizedVehicleYear,
-          plateNumber: req.body.plateNumber || existingChauffeur.plateNumber,
-          vehicleType: req.body.vehicleType || existingChauffeur.vehicleType,
-          carColor: req.body.carColor || existingChauffeur.carColor,
-          phone: req.body.phone || existingChauffeur.phone,
-          passengerCapacity: req.body.passengerCapacity || existingChauffeur.passengerCapacity,
-          luggageCapacity: req.body.luggageCapacity || existingChauffeur.luggageCapacity,
-          profilePhoto: req.body.profilePhoto || existingChauffeur.profilePhoto
+        await storage.updateUser(req.body.userId, {
+          role: "chauffeur",
+          ...req.body.phone ? { phone: String(req.body.phone).trim() } : {}
         });
-      } else {
-        chauffeur = await storage.createChauffeur({
-          ...req.body,
-          vehicleYear: normalizedVehicleYear
-        });
-      }
-      await storage.updateUser(req.body.userId, { role: "chauffeur" });
-      const existingApp = await storage.getDriverApplicationByUserId(req.body.userId);
-      if (!existingApp) {
-        await storage.createDriverApplication({
-          userId: req.body.userId,
-          chauffeurId: chauffeur.id,
-          status: "pending"
-        });
-      } else if (existingApp.chauffeurId !== chauffeur.id) {
-        await storage.updateDriverApplication(existingApp.id, { chauffeurId: chauffeur.id });
-      }
-      return res.json(chauffeur);
+        const existingApp = await storage.getDriverApplicationByUserId(req.body.userId);
+        if (!existingApp) {
+          await storage.createDriverApplication({
+            userId: req.body.userId,
+            chauffeurId: chauffeur.id,
+            status: "pending"
+          });
+        } else if (existingApp.chauffeurId !== chauffeur.id) {
+          await storage.updateDriverApplication(existingApp.id, { chauffeurId: chauffeur.id });
+        }
+        return res.json(chauffeur);
+      });
     } catch (error) {
-      return res.status(500).json({ message: error.message });
+      return res.status(error instanceof UserIdentityConflictError ? 409 : 500).json({
+        code: error instanceof UserIdentityConflictError ? `DUPLICATE_${error.field.toUpperCase()}` : void 0,
+        message: error.message
+      });
     }
   });
   const PARTNER_REQUIRED_DOCS = /* @__PURE__ */ new Set([
@@ -5548,34 +5663,43 @@ If you did not request this, you can ignore this email.`,
       });
       return res.status(201).json(doc);
     } catch (error) {
-      return res.status(400).json({ message: error.message });
+      return res.status(error instanceof UserIdentityConflictError ? 409 : 400).json({ message: error.message });
     }
   });
   app2.post("/api/operator-profile/driver", requireAuth, async (req, res) => {
     try {
       const phone = requireStringField(req.body, "phone");
-      const profile = await getOrCreateOperatorProfile({
-        userId: req.auth.sub,
-        type: "driver",
-        status: "pending"
-      });
-      if (!profile) return res.status(500).json({ message: "Could not create driver profile" });
-      let chauffeur = await storage.getChauffeurByUserId(req.auth.sub);
-      if (chauffeur) {
-        chauffeur = await storage.updateChauffeur(chauffeur.id, {
-          phone,
-          profilePhoto: req.body.profilePhoto || chauffeur.profilePhoto,
-          isApproved: profile.status === "approved" ? true : chauffeur.isApproved
-        });
-      } else {
-        chauffeur = await storage.createChauffeur({
-          userId: req.auth.sub,
-          phone,
-          profilePhoto: req.body.profilePhoto || null,
-          isApproved: false
-        });
-      }
-      await storage.updateUser(req.auth.sub, { role: "chauffeur", phone });
+      const result = await withUserIdentityLocks(
+        [normalizePhoneIdentity(phone)],
+        async () => {
+          await assertUserIdentityAvailable({ phone, excludeUserId: req.auth.sub });
+          const profile2 = await getOrCreateOperatorProfile({
+            userId: req.auth.sub,
+            type: "driver",
+            status: "pending"
+          });
+          if (!profile2) throw new Error("Could not create driver profile");
+          let chauffeur2 = await storage.getChauffeurByUserId(req.auth.sub);
+          if (chauffeur2) {
+            chauffeur2 = await storage.updateChauffeur(chauffeur2.id, {
+              phone,
+              profilePhoto: req.body.profilePhoto || chauffeur2.profilePhoto,
+              isApproved: profile2.status === "approved" ? true : chauffeur2.isApproved
+            });
+          } else {
+            chauffeur2 = await storage.createChauffeur({
+              userId: req.auth.sub,
+              phone,
+              profilePhoto: req.body.profilePhoto || null,
+              isApproved: false
+            });
+          }
+          await storage.updateUser(req.auth.sub, { role: "chauffeur", phone });
+          return { profile: profile2, chauffeur: chauffeur2 };
+        }
+      );
+      const { profile } = result;
+      let { chauffeur } = result;
       let application = await storage.getDriverApplicationByUserId(req.auth.sub);
       if (application) {
         application = await storage.updateDriverApplication(application.id, {
@@ -5594,7 +5718,7 @@ If you did not request this, you can ignore this email.`,
       return res.status(201).json({ profile, chauffeur, application });
     } catch (error) {
       const message = error.message || "Failed to submit driver profile";
-      return res.status(message.includes("already registered") ? 409 : 400).json({ message });
+      return res.status(error instanceof UserIdentityConflictError || message.includes("already registered") ? 409 : 400).json({ message });
     }
   });
   app2.post("/api/operator-profile/partner", requireAuth, async (req, res) => {
@@ -5609,6 +5733,10 @@ If you did not request this, you can ignore this email.`,
         accountHolder: requireStringField(req.body, "accountHolder"),
         accountNumber: requireStringField(req.body, "accountNumber")
       };
+      await assertUserIdentityAvailable({
+        phone: partnerData.contactPhone,
+        excludeUserId: req.auth.sub
+      });
       const docs = await storage.getDocumentsByUser(req.auth.sub);
       const uploadedTypes = new Set(docs.map((doc) => doc.type));
       const missingDocs = [...PARTNER_REQUIRED_DOCS].filter((type) => !uploadedTypes.has(type));
@@ -5628,11 +5756,17 @@ If you did not request this, you can ignore this email.`,
         operatorProfileId: profile.id,
         ...partnerData
       });
-      await storage.updateUser(req.auth.sub, { role: "chauffeur", phone: partnerData.contactPhone });
+      await withUserIdentityLocks(
+        [normalizePhoneIdentity(partnerData.contactPhone)],
+        async () => {
+          await assertUserIdentityAvailable({ phone: partnerData.contactPhone, excludeUserId: req.auth.sub });
+          await storage.updateUser(req.auth.sub, { role: "chauffeur", phone: partnerData.contactPhone });
+        }
+      );
       return res.status(201).json({ profile, partnerProfile });
     } catch (error) {
       const message = error.message || "Failed to submit partner profile";
-      return res.status(message.includes("already registered") ? 409 : 400).json({ message });
+      return res.status(error instanceof UserIdentityConflictError || message.includes("already registered") ? 409 : 400).json({ message });
     }
   });
   app2.get("/api/vehicles", requireAuth, async (req, res) => {
@@ -9375,6 +9509,7 @@ If you did not request this, you can ignore this email.`,
         const available = Math.max(Number(chauffeur?.earningsTotal || 0), Number(user.walletBalance || 0));
         return res.status(400).json({ message: `You only have R${available.toFixed(2)} available to withdraw.` });
       }
+      if (source === "wallet" && chauffeur && !await requireLiftClubRewardAccess(userId, res)) return;
       if (source === "driver_earnings" && chauffeur) {
         await storage.updateChauffeur(chauffeur.id, {
           earningsTotal: Number(chauffeur.earningsTotal || 0) - amount
@@ -10240,6 +10375,7 @@ If you did not request this, you can ignore this email.`,
       }
       const fromWallet = Math.min(walletBefore, amount);
       const fromRewards = amount - fromWallet;
+      if (fromRewards > 0 && !await requireLiftClubRewardAccess(userId, res)) return;
       await storage.updateUser(userId, {
         walletBalance: walletBefore - fromWallet,
         ...fromRewards > 0 ? { rewardsBalance: rewardsBefore - fromRewards } : {}

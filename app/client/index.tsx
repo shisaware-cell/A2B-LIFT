@@ -39,6 +39,7 @@ import { uploadDocument } from "@/lib/supabase-storage";
 import Colors from "@/constants/colors";
 import A2BMap from "@/components/A2BMap";
 import LivenessCamera, { type LivenessChallenge, type LivenessCaptureResult } from "@/components/LivenessCamera";
+import LiftClubMembershipRequiredModal from "@/components/LiftClubMembershipRequiredModal";
 import { VEHICLE_CATEGORY_PRICING, getBillableDistanceKm } from "@shared/fare-policy";
 import { encodeStopsQuery, normalizeRideStops, type RideStop } from "@shared/ride-stops";
 
@@ -943,6 +944,7 @@ export default function ClientHomeScreen() {
   const [submittingRating, setSubmittingRating] = useState(false);
   const [onlineDrivers, setOnlineDrivers] = useState<NearbyDriverState[]>([]);
   const [showPaymentPicker, setShowPaymentPicker] = useState(false);
+  const [showLiftClubGate, setShowLiftClubGate] = useState(false);
   const [paymentMethodsLoading, setPaymentMethodsLoading] = useState(false);
   const [estimatingFare, setEstimatingFare] = useState(false);
   const [rideRequestLoading, setRideRequestLoading] = useState(false);
@@ -3537,14 +3539,26 @@ export default function ClientHomeScreen() {
               <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
             </Pressable>
             {(() => {
-              const spendable = Number(user?.walletBalance || 0) + Number((user as any)?.rewardsBalance || 0);
+              const walletBalance = Number(user?.walletBalance || 0);
+              const rewardsBalance = Number(user?.rewardsBalance || 0);
+              const spendable = walletBalance + (isLiftClubMember ? rewardsBalance : 0);
+              const balanceIncludingLockedRewards = walletBalance + rewardsBalance;
               const fare = estimatedPrice || 0;
               const canAfford = fare > 0 && spendable >= fare;
+              const lockedRewardsWouldCoverFare =
+                !isLiftClubMember && fare > 0 && balanceIncludingLockedRewards >= fare;
               return (
                 <Pressable
-                  style={[styles.payMethodRow, !canAfford && { opacity: 0.45 }]}
-                  disabled={!canAfford}
-                  onPress={() => handlePayAndRide("wallet")}
+                  style={[styles.payMethodRow, !canAfford && !lockedRewardsWouldCoverFare && { opacity: 0.45 }]}
+                  disabled={!canAfford && !lockedRewardsWouldCoverFare}
+                  onPress={() => {
+                    if (lockedRewardsWouldCoverFare) {
+                      setShowPaymentPicker(false);
+                      setShowLiftClubGate(true);
+                      return;
+                    }
+                    handlePayAndRide("wallet");
+                  }}
                 >
                   <View style={[styles.payMethodIcon, { backgroundColor: Colors.success }]}>
                     <Ionicons name="wallet" size={20} color="#fff" />
@@ -3553,7 +3567,9 @@ export default function ClientHomeScreen() {
                     <Text style={styles.payMethodName}>Wallet</Text>
                     <Text style={styles.payMethodSub}>
                       {canAfford
-                        ? `R ${spendable.toFixed(2)} available (incl. rewards)`
+                        ? `R ${spendable.toFixed(2)} available${isLiftClubMember ? " including rewards" : ""}`
+                        : lockedRewardsWouldCoverFare
+                          ? `R ${rewardsBalance.toFixed(2)} rewards locked until Lift Club approval`
                         : `R ${spendable.toFixed(2)} available — not enough for this trip`}
                     </Text>
                   </View>
@@ -4054,6 +4070,10 @@ export default function ClientHomeScreen() {
           </View>
         </View>
       </Modal>
+      <LiftClubMembershipRequiredModal
+        visible={showLiftClubGate}
+        onClose={() => setShowLiftClubGate(false)}
+      />
     </View>
   );
 }

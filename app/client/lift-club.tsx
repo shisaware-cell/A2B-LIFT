@@ -188,7 +188,7 @@ export default function LiftClubMembershipScreen() {
 
           <View style={styles.infoCard}>
             <Text style={styles.infoTitle}>Reward note</Text>
-            <Text style={styles.muted}>Your existing 2.5% reward programme stays active. You also earn R100 once when someone you invited pays the R200 Lift Club registration fee and is approved by admin.</Text>
+            <Text style={styles.muted}>Your existing 2.5% reward programme stays active while your application is pending. Approved Lift Club membership unlocks reward transfers, spending, and withdrawals. You also earn R100 once when someone you invited pays the R200 Lift Club registration fee and is approved by admin.</Text>
           </View>
 
           <View style={styles.infoCard}>

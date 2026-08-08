@@ -298,7 +298,6 @@ export default function ClientWalletScreen() {
   }
 
   const balance = user?.walletBalance || 0;
-
   async function handleWithdrawRequest() {
     const amount = parseFloat(withdrawAmount);
     if (isNaN(amount) || amount < 50) { Alert.alert("Minimum withdrawal is R50"); return; }
@@ -387,7 +386,7 @@ export default function ClientWalletScreen() {
           <View style={styles.rewardsInfo}>
             <Text style={styles.rewardsLabel}>Rewards Balance</Text>
             <Text style={styles.rewardsAmount}>R {(user?.rewardsBalance || 0).toFixed(2)}</Text>
-            <Text style={styles.rewardsSub}>Spend rewards on rides or request a manual cash-out.</Text>
+            <Text style={styles.rewardsSub}>Rewards keep growing. Lift Club approval unlocks spending and withdrawals.</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
         </Pressable>

@@ -22,7 +22,11 @@ export function KeyboardAwareScrollViewCompat({
       keyboardVerticalOffset={keyboardVerticalOffset}
       style={{ flex: 1 }}
     >
-      <ScrollView keyboardShouldPersistTaps={keyboardShouldPersistTaps} {...props}>
+      <ScrollView
+        keyboardShouldPersistTaps={keyboardShouldPersistTaps}
+        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+        {...props}
+      >
         {children}
       </ScrollView>
     </KeyboardAvoidingView>

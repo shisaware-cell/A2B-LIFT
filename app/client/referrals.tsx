@@ -20,6 +20,7 @@ import QRCode from "react-native-qrcode-svg";
 import { apiRequest } from "@/lib/query-client";
 import { useAuth } from "@/lib/auth-context";
 import Colors from "@/constants/colors";
+import LiftClubMembershipRequiredModal from "@/components/LiftClubMembershipRequiredModal";
 
 type ReferralSummary = {
   referralCode: string;
@@ -62,6 +63,7 @@ type RewardCashout = {
 };
 
 type ReferralDashboardResponse = ReferralSummary & {
+  rewardAccessUnlocked?: boolean;
   referredPeople?: ReferredPerson[];
   transactions?: RewardTransaction[];
   cashouts?: RewardCashout[];
@@ -213,9 +215,13 @@ export default function ReferralsScreen() {
   const [accountNumber, setAccountNumber] = useState("");
   const [cashoutBusy, setCashoutBusy] = useState(false);
   const [transferBusy, setTransferBusy] = useState(false);
+  const [showLiftClubGate, setShowLiftClubGate] = useState(false);
 
   const isWide = width >= 900;
   const rewardsBalance = Number(summary?.rewardsBalance ?? user?.rewardsBalance ?? 0);
+  const rewardAccessUnlocked =
+    user?.liftClubMembership?.status === "approved" ||
+    user?.liftClubMembership?.isApproved === true;
   const canRequestCashout = rewardsBalance >= MIN_CASHOUT_AMOUNT;
   const enteredCashoutAmount = Number(cashoutAmount);
   const canSubmitCashout =
@@ -362,6 +368,11 @@ export default function ReferralsScreen() {
   }
 
   async function handleCashoutRequest() {
+    if (!rewardAccessUnlocked) {
+      setShowCashout(false);
+      setShowLiftClubGate(true);
+      return;
+    }
     const amount = Number(cashoutAmount);
     if (!amount || amount <= 0) {
       Alert.alert("Invalid Amount", "Enter a valid cash-out amount.");
@@ -393,6 +404,11 @@ export default function ReferralsScreen() {
       setAccountNumber("");
       Alert.alert("Request Submitted", "Your rewards cash-out request has been sent for review.");
     } catch (error: any) {
+      if (String(error?.message || "").includes("Lift Club membership")) {
+        setShowCashout(false);
+        setShowLiftClubGate(true);
+        return;
+      }
       Alert.alert("Cash-Out Failed", error.message || "Could not submit your request.");
     } finally {
       setCashoutBusy(false);
@@ -402,6 +418,10 @@ export default function ReferralsScreen() {
   async function handleTransferToWallet() {
     if (rewardsBalance <= 0) {
       Alert.alert("Nothing to transfer", "You have no referral balance to move to your wallet yet.");
+      return;
+    }
+    if (!rewardAccessUnlocked) {
+      setShowLiftClubGate(true);
       return;
     }
     setTransferBusy(true);
@@ -422,6 +442,10 @@ export default function ReferralsScreen() {
         `R ${Number(data.amount || rewardsBalance).toFixed(2)} moved to your wallet. You can now withdraw it (admin-approved) or use it to pay for rides.`,
       );
     } catch (error: any) {
+      if (String(error?.message || "").includes("Lift Club membership")) {
+        setShowLiftClubGate(true);
+        return;
+      }
       Alert.alert("Transfer failed", error.message || "Could not transfer your referral balance.");
     } finally {
       setTransferBusy(false);
@@ -535,7 +559,7 @@ export default function ReferralsScreen() {
 
             <Text style={styles.balanceAmount}>{formatCurrency(rewardsBalance)}</Text>
             <Text style={styles.balanceCopy}>
-              You earn 2.5% back on every completed ride. Spend it on trips or withdraw it.
+              You keep earning 2.5% rewards. Approved Lift Club members can spend, transfer, or withdraw them.
             </Text>
 
             <View style={styles.balanceMetaRow}>
@@ -554,7 +578,7 @@ export default function ReferralsScreen() {
               <Text style={styles.balanceNoticeText}>Balances refresh after completed trips and reward programme earnings post automatically.</Text>
             </View>
 
-            <Text style={styles.minimumHint}>Move your referral earnings to your wallet, then withdraw (admin-approved) or spend them on rides.</Text>
+            <Text style={styles.minimumHint}>Your balance remains safe while Lift Club approval is pending.</Text>
 
             <Pressable
               style={[styles.primaryAction, (rewardsBalance <= 0 || transferBusy) && styles.secondaryActionDisabled]}
@@ -568,7 +592,7 @@ export default function ReferralsScreen() {
             <View style={styles.balanceActionsRow}>
               <Pressable
                 style={[styles.secondaryAction, !canRequestCashout && styles.secondaryActionDisabled]}
-                onPress={() => setShowCashout(true)}
+                onPress={() => rewardAccessUnlocked ? setShowCashout(true) : setShowLiftClubGate(true)}
                 disabled={!canRequestCashout}
               >
                 <Text style={styles.secondaryActionText}>Withdraw</Text>
@@ -671,7 +695,7 @@ export default function ReferralsScreen() {
           <View style={[styles.sectionCard, styles.detailCard, isWide && styles.detailCardWide]}>
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionTitle}>Withdrawal History</Text>
-              <Pressable onPress={() => setShowCashout(true)} disabled={!canRequestCashout}>
+              <Pressable onPress={() => rewardAccessUnlocked ? setShowCashout(true) : setShowLiftClubGate(true)} disabled={!canRequestCashout}>
                 <Text style={[styles.sectionAction, !canRequestCashout && styles.sectionActionDisabled]}>Request</Text>
               </Pressable>
             </View>
@@ -787,6 +811,11 @@ export default function ReferralsScreen() {
           </View>
         </View>
       </Modal>
+
+      <LiftClubMembershipRequiredModal
+        visible={showLiftClubGate}
+        onClose={() => setShowLiftClubGate(false)}
+      />
     </View>
   );
 }

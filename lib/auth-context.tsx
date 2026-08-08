@@ -26,6 +26,11 @@ interface AuthUser {
   referralCode?: string | null;
   referredByUserId?: string | null;
   createdAt?: string | null;
+  liftClubMembership?: {
+    id?: string | null;
+    status?: string | null;
+    isApproved?: boolean;
+  } | null;
 }
 
 type LoginResponse =

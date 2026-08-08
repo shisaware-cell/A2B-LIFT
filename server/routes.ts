@@ -52,6 +52,11 @@ import {
   hashPasswordResetToken,
   validateResetPassword,
 } from "./password-reset";
+import {
+  normalizeEmailIdentity,
+  normalizePhoneIdentity,
+  UserIdentityConflictError,
+} from "./user-identity";
 
 const RIDE_MATCH_RADIUS_KM = 25;
 const CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
@@ -165,25 +170,12 @@ async function creditReferralReward(options: {
   const referrer = await storage.getUser(referrerUserId);
   if (!referrer) return;
 
-  // Referral earnings are paid straight into the wallet so they show in the
-  // wallet balance and can be withdrawn through the normal admin-approved
-  // withdrawal flow (POST /api/withdrawals).
-  const balanceBefore = Number(referrer.walletBalance || 0);
+  // Rewards continue accruing before Lift Club approval, but stay in the
+  // dedicated reward balance until the member unlocks reward use.
+  const balanceBefore = Number(referrer.rewardsBalance || 0);
   const balanceAfter = Math.round((balanceBefore + reward) * 100) / 100;
   const reference = `${options.referencePrefix}_${options.rideId || Date.now()}_${referrer.id.slice(0, 6)}`;
-  await storage.updateUser(referrer.id, { walletBalance: balanceAfter });
-  // Wallet ledger entry — surfaces the credit in wallet transaction history.
-  await storage.createWalletTransaction({
-    userId: referrer.id,
-    type: "referral_reward",
-    amount: reward,
-    balanceBefore,
-    balanceAfter,
-    reference,
-    description: options.description,
-    rideId: options.rideId || null,
-    status: "completed",
-  });
+  await storage.updateUser(referrer.id, { rewardsBalance: balanceAfter });
   // Reward transaction kept as the referral audit trail + dedupe key.
   await storage.createRewardTransaction({
     userId: referrer.id,
@@ -212,7 +204,7 @@ async function creditReferralReward(options: {
   await storage.createNotification({
     userId: referrer.id,
     title: "Reward Earnings",
-    body: `${options.notificationBody.replace("{amount}", reward.toFixed(2))} It's been added to your wallet — withdraw it anytime.`,
+    body: `${options.notificationBody.replace("{amount}", reward.toFixed(2))} It is in your reward balance. Activate Lift Club membership to spend or withdraw rewards.`,
     type: "reward",
   });
 }
@@ -1062,6 +1054,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
       .replace(/[^A-Z0-9]/g, "");
   }
 
+  async function withUserIdentityLocks<T>(
+    identities: Array<string | null | undefined>,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const keys = Array.from(new Set(
+      identities.filter(Boolean).map((identity) => `a2b:user-identity:${identity}`),
+    )).sort();
+    if (keys.length === 0) return action();
+
+    const client = await pool.connect();
+    try {
+      for (const key of keys) {
+        await client.query("SELECT pg_advisory_lock(hashtext($1))", [key]);
+      }
+      return await action();
+    } finally {
+      for (const key of [...keys].reverse()) {
+        await client.query("SELECT pg_advisory_unlock(hashtext($1))", [key]).catch(() => undefined);
+      }
+      client.release();
+    }
+  }
+
+  async function assertUserIdentityAvailable(options: {
+    email?: unknown;
+    phone?: unknown;
+    excludeUserId?: string | null;
+  }) {
+    const excludeUserId = options.excludeUserId || null;
+    const email = normalizeEmailIdentity(options.email);
+    if (email) {
+      const emailResult = await pool.query(
+        `SELECT id FROM users
+         WHERE lower(trim(username)) = $1
+           AND ($2::varchar IS NULL OR id <> $2)
+         LIMIT 1`,
+        [email, excludeUserId],
+      );
+      if (emailResult.rowCount) throw new UserIdentityConflictError("email");
+    }
+
+    const phone = normalizePhoneIdentity(options.phone);
+    if (phone) {
+      const phoneResult = await pool.query(
+        `SELECT id
+         FROM users
+         WHERE CASE
+           WHEN regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g') LIKE '00%'
+             THEN substring(regexp_replace(phone, '[^0-9]', '', 'g') FROM 3)
+           WHEN length(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g')) = 10
+             AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE '0%'
+             THEN '27' || substring(regexp_replace(phone, '[^0-9]', '', 'g') FROM 2)
+           WHEN length(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g')) = 9
+             THEN '27' || regexp_replace(phone, '[^0-9]', '', 'g')
+           ELSE regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g')
+         END = $1
+           AND ($2::varchar IS NULL OR id <> $2)
+         LIMIT 1`,
+        [phone, excludeUserId],
+      );
+      if (phoneResult.rowCount) throw new UserIdentityConflictError("phone");
+    }
+  }
+
   async function generateUniqueReferralCode(name: string, email: string): Promise<string> {
     const seed = normalizeReferralCode(name || email || "A2B") || "A2B";
     const base = seed.slice(0, 6);
@@ -1151,6 +1207,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     };
   }
 
+  async function requireLiftClubRewardAccess(userId: string, res: Response) {
+    const membership = await storage.getLiftClubMembershipByUser(userId).catch(() => undefined);
+    if (membership?.status === "approved") return membership;
+    res.status(403).json({
+      code: "LIFT_CLUB_MEMBERSHIP_REQUIRED",
+      message: "Approved Lift Club membership is required to spend, transfer, or withdraw rewards.",
+      membership: serializeLiftClubMembership(membership),
+    });
+    return null;
+  }
+
   async function notifyAdmins(title: string, body: string, type = "admin") {
     const admins = (await storage.getAllUsers()).filter((admin: any) => admin.role === "admin");
     await Promise.all(admins.map((admin: any) => storage.createNotification({
@@ -1175,24 +1242,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!referrer) return;
 
     const reward = LIFT_CLUB_MEMBERSHIP_REFERRAL_BONUS;
-    // Paid into the wallet so it is withdrawable via the admin-approved flow.
-    const balanceBefore = Number(referrer.walletBalance || 0);
+    const balanceBefore = Number(referrer.rewardsBalance || 0);
     const balanceAfter = Math.round((balanceBefore + reward) * 100) / 100;
     const referralEvent = await storage.getReferralEventByReferredUserId(referredUser.id);
     const bonusDescription = `${referredUser.name || "A referred member"} was approved as a Lift Club member after payment review.`;
 
-    await storage.updateUser(referrer.id, { walletBalance: balanceAfter });
-    await storage.createWalletTransaction({
-      userId: referrer.id,
-      type: "referral_reward",
-      amount: reward,
-      balanceBefore,
-      balanceAfter,
-      reference,
-      description: bonusDescription,
-      rideId: null,
-      status: "completed",
-    });
+    await storage.updateUser(referrer.id, { rewardsBalance: balanceAfter });
     await storage.createRewardTransaction({
       userId: referrer.id,
       referralEventId: referralEvent?.id || null,
@@ -1218,7 +1273,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await storage.createNotification({
       userId: referrer.id,
       title: "Lift Club Reward",
-      body: `You earned R${reward.toFixed(2)} because your invited member was approved for Lift Club. It's been added to your wallet — withdraw it anytime.`,
+      body: `You earned R${reward.toFixed(2)} because your invited member was approved for Lift Club. Activate your own Lift Club membership to spend or withdraw it.`,
       type: "reward",
     });
   }
@@ -1239,16 +1294,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Normalise email — username field now stores email address
-      const email = username.trim().toLowerCase();
+      const email = normalizeEmailIdentity(username);
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
         return res.status(400).json({ message: "Please enter a valid email address" });
-      }
-
-      // Email must be unique
-      const existing = await storage.getUserByUsername(email);
-      if (existing) {
-        return res.status(400).json({ message: "An account with this email already exists" });
       }
 
       // Resolve referral code → referrer
@@ -1259,14 +1308,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const hashedPassword = await bcrypt.hash(password, 10);
-      const user = await storage.createUser({
-        username: email,
-        password: hashedPassword,
-        name: name.trim(),
-        phone: normalizedPhone,
-        role: (role || "client") as UserRole,
-        ...(referrerUser ? { referredByUserId: referrerUser.id } : {}),
-      });
+      const user = await withUserIdentityLocks(
+        [email, normalizePhoneIdentity(normalizedPhone)],
+        async () => {
+          await assertUserIdentityAvailable({ email, phone: normalizedPhone });
+          return storage.createUser({
+            username: email,
+            password: hashedPassword,
+            name: name.trim(),
+            phone: normalizedPhone,
+            role: (role || "client") as UserRole,
+            ...(referrerUser ? { referredByUserId: referrerUser.id } : {}),
+          });
+        },
+      );
 
       // Create referral event so commission tracking can fire later
       if (referrerUser) {
@@ -1288,6 +1343,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const safeUser = await hydrateAuthUser(user);
       return res.json({ user: safeUser, accessToken: token });
     } catch (error: any) {
+      if (error instanceof UserIdentityConflictError) {
+        return res.status(409).json({ code: `DUPLICATE_${error.field.toUpperCase()}`, message: error.message });
+      }
       if (error.code === "23505") {
         return res.status(400).json({ message: "An account with this email already exists" });
       }
@@ -1728,6 +1786,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         process.env.EXPO_PUBLIC_DOMAIN ||
         "https://api.a2blift.com";
       const rewardApp = hydratedUser.role === "chauffeur" ? "driver" : "client";
+      const liftClubMembership = hydratedUser.liftClubMembership || serializeLiftClubMembership(null);
 
       return res.json({
         referralCode: hydratedUser.referralCode,
@@ -1737,6 +1796,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         rewardedReferrals,
         totalRewardsEarned,
         pendingCashoutAmount,
+        liftClubMembership,
+        rewardAccessUnlocked: liftClubMembership.status === "approved",
         referredPeople,
         transactions,
         cashouts,
@@ -1766,6 +1827,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/rewards/cashout", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
+      if (!await requireLiftClubRewardAccess(req.auth!.sub, res)) return;
       const amount = Number(req.body?.amount || 0);
       if (!Number.isFinite(amount) || amount <= 0) {
         return res.status(400).json({ message: "Invalid amount" });
@@ -1798,6 +1860,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Transfer referral (rewards) balance into the spendable wallet. Once in the
   // wallet it can be withdrawn (admin-approved) or used to pay for rides.
   app.post("/api/rewards/transfer-to-wallet", requireAuth, async (req: AuthedRequest, res: Response) => {
+    if (!await requireLiftClubRewardAccess(req.auth!.sub, res)) return;
     const client = await pool.connect();
     try {
       const userId = req.auth!.sub;
@@ -3564,13 +3627,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/users/:id", async (req: Request, res: Response) => {
+  app.put("/api/users/:id", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
-      const user = await storage.updateUser(req.params.id, req.body);
+      if (req.auth!.sub !== req.params.id && req.auth!.role !== "admin") {
+        return res.status(403).json({ message: "You can only update your own account" });
+      }
+      const currentUser = await storage.getUser(req.params.id);
+      if (!currentUser) return res.status(404).json({ message: "User not found" });
+
+      const updates: Record<string, unknown> = {};
+      if (typeof req.body?.name === "string" && req.body.name.trim()) {
+        updates.name = req.body.name.trim();
+      }
+      if (typeof req.body?.phone === "string") {
+        const phone = req.body.phone.trim();
+        if (!normalizePhoneIdentity(phone)) {
+          return res.status(400).json({ message: "Please enter a valid phone number" });
+        }
+        updates.phone = phone;
+      }
+
+      const user = await withUserIdentityLocks(
+        [normalizePhoneIdentity(updates.phone)],
+        async () => {
+          if (updates.phone) {
+            await assertUserIdentityAvailable({ phone: updates.phone, excludeUserId: req.params.id });
+          }
+          return storage.updateUser(req.params.id, updates);
+        },
+      );
       if (!user) return res.status(404).json({ message: "User not found" });
       const { password: _pw, ...safeUser } = user;
       return res.json(safeUser);
     } catch (error: any) {
+      if (error instanceof UserIdentityConflictError) {
+        return res.status(409).json({ code: `DUPLICATE_${error.field.toUpperCase()}`, message: error.message });
+      }
       return res.status(500).json({ message: error.message });
     }
   });
@@ -3867,16 +3959,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/chauffeurs", authOptional, async (req: AuthedRequest, res: Response) => {
+  app.post("/api/chauffeurs", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
       const userId = req.body.userId;
-      const currentYear = new Date().getFullYear();
-      const rawVehicleYear = req.body.vehicleYear;
-
-      // If authenticated, only allow creating/updating own chauffeur profile (unless admin)
-      if (req.auth && req.auth.role !== "admin" && req.auth.sub !== userId) {
+      if (req.auth!.role !== "admin" && req.auth!.sub !== userId) {
         return res.status(403).json({ message: "You can only register your own chauffeur profile" });
       }
+      return await withUserIdentityLocks([normalizePhoneIdentity(req.body.phone)], async () => {
+        if (req.body.phone) {
+          await assertUserIdentityAvailable({ phone: req.body.phone, excludeUserId: userId || null });
+        }
+      const currentYear = new Date().getFullYear();
+      const rawVehicleYear = req.body.vehicleYear;
 
       // Auto-upsert user in this DB — handles cross-environment tokens (e.g. Railway user vs dev DB)
       if (userId) {
@@ -3928,7 +4022,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           vehicleYear: normalizedVehicleYear,
         });
       }
-      await storage.updateUser(req.body.userId, { role: "chauffeur" });
+      await storage.updateUser(req.body.userId, {
+        role: "chauffeur",
+        ...(req.body.phone ? { phone: String(req.body.phone).trim() } : {}),
+      });
 
       // Create/ensure a driver application (pending) for admin review
       const existingApp = await storage.getDriverApplicationByUserId(req.body.userId);
@@ -3943,8 +4040,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       return res.json(chauffeur);
+      });
     } catch (error: any) {
-      return res.status(500).json({ message: error.message });
+      return res.status(error instanceof UserIdentityConflictError ? 409 : 500).json({
+        code: error instanceof UserIdentityConflictError ? `DUPLICATE_${error.field.toUpperCase()}` : undefined,
+        message: error.message,
+      });
     }
   });
 
@@ -4134,37 +4235,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       return res.status(201).json(doc);
     } catch (error: any) {
-      return res.status(400).json({ message: error.message });
+      return res.status(error instanceof UserIdentityConflictError ? 409 : 400).json({ message: error.message });
     }
   });
 
   app.post("/api/operator-profile/driver", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
       const phone = requireStringField(req.body, "phone");
-      const profile = await getOrCreateOperatorProfile({
-        userId: req.auth!.sub,
-        type: "driver",
-        status: "pending",
-      });
-      if (!profile) return res.status(500).json({ message: "Could not create driver profile" });
+      const result = await withUserIdentityLocks(
+        [normalizePhoneIdentity(phone)],
+        async () => {
+          await assertUserIdentityAvailable({ phone, excludeUserId: req.auth!.sub });
+          const profile = await getOrCreateOperatorProfile({
+            userId: req.auth!.sub,
+            type: "driver",
+            status: "pending",
+          });
+          if (!profile) throw new Error("Could not create driver profile");
 
-      let chauffeur = await storage.getChauffeurByUserId(req.auth!.sub);
-      if (chauffeur) {
-        chauffeur = await storage.updateChauffeur(chauffeur.id, {
-          phone,
-          profilePhoto: req.body.profilePhoto || chauffeur.profilePhoto,
-          isApproved: profile.status === "approved" ? true : chauffeur.isApproved,
-        });
-      } else {
-        chauffeur = await storage.createChauffeur({
-          userId: req.auth!.sub,
-          phone,
-          profilePhoto: req.body.profilePhoto || null,
-          isApproved: false,
-        });
-      }
+          let chauffeur = await storage.getChauffeurByUserId(req.auth!.sub);
+          if (chauffeur) {
+            chauffeur = await storage.updateChauffeur(chauffeur.id, {
+              phone,
+              profilePhoto: req.body.profilePhoto || chauffeur.profilePhoto,
+              isApproved: profile.status === "approved" ? true : chauffeur.isApproved,
+            });
+          } else {
+            chauffeur = await storage.createChauffeur({
+              userId: req.auth!.sub,
+              phone,
+              profilePhoto: req.body.profilePhoto || null,
+              isApproved: false,
+            });
+          }
 
-      await storage.updateUser(req.auth!.sub, { role: "chauffeur", phone });
+          await storage.updateUser(req.auth!.sub, { role: "chauffeur", phone });
+          return { profile, chauffeur };
+        },
+      );
+      const { profile } = result;
+      let { chauffeur } = result;
       let application = await storage.getDriverApplicationByUserId(req.auth!.sub);
       if (application) {
         application = await storage.updateDriverApplication(application.id, {
@@ -4184,7 +4294,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(201).json({ profile, chauffeur, application });
     } catch (error: any) {
       const message = error.message || "Failed to submit driver profile";
-      return res.status(message.includes("already registered") ? 409 : 400).json({ message });
+      return res.status(error instanceof UserIdentityConflictError || message.includes("already registered") ? 409 : 400).json({ message });
     }
   });
 
@@ -4200,6 +4310,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         accountHolder: requireStringField(req.body, "accountHolder"),
         accountNumber: requireStringField(req.body, "accountNumber"),
       };
+      await assertUserIdentityAvailable({
+        phone: partnerData.contactPhone,
+        excludeUserId: req.auth!.sub,
+      });
       const docs = await storage.getDocumentsByUser(req.auth!.sub);
       const uploadedTypes = new Set(docs.map((doc) => doc.type));
       const missingDocs = [...PARTNER_REQUIRED_DOCS].filter((type) => !uploadedTypes.has(type));
@@ -4223,11 +4337,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ...partnerData,
           });
 
-      await storage.updateUser(req.auth!.sub, { role: "chauffeur", phone: partnerData.contactPhone });
+      await withUserIdentityLocks(
+        [normalizePhoneIdentity(partnerData.contactPhone)],
+        async () => {
+          await assertUserIdentityAvailable({ phone: partnerData.contactPhone, excludeUserId: req.auth!.sub });
+          await storage.updateUser(req.auth!.sub, { role: "chauffeur", phone: partnerData.contactPhone });
+        },
+      );
       return res.status(201).json({ profile, partnerProfile });
     } catch (error: any) {
       const message = error.message || "Failed to submit partner profile";
-      return res.status(message.includes("already registered") ? 409 : 400).json({ message });
+      return res.status(error instanceof UserIdentityConflictError || message.includes("already registered") ? 409 : 400).json({ message });
     }
   });
 
@@ -8597,6 +8717,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: `You only have R${available.toFixed(2)} available to withdraw.` });
       }
 
+      // A chauffeur's wallet fallback is the referral wallet shown in the
+      // Driver app. Rider wallet top-ups and refunds remain ordinary funds.
+      if (source === "wallet" && chauffeur && !await requireLiftClubRewardAccess(userId, res)) return;
+
       // Hold the funds now — refunded automatically if admin declines or deletes.
       if (source === "driver_earnings" && chauffeur) {
         await storage.updateChauffeur(chauffeur.id, {
@@ -9588,6 +9712,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Draw from wallet first, then rewards for the remainder
       const fromWallet = Math.min(walletBefore, amount);
       const fromRewards = amount - fromWallet;
+
+      if (fromRewards > 0 && !await requireLiftClubRewardAccess(userId, res)) return;
 
       await storage.updateUser(userId, {
         walletBalance: walletBefore - fromWallet,

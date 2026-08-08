@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/query-client";
 import Colors from "@/constants/colors";
+import LiftClubMembershipRequiredModal from "@/components/LiftClubMembershipRequiredModal";
 
 interface Bank { name: string; code: string; }
 interface Withdrawal { id: string; amount: number; status: string; bankName: string; accountNumber: string; createdAt: string; }
@@ -58,6 +59,7 @@ export default function ChauffeurWalletScreen() {
   const [accountNumber, setAccountNumber] = useState("");
   const [accountName, setAccountName] = useState("");
   const [showBankPicker, setShowBankPicker] = useState(false);
+  const [showLiftClubGate, setShowLiftClubGate] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -117,6 +119,14 @@ export default function ChauffeurWalletScreen() {
       Alert.alert("Not Enough Balance", `You have R${cardAvailable.toFixed(2)} in card earnings and R${walletBalance.toFixed(2)} in referral wallet available to withdraw. Please enter a lower amount.`);
       return;
     }
+    const rewardAccessUnlocked =
+      user?.liftClubMembership?.status === "approved" ||
+      user?.liftClubMembership?.isApproved === true;
+    if (cardAvailable < amount && !rewardAccessUnlocked) {
+      setShowWithdraw(false);
+      setShowLiftClubGate(true);
+      return;
+    }
 
     setWithdrawLoading(true);
     try {
@@ -134,6 +144,11 @@ export default function ChauffeurWalletScreen() {
         [{ text: "OK" }]
       );
     } catch (e: any) {
+      if (String(e?.message || "").includes("Lift Club membership")) {
+        setShowWithdraw(false);
+        setShowLiftClubGate(true);
+        return;
+      }
       Alert.alert("Withdrawal Failed", (e.message || "Please try again").replace(/^\d+:\s*/, ""));
     } finally { setWithdrawLoading(false); }
   }
@@ -192,7 +207,16 @@ export default function ChauffeurWalletScreen() {
           </View>
           <Pressable
             style={[styles.withdrawBtn, maxWithdrawable < 50 && styles.withdrawBtnDisabled]}
-            onPress={() => setShowWithdraw(true)}
+            onPress={() => {
+              const rewardAccessUnlocked =
+                user?.liftClubMembership?.status === "approved" ||
+                user?.liftClubMembership?.isApproved === true;
+              if (earnings_total < 50 && walletBalance >= 50 && !rewardAccessUnlocked) {
+                setShowLiftClubGate(true);
+                return;
+              }
+              setShowWithdraw(true);
+            }}
             disabled={maxWithdrawable < 50}
           >
             <Ionicons name="arrow-down-circle-outline" size={16} color={maxWithdrawable < 50 ? Colors.textMuted : Colors.primary} />
@@ -211,9 +235,9 @@ export default function ChauffeurWalletScreen() {
           <View style={styles.referralWalletCard}>
             <View style={styles.referralWalletRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.referralWalletLabel}>Referral Wallet (Withdrawable)</Text>
+                <Text style={styles.referralWalletLabel}>Referral wallet</Text>
                 <Text style={styles.referralWalletAmount}>R {walletBalance.toFixed(2)}</Text>
-                <Text style={styles.referralWalletSub}>Earnings from your referral programme. Withdraw them with the button above — requests go to A2B admin for approval.</Text>
+                <Text style={styles.referralWalletSub}>Referral earnings stay available. Approved Lift Club members can withdraw them through A2B admin review.</Text>
               </View>
               <Ionicons name="gift-outline" size={26} color={Colors.accent} />
             </View>
@@ -453,6 +477,10 @@ export default function ChauffeurWalletScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+      <LiftClubMembershipRequiredModal
+        visible={showLiftClubGate}
+        onClose={() => setShowLiftClubGate(false)}
+      />
     </View>
   );
 }

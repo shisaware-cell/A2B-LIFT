@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator, Platform, ScrollView, Image } from "react-native";
+import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator, Platform, Image } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -10,6 +10,7 @@ import { Colors } from "@mobile-ui/colors";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { KeyboardAwareScrollViewCompat } from "@mobile-ui/scroll";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -141,7 +142,8 @@ export default function RegisterScreen() {
       await AsyncStorage.removeItem(NEEDS_ROLE_SELECT_KEY);
       await AsyncStorage.removeItem(NEEDS_OPERATOR_CHOICE_KEY);
       const msg = e.message || "Registration failed.";
-      if (msg.includes("already exists") || msg.includes("400")) setError("An account with this email already exists");
+      if (msg.toLowerCase().includes("phone number already exists")) setError("An account with this phone number already exists");
+      else if (msg.toLowerCase().includes("email already exists")) setError("An account with this email already exists");
       else if (msg.includes("500") || msg.includes("Database")) setError("Server error. Please try again.");
       else if (msg.includes("fetch") || msg.includes("network")) setError("Cannot connect to server.");
       else setError(msg);
@@ -154,7 +156,15 @@ export default function RegisterScreen() {
         <Ionicons name="chevron-back" size={24} color={Colors.white} />
       </Pressable>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <KeyboardAwareScrollViewCompat
+        style={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+        keyboardVerticalOffset={insets.top}
+        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+        contentContainerStyle={styles.scrollContent}
+      >
         <View style={styles.header}>
           <Text style={styles.title}>Create Account</Text>
           <Text style={styles.subtitle}>Join A2B LIFT for premium rides</Text>
@@ -283,14 +293,15 @@ export default function RegisterScreen() {
             <Text style={styles.footerLink}>Sign In</Text>
           </Pressable>
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollViewCompat>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.primary, paddingHorizontal: 24 },
-  scrollContent: { flexGrow: 1 },
+  scroll: { flex: 1 },
+  scrollContent: { flexGrow: 1, paddingBottom: 24 },
   backBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center", marginLeft: -8 },
   header: { marginTop: 20, marginBottom: 28 },
   title: { fontSize: 28, fontFamily: "Inter_700Bold", color: Colors.white, marginBottom: 8 },

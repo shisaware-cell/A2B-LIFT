@@ -3,11 +3,18 @@ const isLiquidGlassAvailable = () => false;
 import { Tabs } from "expo-router";
 import { NativeTabs, Icon, Label } from "expo-router/unstable-native-tabs";
 import { BlurView } from "expo-blur";
-import { Platform, StyleSheet, View } from "react-native";
+import { AppState, Platform, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import React from "react";
+import React, { useEffect } from "react";
 import { Colors } from "@mobile-ui/colors";
 import { useKeepAwake } from "expo-keep-awake";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  DRIVER_OVERLAY_ENABLED_KEY,
+  hasDriverOverlayPermission,
+  isDriverOverlayAvailable,
+  startDriverOverlay,
+} from "@/lib/driver-overlay";
 
 function NativeTabLayout() {
   return (
@@ -133,6 +140,13 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
+        name="lift-club-membership"
+        options={{
+          href: null,
+          tabBarStyle: { display: "none" },
+        }}
+      />
+      <Tabs.Screen
         name="referrals"
         options={{
           href: null,
@@ -152,6 +166,23 @@ function ClassicTabLayout() {
 
 export default function ChauffeurLayout() {
   useKeepAwake("a2b-chauffeur-active");
+
+  useEffect(() => {
+    if (!isDriverOverlayAvailable()) return;
+
+    async function keepDriverServiceActive() {
+      const enabled = await AsyncStorage.getItem(DRIVER_OVERLAY_ENABLED_KEY) === "true";
+      if (enabled && await hasDriverOverlayPermission()) {
+        await startDriverOverlay();
+      }
+    }
+
+    void keepDriverServiceActive();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active" || state === "background") void keepDriverServiceActive();
+    });
+    return () => subscription.remove();
+  }, []);
 
   if (isLiquidGlassAvailable()) {
     return <NativeTabLayout />;
