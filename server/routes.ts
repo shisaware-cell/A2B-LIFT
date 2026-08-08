@@ -3427,6 +3427,132 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Referral relationships and reward activity for the admin dashboard.
+  // Start from users.referred_by_user_id so registrations remain visible even
+  // when an older referral did not create its optional audit event.
+  app.get("/api/admin/referrals", requireAuth, requireRole(["admin"]), async (_req: AuthedRequest, res: Response) => {
+    try {
+      const result = await pool.query(`
+        WITH reward_summary AS (
+          SELECT
+            referral_event_id,
+            COUNT(*) FILTER (
+              WHERE amount > 0
+                AND status <> 'failed'
+                AND type NOT IN ('wallet_transfer', 'ride_redemption', 'cashout_request')
+            )::integer AS reward_count,
+            COALESCE(SUM(amount) FILTER (
+              WHERE amount > 0
+                AND status <> 'failed'
+                AND type NOT IN ('wallet_transfer', 'ride_redemption', 'cashout_request')
+            ), 0)::real AS reward_total,
+            MAX(created_at) FILTER (
+              WHERE amount > 0
+                AND status <> 'failed'
+                AND type NOT IN ('wallet_transfer', 'ride_redemption', 'cashout_request')
+            ) AS last_reward_at
+          FROM reward_transactions
+          WHERE referral_event_id IS NOT NULL
+          GROUP BY referral_event_id
+        )
+        SELECT
+          referrer.id AS referrer_user_id,
+          referrer.name AS referrer_name,
+          referrer.username AS referrer_email,
+          referrer.phone AS referrer_phone,
+          referrer.role AS referrer_role,
+          referrer.referral_code AS referrer_code,
+          referrer.rewards_balance AS referrer_rewards_balance,
+          referrer.wallet_balance AS referrer_wallet_balance,
+          referrer.created_at AS referrer_joined_at,
+          referred.id AS referred_user_id,
+          referred.name AS referred_name,
+          referred.username AS referred_email,
+          referred.phone AS referred_phone,
+          referred.role AS referred_role,
+          referred.created_at AS referred_joined_at,
+          event.id AS referral_event_id,
+          COALESCE(event.referral_code_used, referrer.referral_code) AS referral_code_used,
+          COALESCE(event.status, 'registered') AS referral_status,
+          event.created_at AS referral_event_created_at,
+          event.first_reward_at,
+          COALESCE(event.last_reward_at, rewards.last_reward_at) AS last_reward_at,
+          GREATEST(COALESCE(event.total_rewards, 0), COALESCE(rewards.reward_total, 0))::real AS total_rewards,
+          COALESCE(rewards.reward_count, 0)::integer AS reward_count
+        FROM users referred
+        INNER JOIN users referrer ON referrer.id = referred.referred_by_user_id
+        LEFT JOIN referral_events event ON event.referred_user_id = referred.id
+        LEFT JOIN reward_summary rewards ON rewards.referral_event_id = event.id
+        WHERE referred.referred_by_user_id IS NOT NULL
+        ORDER BY referred.created_at DESC NULLS LAST
+      `);
+
+      const referralBase = String(
+        process.env.EXPO_PUBLIC_REFERRAL_LINK_BASE_URL ||
+        process.env.EXPO_PUBLIC_DOMAIN ||
+        "https://a2blift.com",
+      ).replace(/\/$/, "");
+      const relationships = result.rows.map((row: any) => {
+        const referralCode = normalizeReferralCode(row.referral_code_used || row.referrer_code);
+        const app = row.referrer_role === "chauffeur" || row.referrer_role === "driver" ? "driver" : "client";
+        const totalRewards = Number(row.total_rewards || 0);
+        return {
+          referrer: {
+            id: row.referrer_user_id,
+            name: row.referrer_name,
+            email: row.referrer_email,
+            phone: row.referrer_phone,
+            role: row.referrer_role,
+            referralCode: row.referrer_code,
+            rewardsBalance: Number(row.referrer_rewards_balance || 0),
+            walletBalance: Number(row.referrer_wallet_balance || 0),
+            joinedAt: row.referrer_joined_at,
+          },
+          referred: {
+            id: row.referred_user_id,
+            name: row.referred_name,
+            email: row.referred_email,
+            phone: row.referred_phone,
+            role: row.referred_role,
+            joinedAt: row.referred_joined_at,
+          },
+          eventId: row.referral_event_id,
+          referralCode,
+          shareUrl: referralCode
+            ? `${referralBase}/r/${encodeURIComponent(referralCode)}?app=${encodeURIComponent(app)}`
+            : null,
+          status: totalRewards > 0 ? "rewarded" : (row.referral_status || "registered"),
+          createdAt: row.referral_event_created_at || row.referred_joined_at,
+          firstRewardAt: row.first_reward_at,
+          lastRewardAt: row.last_reward_at,
+          totalRewards,
+          rewardCount: Number(row.reward_count || 0),
+        };
+      });
+
+      const uniqueReferrers = new Set(relationships.map((item: any) => item.referrer.id)).size;
+      const referredDrivers = relationships.filter((item: any) =>
+        item.referred.role === "chauffeur" || item.referred.role === "driver",
+      ).length;
+      const rewardedReferrals = relationships.filter((item: any) => item.totalRewards > 0).length;
+      const totalRewards = relationships.reduce((sum: number, item: any) => sum + item.totalRewards, 0);
+
+      return res.json({
+        summary: {
+          totalReferrals: relationships.length,
+          uniqueReferrers,
+          referredRiders: relationships.length - referredDrivers,
+          referredDrivers,
+          rewardedReferrals,
+          totalRewards: Math.round(totalRewards * 100) / 100,
+        },
+        relationships,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message || "Unable to load referral summary" });
+    }
+  });
+
   app.get("/api/users/:id", async (req: Request, res: Response) => {
     try {
       const user = await storage.getUser(req.params.id);

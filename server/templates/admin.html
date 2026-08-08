@@ -115,6 +115,8 @@ tbody tr:hover { background:#fafaf8; }
 .b-driver { background:var(--yellow-bg); color:var(--yellow); } .b-driver::before { background:var(--yellow); }
 .b-client { background:#f5f5f0; color:var(--muted); } .b-client::before { background:var(--muted-light); }
 .b-liftclub { background:#fff7cc; color:#7a5200; } .b-liftclub::before { background:#f7c948; }
+.b-registered { background:var(--blue-bg); color:var(--blue); } .b-registered::before { background:var(--blue); }
+.b-rewarded { background:var(--green-bg); color:var(--green); } .b-rewarded::before { background:var(--green); }
 
 /* BUTTONS */
 .btn-sm { padding:5px 12px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.15s; border:1px solid; font-family:var(--font); }
@@ -301,6 +303,9 @@ tbody tr:hover { background:#fafaf8; }
     <div class="nav-section">Accounts</div>
     <div class="nav-item" onclick="go('users',this);closeSidebar()">
       <span class="nav-icon">👤</span> All Users
+    </div>
+    <div class="nav-item" onclick="go('referrals',this);closeSidebar()">
+      <span class="nav-icon">↗</span> Referrals
     </div>
   </nav>
   <div class="sidebar-foot">
@@ -503,6 +508,24 @@ tbody tr:hover { background:#fafaf8; }
       <div class="table-card" id="users-table"><div class="loading">Loading…</div></div>
     </div>
 
+    <!-- REFERRALS -->
+    <div class="view" id="view-referrals">
+      <div class="stats-row" id="referral-stats">
+        <div class="stat-card"><div class="loading">Loading…</div></div>
+      </div>
+      <div class="sec-head">
+        <div class="sec-title">Who Referred Who</div>
+        <div class="filter-group">
+          <input class="f-input" id="referral-search" placeholder="Search name, email, phone or code" oninput="renderFilteredReferrals()" style="width:260px;padding:6px 10px" />
+          <button class="ftab active" onclick="filterReferrals('all',this)">All</button>
+          <button class="ftab" onclick="filterReferrals('client',this)">Riders</button>
+          <button class="ftab" onclick="filterReferrals('driver',this)">Drivers</button>
+          <button class="ftab" onclick="filterReferrals('rewarded',this)">Rewarded</button>
+        </div>
+      </div>
+      <div class="table-card" id="referrals-table"><div class="loading">Loading…</div></div>
+    </div>
+
   </div>
 </main>
 
@@ -651,8 +674,8 @@ async function doLogout() {
 
 // ── NAV ──
 let curView = 'overview';
-let allChauf = [], allWd = [], allSafe = [], allApps = [], allPartners = [], allVehicles = [], allDocuments = [], allSelfies = [], allUsers = [], allLiftClubMemberships = [], allLiftClubRoutes = [], chaufFilter = 'all', wdFilter = 'all', safeFilter = 'all', appsFilter = 'all', partnersFilter = 'all', vehiclesFilter = 'all', documentsFilter = 'all', liftClubFilter = 'all', liftClubRouteFilter = 'all';
-const VIEW_TITLES = { overview:'Dashboard', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', documents:'Document Review', rides:'Rides', payments:'Payments', liftClubApplications:'Lift Club', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users' };
+let allChauf = [], allWd = [], allSafe = [], allApps = [], allPartners = [], allVehicles = [], allDocuments = [], allSelfies = [], allUsers = [], allReferrals = [], allLiftClubMemberships = [], allLiftClubRoutes = [], chaufFilter = 'all', wdFilter = 'all', safeFilter = 'all', appsFilter = 'all', partnersFilter = 'all', vehiclesFilter = 'all', documentsFilter = 'all', referralFilter = 'all', liftClubFilter = 'all', liftClubRouteFilter = 'all';
+const VIEW_TITLES = { overview:'Dashboard', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', documents:'Document Review', rides:'Rides', payments:'Payments', liftClubApplications:'Lift Club', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users', referrals:'Referral Summary' };
 
 function go(view, el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -666,7 +689,7 @@ function go(view, el) {
 }
 
 function loadView() {
-  ({ overview:loadOverview, chauffeurs:loadChauf, applications:loadApps, partners:loadPartners, vehicles:loadVehicles, documents:loadDocuments, rides:loadRides, payments:loadPay, liftClubApplications:loadLiftClubApplications, selfies:loadSelfies, withdrawals:loadWd, safety:loadSafe, users:loadUsers })[curView]?.();
+  ({ overview:loadOverview, chauffeurs:loadChauf, applications:loadApps, partners:loadPartners, vehicles:loadVehicles, documents:loadDocuments, rides:loadRides, payments:loadPay, liftClubApplications:loadLiftClubApplications, selfies:loadSelfies, withdrawals:loadWd, safety:loadSafe, users:loadUsers, referrals:loadReferrals })[curView]?.();
 }
 
 function loadAll() {
@@ -683,6 +706,7 @@ function loadAll() {
   loadWd();
   loadSafe();
   loadUsers();
+  loadReferrals();
 }
 
 // ── SIDEBAR TOGGLE (mobile) ──
@@ -2444,6 +2468,161 @@ async function loadUsers() {
   }
 }
 
+// ── REFERRALS ──
+async function loadReferrals() {
+  spin('referrals-table');
+  try {
+    const res = await apiFetch('/api/admin/referrals');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || res.status);
+    allReferrals = Array.isArray(data.relationships) ? data.relationships : [];
+    const summary = data.summary || {};
+    document.getElementById('referral-stats').innerHTML = `
+      <div class="stat-card">
+        <div class="stat-top"><div class="stat-label">Total Referrals</div><div class="stat-icon si-black">↗</div></div>
+        <div class="stat-value">${Number(summary.totalReferrals || 0)}</div>
+        <div class="stat-foot">${Number(summary.referredRiders || 0)} riders · ${Number(summary.referredDrivers || 0)} drivers</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-top"><div class="stat-label">Active Referrers</div><div class="stat-icon si-blue">👤</div></div>
+        <div class="stat-value">${Number(summary.uniqueReferrers || 0)}</div>
+        <div class="stat-foot">Users who invited at least one person</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-top"><div class="stat-label">Rewarded Referrals</div><div class="stat-icon si-green">✓</div></div>
+        <div class="stat-value">${Number(summary.rewardedReferrals || 0)}</div>
+        <div class="stat-foot">Referrals with recorded earnings</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-top"><div class="stat-label">Rewards Paid</div><div class="stat-icon si-yellow">R</div></div>
+        <div class="stat-value">R ${Number(summary.totalRewards || 0).toFixed(2)}</div>
+        <div class="stat-foot">Total earned across referral events</div>
+      </div>`;
+    renderFilteredReferrals();
+    tick();
+  } catch (e) {
+    allReferrals = [];
+    document.getElementById('referral-stats').innerHTML = '';
+    document.getElementById('referrals-table').innerHTML = emptyState('!', 'Failed to load referrals', e.message);
+  }
+}
+
+function filterReferrals(filter, el) {
+  referralFilter = filter;
+  document.querySelectorAll('#view-referrals .ftab').forEach(tab => tab.classList.remove('active'));
+  el.classList.add('active');
+  renderFilteredReferrals();
+}
+
+function renderFilteredReferrals() {
+  const search = String(document.getElementById('referral-search')?.value || '').trim().toLowerCase();
+  const relationships = allReferrals.filter(item => {
+    const referredRole = String(item.referred?.role || 'client').toLowerCase();
+    const roleMatches = referralFilter === 'all'
+      || (referralFilter === 'driver' && ['driver', 'chauffeur'].includes(referredRole))
+      || (referralFilter === 'client' && !['driver', 'chauffeur'].includes(referredRole))
+      || (referralFilter === 'rewarded' && Number(item.totalRewards || 0) > 0);
+    if (!roleMatches) return false;
+    if (!search) return true;
+    return [
+      item.referrer?.name, item.referrer?.email, item.referrer?.phone,
+      item.referred?.name, item.referred?.email, item.referred?.phone,
+      item.referralCode, item.status,
+    ].some(value => String(value || '').toLowerCase().includes(search));
+  });
+  renderReferralTable(relationships);
+}
+
+function renderReferralTable(relationships) {
+  const target = document.getElementById('referrals-table');
+  if (!relationships.length) {
+    target.innerHTML = emptyState('↗', 'No referral relationships found', 'Try another filter or search term');
+    return;
+  }
+  target.innerHTML = `<table style="min-width:1120px">
+    <thead><tr><th>Referrer</th><th>Referred User</th><th>Account</th><th>Referral Link</th><th>Status</th><th>Rewards</th><th>Joined</th><th>Actions</th></tr></thead>
+    <tbody>${relationships.map(item => {
+      const referrer = item.referrer || {};
+      const referred = item.referred || {};
+      const referredRole = ['driver', 'chauffeur'].includes(String(referred.role || '').toLowerCase()) ? 'driver' : 'client';
+      const status = String(item.status || 'registered').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      const link = item.shareUrl || '';
+      return `<tr>
+        <td>
+          <button class="btn-sm btn-detail" onclick="openReferralUser('${escapeHtml(referrer.id)}')" style="font-weight:700;margin-bottom:5px">${escapeHtml(referrer.name || 'Unnamed user')}</button>
+          <div style="font-size:11px;color:var(--muted)">${escapeHtml(referrer.email || '—')} · ${escapeHtml(referrer.phone || 'No phone')}</div>
+        </td>
+        <td>
+          <button class="btn-sm btn-detail" onclick="openReferralUser('${escapeHtml(referred.id)}')" style="font-weight:700;margin-bottom:5px">${escapeHtml(referred.name || 'Unnamed user')}</button>
+          <div style="font-size:11px;color:var(--muted)">${escapeHtml(referred.email || '—')} · ${escapeHtml(referred.phone || 'No phone')}</div>
+        </td>
+        <td><span class="badge b-${referredRole}">${referredRole === 'driver' ? 'Driver' : 'Rider'}</span></td>
+        <td>
+          <div style="font-family:var(--mono);font-size:12px;font-weight:600">${escapeHtml(item.referralCode || 'No code')}</div>
+          ${link ? `<div style="margin-top:5px;display:flex;gap:6px"><button class="btn-sm btn-detail" onclick="copyReferralLink('${escapeHtml(link)}')">Copy link</button><a class="btn-sm btn-detail" href="${escapeHtml(link)}" target="_blank" rel="noopener" style="text-decoration:none">Open</a></div>` : ''}
+        </td>
+        <td><span class="badge b-${status === 'rewarded' ? 'rewarded' : 'registered'}">${escapeHtml(String(item.status || 'registered').replace(/_/g, ' '))}</span></td>
+        <td>
+          <div style="font-weight:700;color:var(--green)">R ${Number(item.totalRewards || 0).toFixed(2)}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:3px">${Number(item.rewardCount || 0)} transaction${Number(item.rewardCount || 0) === 1 ? '' : 's'}</div>
+        </td>
+        <td><div style="font-size:12px">${fmt(referred.joinedAt || item.createdAt)}</div><div style="font-size:11px;color:var(--muted);margin-top:3px">Reward: ${fmt(item.lastRewardAt)}</div></td>
+        <td><div class="action-cell"><button class="btn-sm btn-detail" onclick="showReferralDetails('${escapeHtml(referred.id)}')">Details</button></div></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+async function openReferralUser(userId) {
+  try {
+    await ensureAdminUsersLoaded();
+    userDetail(userId);
+  } catch (e) {
+    toast('Unable to open account: ' + (e.message || 'Unknown error'), 'err');
+  }
+}
+
+function showReferralDetails(referredUserId) {
+  const item = allReferrals.find(entry => entry.referred?.id === referredUserId);
+  if (!item) return;
+  const referrer = item.referrer || {};
+  const referred = item.referred || {};
+  document.getElementById('m-title').textContent = 'Referral relationship';
+  document.getElementById('m-sub').textContent = `${referrer.name || 'Unknown referrer'} referred ${referred.name || 'Unknown user'}`;
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid">
+      <div class="info-row"><div class="info-label">Referrer</div><div class="info-val">${escapeHtml(referrer.name || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Referred user</div><div class="info-val">${escapeHtml(referred.name || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Referrer email</div><div class="info-val">${escapeHtml(referrer.email || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Referred email</div><div class="info-val">${escapeHtml(referred.email || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Referrer phone</div><div class="info-val">${escapeHtml(referrer.phone || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Referred phone</div><div class="info-val">${escapeHtml(referred.phone || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Code used</div><div class="info-val" style="font-family:var(--mono)">${escapeHtml(item.referralCode || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Status</div><div class="info-val">${escapeHtml(String(item.status || 'registered').replace(/_/g, ' '))}</div></div>
+      <div class="info-row"><div class="info-label">Total rewards</div><div class="info-val" style="font-weight:700;color:var(--green)">R ${Number(item.totalRewards || 0).toFixed(2)}</div></div>
+      <div class="info-row"><div class="info-label">Reward transactions</div><div class="info-val">${Number(item.rewardCount || 0)}</div></div>
+      <div class="info-row"><div class="info-label">Registered</div><div class="info-val">${fmtFull(item.createdAt)}</div></div>
+      <div class="info-row"><div class="info-label">Last reward</div><div class="info-val">${fmtFull(item.lastRewardAt)}</div></div>
+      <div class="info-row"><div class="info-label">Referrer balances</div><div class="info-val">Rewards R ${Number(referrer.rewardsBalance || 0).toFixed(2)} · Wallet R ${Number(referrer.walletBalance || 0).toFixed(2)}</div></div>
+      <div class="info-row"><div class="info-label">Referral event ID</div><div class="info-val" style="font-family:var(--mono);font-size:11px">${escapeHtml(item.eventId || 'No audit event')}</div></div>
+    </div>
+    ${item.shareUrl ? `<div class="field" style="margin-top:18px"><div class="f-label">Referral link</div><input class="f-input" value="${escapeHtml(item.shareUrl)}" readonly onclick="this.select()" /></div>` : ''}`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Close</button>
+    <button class="btn-lg btn-outline" onclick="closeModal();openReferralUser('${escapeHtml(referrer.id)}')">Open referrer</button>
+    <button class="btn-lg btn-black" onclick="closeModal();openReferralUser('${escapeHtml(referred.id)}')">Open referred user</button>`;
+  openModal();
+}
+
+async function copyReferralLink(link) {
+  try {
+    await navigator.clipboard.writeText(link);
+    toast('Referral link copied', 'ok');
+  } catch (e) {
+    toast('Unable to copy referral link', 'err');
+  }
+}
+
 function userDetail(id) {
   const u = allUsers.find(item => item.id === id);
   if (!u) { toast('❌ User not found in current list.', 'err'); return; }
@@ -2659,6 +2838,13 @@ function switchToChauffeursView() {
 
 async function doSearch(q) {
   const query = (q || '').trim();
+
+  if (curView === 'referrals') {
+    const input = document.getElementById('referral-search');
+    if (input) input.value = query;
+    renderFilteredReferrals();
+    return;
+  }
 
   // The selfies view keeps its own dedicated search.
   if (curView === 'selfies') {
