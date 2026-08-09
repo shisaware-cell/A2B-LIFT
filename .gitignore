@@ -12,8 +12,9 @@ builds/
 attached_assets/
 
 # Native
-ios/
-android/
+/ios/
+/android/
+modules/driver-overlay/android/build/
 *.orig.*
 *.jks
 *.p8

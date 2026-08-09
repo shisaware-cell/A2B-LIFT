@@ -55,3 +55,15 @@ test("Android driver overlay survives task removal when the user enables it", ()
   assert.match(settingsSource, /disabled=\{!overlayAvailable\}/);
   assert.match(manifestSource, /android:stopWithTask="false"/);
 });
+
+test("EAS keeps the custom Android overlay module in build archives", () => {
+  const easIgnore = readProjectFile(".easignore");
+  const gitIgnore = readProjectFile(".gitignore");
+
+  assert.match(easIgnore, /^\/android\/$/m);
+  assert.doesNotMatch(easIgnore, /^android\/$/m);
+  assert.match(easIgnore, /^modules\/driver-overlay\/android\/build\/$/m);
+  assert.match(gitIgnore, /^\/android\/$/m);
+  assert.doesNotMatch(gitIgnore, /^android\/$/m);
+  assert.match(gitIgnore, /^modules\/driver-overlay\/android\/build\/$/m);
+});

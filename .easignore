@@ -7,8 +7,9 @@ server_dist/
 dist/
 website/
 attached_assets/
-ios/
-android/
+/ios/
+/android/
+modules/driver-overlay/android/build/
 .expo/
 
 # Large image files not needed for the build
