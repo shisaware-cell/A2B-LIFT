@@ -37,6 +37,7 @@ interface DriverProfileSummary {
 export default function ChauffeurSettingsScreen() {
   const insets = useSafeAreaInsets();
   const { user, logout, clearSession } = useAuth();
+  const overlayAvailable = isDriverOverlayAvailable();
   const [showVehicle, setShowVehicle] = useState(false);
   const [showDocuments, setShowDocuments] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -88,6 +89,13 @@ export default function ChauffeurSettingsScreen() {
 
   async function toggleDriverOverlay(enabled: boolean) {
     if (overlayUpdating) return;
+    if (!overlayAvailable) {
+      Alert.alert(
+        "Driver update required",
+        "Install the latest A2B Driver Android build to enable the floating shortcut.",
+      );
+      return;
+    }
     setOverlayUpdating(true);
     try {
       setOverlayEnabled(enabled);
@@ -349,7 +357,7 @@ export default function ChauffeurSettingsScreen() {
       )}
 
       <View style={styles.menuGroup}>
-        {isDriverOverlayAvailable() ? (
+        {Platform.OS === "android" ? (
           <View style={styles.menuItem}>
             <View style={styles.menuIconCircle}>
               <Ionicons name="chatbubble-ellipses-outline" size={20} color={Colors.white} />
@@ -357,7 +365,9 @@ export default function ChauffeurSettingsScreen() {
             <View style={styles.menuTextBlock}>
               <Text style={styles.menuText}>Floating driver shortcut</Text>
               <Text style={styles.menuSubText}>
-                {overlayEnabled && !overlayPermissionGranted
+                {!overlayAvailable
+                  ? "Install the latest Driver build to enable"
+                  : overlayEnabled && !overlayPermissionGranted
                   ? "Allow display over other apps to finish setup"
                   : "Keep A2B available while using other apps"}
               </Text>
@@ -368,6 +378,7 @@ export default function ChauffeurSettingsScreen() {
               <Switch
                 value={overlayEnabled && overlayPermissionGranted}
                 onValueChange={toggleDriverOverlay}
+                disabled={!overlayAvailable}
                 trackColor={{ false: Colors.border, true: Colors.success }}
                 thumbColor={Colors.white}
               />
