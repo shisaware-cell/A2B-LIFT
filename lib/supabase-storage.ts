@@ -1,5 +1,5 @@
-import { Platform } from "react-native";
-import { getApiUrl } from "./query-client";
+import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
+import { apiRequest, getApiUrl } from "./query-client";
 
 const SUPABASE_URL =
   process.env.EXPO_PUBLIC_SUPABASE_URL || "https://zzwkieiktbhptvgsqerd.supabase.co";
@@ -33,6 +33,10 @@ export async function uploadDocument(
   docType: string,
   options: UploadDocumentOptions = {}
 ): Promise<string> {
+  if (docType === "profile_selfie") {
+    return uploadProfileSelfie(localUri, userId);
+  }
+
   // ── 1. Read the file bytes ──────────────────────────────────────────────
   const blob = await readUriAsBlob(localUri);
   const mimeType = normalizeMimeType(options.mimeType, blob.type);
@@ -92,6 +96,30 @@ export async function uploadDocument(
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function uploadProfileSelfie(localUri: string, userId: string): Promise<string> {
+  let optimizedUri = localUri;
+  try {
+    const optimized = await manipulateAsync(
+      localUri,
+      [{ resize: { width: 720 } }],
+      { compress: 0.72, format: SaveFormat.JPEG },
+    );
+    optimizedUri = optimized.uri;
+  } catch (error: any) {
+    console.warn("[selfie-upload] Image optimization failed; using captured image:", error?.message);
+  }
+
+  const blob = await readUriAsBlob(optimizedUri);
+  const base64Data = await blobToBase64(blob);
+  const response = await apiRequest("POST", `/api/users/${encodeURIComponent(userId)}/selfie-upload`, {
+    base64Data,
+    mimeType: "image/jpeg",
+  });
+  const result = await response.json();
+  if (!result?.url) throw new Error("Selfie upload did not return an image URL.");
+  return result.url;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

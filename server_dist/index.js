@@ -35,7 +35,7 @@ var import_node_http = require("node:http");
 var import_socket = require("socket.io");
 var import_axios2 = __toESM(require("axios"));
 var import_bcryptjs = __toESM(require("bcryptjs"));
-var import_node_crypto2 = __toESM(require("node:crypto"));
+var import_node_crypto3 = __toESM(require("node:crypto"));
 
 // server/storage.ts
 var import_node_postgres = require("drizzle-orm/node-postgres");
@@ -1753,9 +1753,15 @@ var CATEGORY_ALIASES = {
   sedan: "budget",
   luxury: "luxury",
   luxury_car: "luxury",
+  luxury_sedan: "luxury",
   premium: "luxury",
   business: "business",
   business_class: "business",
+  vip: "business",
+  vip_car: "business",
+  luxury_vip: "business",
+  luxury_vip_car: "business",
+  business_vip: "business",
   van: "van",
   minivan: "van",
   luxury_van: "luxury_van",
@@ -2297,6 +2303,58 @@ var UserIdentityConflictError = class extends Error {
   }
 };
 
+// server/media-object-store.ts
+var import_node_crypto2 = __toESM(require("node:crypto"));
+var ensureTablePromise = null;
+async function ensureMediaObjectStore() {
+  if (!ensureTablePromise) {
+    ensureTablePromise = pool2.query(`
+      CREATE TABLE IF NOT EXISTS app_media_objects (
+        id varchar PRIMARY KEY,
+        owner_user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        purpose text NOT NULL,
+        mime_type text NOT NULL,
+        data bytea NOT NULL,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `).then(() => void 0).catch((error) => {
+      ensureTablePromise = null;
+      throw error;
+    });
+  }
+  return ensureTablePromise;
+}
+async function storeMediaObject(input) {
+  await ensureMediaObjectStore();
+  const id = import_node_crypto2.default.randomUUID();
+  await pool2.query(
+    `INSERT INTO app_media_objects (id, owner_user_id, purpose, mime_type, data)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [id, input.ownerUserId, input.purpose, input.mimeType, input.data]
+  );
+  return id;
+}
+async function getMediaObject(id) {
+  await ensureMediaObjectStore();
+  const result = await pool2.query(
+    `SELECT id, mime_type, data
+       FROM app_media_objects
+      WHERE id = $1
+      LIMIT 1`,
+    [id]
+  );
+  if (!result.rows[0]) return null;
+  return {
+    id: result.rows[0].id,
+    mimeType: result.rows[0].mime_type,
+    data: result.rows[0].data
+  };
+}
+async function deleteMediaObject(id) {
+  await ensureMediaObjectStore();
+  await pool2.query("DELETE FROM app_media_objects WHERE id = $1", [id]);
+}
+
 // server/routes.ts
 var RIDE_MATCH_RADIUS_KM = 25;
 var CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1e3;
@@ -2601,10 +2659,48 @@ function isAllowedSelfieUrl(rawUrl) {
       const supabaseHost = new URL(supabaseUrl).host;
       if (parsed.host === supabaseHost) return true;
     }
+    if (["a2blift.com", "www.a2blift.com"].includes(parsed.host) && /^\/api\/media\/[0-9a-f-]{36}$/.test(parsed.pathname)) {
+      return true;
+    }
     return parsed.host.endsWith("supabase.co");
   } catch {
     return false;
   }
+}
+function getStoredMediaId(rawUrl) {
+  if (typeof rawUrl !== "string") return null;
+  const match = rawUrl.match(/\/api\/media\/([0-9a-f-]{36})(?:[?#]|$)/i);
+  return match?.[1] || null;
+}
+function getImageDimensions(buffer) {
+  if (buffer.length > 24 && buffer[0] === 137 && buffer[1] === 80 && buffer[2] === 78 && buffer[3] === 71) {
+    return {
+      width: buffer.readUInt32BE(16),
+      height: buffer.readUInt32BE(20)
+    };
+  }
+  if (buffer.length > 4 && buffer[0] === 255 && buffer[1] === 216) {
+    let offset = 2;
+    while (offset < buffer.length - 1) {
+      if (buffer[offset] !== 255) {
+        offset++;
+        continue;
+      }
+      const marker = buffer[offset + 1];
+      if (marker === 192 || marker === 194) {
+        if (offset + 8 >= buffer.length) return null;
+        const height = buffer.readUInt16BE(offset + 5);
+        const width = buffer.readUInt16BE(offset + 7);
+        return { width, height };
+      }
+      if (marker === 218 || marker === 217) break;
+      if (offset + 3 >= buffer.length) break;
+      const segmentLength = buffer.readUInt16BE(offset + 2);
+      if (segmentLength <= 0) break;
+      offset += 2 + segmentLength;
+    }
+  }
+  return null;
 }
 async function runMockSelfieQualityCheck(selfieUrl, faceData, challenge) {
   if (!isAllowedSelfieUrl(selfieUrl)) {
@@ -2947,6 +3043,23 @@ async function registerRoutes(app2) {
   }
   app2.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+  });
+  app2.get("/api/media/:id", async (req, res) => {
+    try {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(req.params.id)) {
+        return res.status(404).end();
+      }
+      const media = await getMediaObject(req.params.id);
+      if (!media) return res.status(404).end();
+      res.setHeader("Content-Type", media.mimeType);
+      res.setHeader("Content-Length", String(media.data.length));
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      return res.send(media.data);
+    } catch (error) {
+      console.error("[media] read failed:", error.message);
+      return res.status(500).end();
+    }
   });
   app2.get("/api/config", (_req, res) => {
     res.json({
@@ -3490,7 +3603,7 @@ If you did not request this, you can ignore this email.`,
         return res.status(409).json({ message: "Please complete or cancel any active trip before deleting your account." });
       }
       const deletedEmail = `deleted-${userId}@deleted.a2b.local`;
-      const deletedPassword = await import_bcryptjs.default.hash(import_node_crypto2.default.randomBytes(32).toString("hex"), 10);
+      const deletedPassword = await import_bcryptjs.default.hash(import_node_crypto3.default.randomBytes(32).toString("hex"), 10);
       await client.query("BEGIN");
       await maybeQuery("DELETE FROM notifications WHERE user_id = $1", [userId]);
       await maybeQuery("DELETE FROM saved_cards WHERE user_id = $1", [userId]);
@@ -5171,6 +5284,57 @@ If you did not request this, you can ignore this email.`,
         return res.status(409).json({ code: `DUPLICATE_${error.field.toUpperCase()}`, message: error.message });
       }
       return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.post("/api/users/:id/selfie-upload", requireAuth, async (req, res) => {
+    let storedMediaId = null;
+    try {
+      if (req.auth.sub !== req.params.id) return res.status(403).json({ message: "Forbidden" });
+      const { base64Data } = req.body;
+      if (typeof base64Data !== "string" || !base64Data.trim()) {
+        return res.status(400).json({ message: "Selfie image is required." });
+      }
+      const normalizedBase64 = base64Data.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "").replace(/\s/g, "");
+      if (normalizedBase64.length > 27e5) {
+        return res.status(413).json({ message: "The selfie is too large. Please retake it." });
+      }
+      if (!/^[a-zA-Z0-9+/]+={0,2}$/.test(normalizedBase64)) {
+        return res.status(400).json({ message: "The selfie image is invalid. Please retake it." });
+      }
+      const buffer = Buffer.from(normalizedBase64, "base64");
+      if (buffer.length < 1024 || buffer.length > 2e6) {
+        return res.status(400).json({ message: "The selfie image size is invalid. Please retake it." });
+      }
+      const isJpeg = buffer[0] === 255 && buffer[1] === 216;
+      const isPng = buffer[0] === 137 && buffer[1] === 80 && buffer[2] === 78 && buffer[3] === 71;
+      if (!isJpeg && !isPng) {
+        return res.status(400).json({ message: "Only JPEG or PNG selfies are supported." });
+      }
+      const dimensions = getImageDimensions(buffer);
+      if (!dimensions || dimensions.width < 160 || dimensions.height < 160 || dimensions.width > 5e3 || dimensions.height > 5e3) {
+        return res.status(400).json({ message: "The selfie dimensions are invalid. Please retake it." });
+      }
+      const currentUser = await storage.getUser(req.params.id);
+      if (!currentUser) return res.status(404).json({ message: "User not found" });
+      const oldMediaId = getStoredMediaId(currentUser.profilePhoto);
+      storedMediaId = await storeMediaObject({
+        ownerUserId: req.params.id,
+        purpose: "profile_selfie",
+        mimeType: isPng ? "image/png" : "image/jpeg",
+        data: buffer
+      });
+      const url = `https://a2blift.com/api/media/${storedMediaId}`;
+      const updatedUser = await storage.updateUser(req.params.id, { profilePhoto: url });
+      if (!updatedUser) throw new Error("Could not update the user profile.");
+      if (oldMediaId && oldMediaId !== storedMediaId) {
+        await deleteMediaObject(oldMediaId).catch(() => void 0);
+      }
+      const { password: _pw, ...safeUser } = updatedUser;
+      return res.json({ url, user: safeUser });
+    } catch (error) {
+      if (storedMediaId) await deleteMediaObject(storedMediaId).catch(() => void 0);
+      console.error("[selfie-upload] error:", error.message);
+      return res.status(500).json({ message: "Could not save your selfie. Please try again." });
     }
   });
   app2.put("/api/users/:id/selfie", requireAuth, async (req, res) => {
@@ -8423,7 +8587,7 @@ If you did not request this, you can ignore this email.`,
       }
       const rawBody = req.rawBody;
       const raw = typeof rawBody === "string" ? rawBody : Buffer.isBuffer(rawBody) ? rawBody : JSON.stringify(req.body);
-      const hash = import_node_crypto2.default.createHmac("sha512", secret).update(raw).digest("hex");
+      const hash = import_node_crypto3.default.createHmac("sha512", secret).update(raw).digest("hex");
       if (hash !== signature) {
         console.warn("Invalid Paystack webhook signature");
         return res.status(401).json({ message: "Invalid signature" });
@@ -10529,7 +10693,7 @@ If you did not request this, you can ignore this email.`,
   });
   app2.post("/api/payments/webhook", async (req, res) => {
     try {
-      const hash = import_node_crypto2.default.createHmac("sha512", PAYSTACK_SECRET).update(JSON.stringify(req.body)).digest("hex");
+      const hash = import_node_crypto3.default.createHmac("sha512", PAYSTACK_SECRET).update(JSON.stringify(req.body)).digest("hex");
       if (hash !== req.headers["x-paystack-signature"]) {
         return res.status(401).json({ message: "Invalid signature" });
       }

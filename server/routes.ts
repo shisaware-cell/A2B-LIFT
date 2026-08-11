@@ -57,6 +57,11 @@ import {
   normalizePhoneIdentity,
   UserIdentityConflictError,
 } from "./user-identity";
+import {
+  deleteMediaObject,
+  getMediaObject,
+  storeMediaObject,
+} from "./media-object-store";
 
 const RIDE_MATCH_RADIUS_KM = 25;
 const CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
@@ -446,11 +451,24 @@ function isAllowedSelfieUrl(rawUrl: string): boolean {
       if (parsed.host === supabaseHost) return true;
     }
 
+    if (
+      ["a2blift.com", "www.a2blift.com"].includes(parsed.host) &&
+      /^\/api\/media\/[0-9a-f-]{36}$/.test(parsed.pathname)
+    ) {
+      return true;
+    }
+
     // Allow known Supabase storage domains when explicit env is missing.
     return parsed.host.endsWith("supabase.co");
   } catch {
     return false;
   }
+}
+
+function getStoredMediaId(rawUrl: unknown): string | null {
+  if (typeof rawUrl !== "string") return null;
+  const match = rawUrl.match(/\/api\/media\/([0-9a-f-]{36})(?:[?#]|$)/i);
+  return match?.[1] || null;
 }
 
 function getImageDimensions(buffer: Buffer): { width: number; height: number } | null {
@@ -923,6 +941,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Health check for Railway / Render uptime monitoring
   app.get("/api/health", (_req: Request, res: Response) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  app.get("/api/media/:id", async (req: Request, res: Response) => {
+    try {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(req.params.id)) {
+        return res.status(404).end();
+      }
+      const media = await getMediaObject(req.params.id);
+      if (!media) return res.status(404).end();
+      res.setHeader("Content-Type", media.mimeType);
+      res.setHeader("Content-Length", String(media.data.length));
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      return res.send(media.data);
+    } catch (error: any) {
+      console.error("[media] read failed:", error.message);
+      return res.status(500).end();
+    }
   });
 
   // Public config for the website (safe, non-secret values only)
@@ -3664,6 +3700,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({ code: `DUPLICATE_${error.field.toUpperCase()}`, message: error.message });
       }
       return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/users/:id/selfie-upload", requireAuth, async (req: AuthedRequest, res: Response) => {
+    let storedMediaId: string | null = null;
+    try {
+      if (req.auth!.sub !== req.params.id) return res.status(403).json({ message: "Forbidden" });
+      const { base64Data } = req.body as { base64Data?: string; mimeType?: string };
+      if (typeof base64Data !== "string" || !base64Data.trim()) {
+        return res.status(400).json({ message: "Selfie image is required." });
+      }
+
+      const normalizedBase64 = base64Data.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "").replace(/\s/g, "");
+      if (normalizedBase64.length > 2_700_000) {
+        return res.status(413).json({ message: "The selfie is too large. Please retake it." });
+      }
+      if (!/^[a-zA-Z0-9+/]+={0,2}$/.test(normalizedBase64)) {
+        return res.status(400).json({ message: "The selfie image is invalid. Please retake it." });
+      }
+
+      const buffer = Buffer.from(normalizedBase64, "base64");
+      if (buffer.length < 1_024 || buffer.length > 2_000_000) {
+        return res.status(400).json({ message: "The selfie image size is invalid. Please retake it." });
+      }
+      const isJpeg = buffer[0] === 0xff && buffer[1] === 0xd8;
+      const isPng = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
+      if (!isJpeg && !isPng) {
+        return res.status(400).json({ message: "Only JPEG or PNG selfies are supported." });
+      }
+      const dimensions = getImageDimensions(buffer);
+      if (!dimensions || dimensions.width < 160 || dimensions.height < 160 || dimensions.width > 5000 || dimensions.height > 5000) {
+        return res.status(400).json({ message: "The selfie dimensions are invalid. Please retake it." });
+      }
+
+      const currentUser = await storage.getUser(req.params.id);
+      if (!currentUser) return res.status(404).json({ message: "User not found" });
+      const oldMediaId = getStoredMediaId(currentUser.profilePhoto);
+      storedMediaId = await storeMediaObject({
+        ownerUserId: req.params.id,
+        purpose: "profile_selfie",
+        mimeType: isPng ? "image/png" : "image/jpeg",
+        data: buffer,
+      });
+      const url = `https://a2blift.com/api/media/${storedMediaId}`;
+      const updatedUser = await storage.updateUser(req.params.id, { profilePhoto: url } as any);
+      if (!updatedUser) throw new Error("Could not update the user profile.");
+      if (oldMediaId && oldMediaId !== storedMediaId) {
+        await deleteMediaObject(oldMediaId).catch(() => undefined);
+      }
+      const { password: _pw, ...safeUser } = updatedUser;
+      return res.json({ url, user: safeUser });
+    } catch (error: any) {
+      if (storedMediaId) await deleteMediaObject(storedMediaId).catch(() => undefined);
+      console.error("[selfie-upload] error:", error.message);
+      return res.status(500).json({ message: "Could not save your selfie. Please try again." });
     }
   });
 

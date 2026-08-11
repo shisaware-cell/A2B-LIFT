@@ -86,7 +86,9 @@ test("requires ML Kit face validation before a selfie can be used", () => {
 
   assert.match(cameraSource, /useFacesInPhoto\(capturedUri \|\| undefined\)/);
   assert.match(cameraSource, /faceCount !== 1/);
-  assert.match(cameraSource, /faceValidation\.passed/);
+  assert.match(cameraSource, /validation\.passed/);
+  assert.match(cameraSource, /checkComplete &&\s*validation\.passed/);
+  assert.doesNotMatch(cameraSource, /Use anyway/);
   assert.doesNotMatch(cameraSource, /onCapture\(\{ uri: capturedUri, passed: true/);
 });
 

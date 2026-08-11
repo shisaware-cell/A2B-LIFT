@@ -8,9 +8,7 @@
  *    forward-facing profile photo (what riders and drivers actually see) and is
  *    never silently swapped for a random action.
  *  - The challenge stays the same across retakes so guidance is predictable.
- *  - A user is never dead-ended. If ML Kit errors, stalls, or keeps rejecting a
- *    genuine photo, the capture can still be submitted — flagged with a lower
- *    confidence score so review can happen server-side.
+ *  - A photo cannot be submitted unless ML Kit detects exactly one valid face.
  */
 
 import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
@@ -63,8 +61,6 @@ const OVAL_H = OVAL_W * 1.28;
 const OVAL_X = (SW - OVAL_W) / 2;
 const OVAL_Y = SH * 0.14;
 
-/** After this many rejected attempts the photo can be submitted anyway. */
-const MAX_STRICT_ATTEMPTS = 2;
 /** If ML Kit hasn't answered in this long, stop blocking the user. */
 const DETECTION_TIMEOUT_MS = 8000;
 /** Minimum share of the frame the face must occupy. */
@@ -184,7 +180,6 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
   const [step, setStep] = useState<"ready" | "capturing" | "review">("ready");
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
   const [photoSize, setPhotoSize] = useState<{ width: number; height: number } | null>(null);
-  const [attempts, setAttempts] = useState(0);
   const [detectionTimedOut, setDetectionTimedOut] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const capturingRef = useRef(false);
@@ -205,14 +200,11 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
     [faces, activeChallenge, photoSize],
   );
 
-  // If verification can't run, don't hold the user hostage — accept the photo
-  // with a reduced confidence score instead.
   const verificationUnavailable = detectorUnavailable;
   const canSubmit =
     !!capturedUri &&
     checkComplete &&
-    (validation.passed || verificationUnavailable || attempts >= MAX_STRICT_ATTEMPTS);
-  const submitIsFallback = !!capturedUri && checkComplete && !validation.passed && canSubmit;
+    validation.passed;
 
   // Animations
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -283,9 +275,7 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
       await onCapture({
         uri: capturedUri,
         passed: validation.passed,
-        // A fallback submission is recorded with lower confidence so it can be
-        // reviewed rather than silently trusted.
-        score: validation.passed ? validation.score : verificationUnavailable ? 0.5 : 0.4,
+        score: validation.score,
         challenge: activeChallenge,
         faceData: {
           faceCount: faces.length,
@@ -298,7 +288,7 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
     }
   }, [
     activeChallenge, canSubmit, capturedUri, confirming, faces,
-    onCapture, validation.passed, validation.score, verificationUnavailable,
+    onCapture, validation.passed, validation.score,
   ]);
 
   const retake = useCallback(() => {
@@ -306,7 +296,6 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
     setCapturedUri(null);
     setPhotoSize(null);
     setDetectionTimedOut(false);
-    setAttempts((n) => n + 1);
     capturingRef.current = false;
     setStep("ready");
   }, [clearFaces]);
@@ -353,7 +342,7 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
       : validation.passed
         ? "Your face is clear and well positioned. This photo will be shown on your profile."
         : verificationUnavailable
-          ? "Automatic face checks aren't available right now. You can still use this photo if your face is clear."
+          ? "Automatic face checks aren't available right now. Retake the photo. If this continues, close and reopen the app."
           : validation.message;
 
     return (
@@ -381,12 +370,6 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
             <Text style={styles.reviewBody}>{body}</Text>
           )}
 
-          {submitIsFallback && !verificationUnavailable && (
-            <Text style={styles.fallbackNote}>
-              You can retake it, or use this photo anyway — our team will review it.
-            </Text>
-          )}
-
           <View style={styles.reviewActions}>
             <Pressable style={styles.retakeBtn} onPress={retake} disabled={confirming}>
               <Ionicons name="refresh" size={18} color={Colors.white} />
@@ -402,9 +385,7 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
                   ? <ActivityIndicator size="small" color={Colors.primary} />
                   : <>
                       <Ionicons name="checkmark" size={18} color={Colors.primary} />
-                      <Text style={styles.confirmBtnText}>
-                        {submitIsFallback ? "Use anyway" : "Use Photo"}
-                      </Text>
+                      <Text style={styles.confirmBtnText}>Use Photo</Text>
                     </>
                 }
               </Pressable>
@@ -574,7 +555,6 @@ const styles = StyleSheet.create({
   reviewHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   reviewTitle: { fontSize: 20, fontFamily: "Inter_700Bold", color: "#fff", flexShrink: 1 },
   reviewBody:  { fontSize: 14, fontFamily: "Inter_400Regular", color: "rgba(255,255,255,0.7)", lineHeight: 20, flexShrink: 1 },
-  fallbackNote: { fontSize: 12, fontFamily: "Inter_400Regular", color: "rgba(255,255,255,0.45)", lineHeight: 18 },
   verificationRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   reviewActions: { flexDirection: "row", gap: 10, marginTop: 4 },
   retakeBtn: {
