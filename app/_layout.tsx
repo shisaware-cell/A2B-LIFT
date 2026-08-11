@@ -16,6 +16,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AuthProvider, useAuth } from "@mobile-core/auth";
 import { SocketProvider } from "@mobile-core/socket";
 import { FaceDetectionProvider } from "@infinitered/react-native-mlkit-face-detection";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 
 const RIDE_ALERT_CHANNEL_ID = "ride-alerts-v3";
 const RIDE_ALERT_SOUND = "trip_alert.wav";
@@ -324,7 +325,9 @@ export default function RootLayout() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <GestureHandlerRootView style={{ flex: 1 }}>
-          {appTree}
+          <KeyboardProvider>
+            {appTree}
+          </KeyboardProvider>
         </GestureHandlerRootView>
       </QueryClientProvider>
     </ErrorBoundary>

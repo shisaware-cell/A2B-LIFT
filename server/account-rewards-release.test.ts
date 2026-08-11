@@ -11,12 +11,17 @@ function readProjectFile(relativePath: string) {
 
 test("registration keeps fields visible above the mobile keyboard", () => {
   const registerSource = readProjectFile("app/register.tsx");
+  const loginSource = readProjectFile("app/login.tsx");
+  const rootLayoutSource = readProjectFile("app/_layout.tsx");
   const scrollSource = readProjectFile("components/KeyboardAwareScrollViewCompat.tsx");
 
   assert.match(registerSource, /KeyboardAwareScrollViewCompat/);
+  assert.match(loginSource, /KeyboardAwareScrollViewCompat/);
   assert.match(registerSource, /keyboardShouldPersistTaps="handled"/);
   assert.match(registerSource, /automaticallyAdjustKeyboardInsets=\{Platform\.OS === "ios"\}/);
-  assert.match(scrollSource, /automaticallyAdjustKeyboardInsets=\{Platform\.OS === "ios"\}/);
+  assert.match(rootLayoutSource, /KeyboardProvider/);
+  assert.match(scrollSource, /KeyboardAwareScrollView/);
+  assert.match(scrollSource, /bottomOffset=\{Math\.max\(16, keyboardVerticalOffset\)\}/);
 });
 
 test("one cross-app identity policy rejects duplicate emails and phones", () => {

@@ -7,7 +7,7 @@ import {
   getPlatformCommission,
 } from "../shared/fare-policy";
 
-export const VEHICLE_CATEGORIES: Record<string, { name: string; pricePerKm: number; baseFare: number; includedKm: number; longTripBaseFare?: number; longTripStartsAtKm?: number; maxPassengers: number; commissionRate: number; examples: string }> = {
+export const VEHICLE_CATEGORIES: Record<string, { name: string; pricePerKm: number; baseFare: number; includedKm: number; maxPassengers: number; commissionRate: number; examples: string }> = {
   a2b_lite: { name: "A2B Lite", ...VEHICLE_CATEGORY_PRICING.a2b_lite, commissionRate: getVehicleCategoryCommissionRate("a2b_lite"), examples: "Hyundai i10 and similar compact cars" },
   budget: { name: "Budget", ...VEHICLE_CATEGORY_PRICING.budget, commissionRate: getVehicleCategoryCommissionRate("budget"), examples: "Toyota Corolla, Toyota Quest" },
   luxury: { name: "Luxury", ...VEHICLE_CATEGORY_PRICING.luxury, commissionRate: getVehicleCategoryCommissionRate("luxury"), examples: "BMW 3 Series, Mercedes C Class" },
@@ -102,13 +102,8 @@ export function calculatePrice(
   }
 ): PriceEstimate {
   const category = VEHICLE_CATEGORIES[categoryId] || VEHICLE_CATEGORIES.budget;
-  const usesLongTripFare =
-    categoryId === "a2b_lite" &&
-    Number(distanceKm) >= Number(category.longTripStartsAtKm || 3);
-  const baseFare = usesLongTripFare
-    ? Number(category.longTripBaseFare || category.baseFare)
-    : category.baseFare;
-  const includedKm = usesLongTripFare ? 0 : (category.includedKm || 0);
+  const baseFare = category.baseFare;
+  const includedKm = category.includedKm || 0;
   const distanceFare = getBillableDistanceKm(distanceKm, includedKm) * category.pricePerKm;
 
   let subtotal = baseFare + distanceFare;
