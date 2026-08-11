@@ -27,11 +27,13 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   const socketRef = useRef<Socket | null>(null);
   // Local listeners map — used to re-attach after reconnect and for triggerEvent
   const listenersRef = useRef<Map<string, Set<EventCallback>>>(new Map());
+  const persistentRegistrationsRef = useRef<Map<string, any>>(new Map());
 
   useEffect(() => {
     if (!user || !accessToken) {
       socketRef.current?.disconnect();
       socketRef.current = null;
+      persistentRegistrationsRef.current.clear();
       return;
     }
 
@@ -60,6 +62,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     socket.on("connect", () => {
       console.log("[Socket] connected:", socket.id);
+      persistentRegistrationsRef.current.forEach((data, event) => {
+        socket.emit(event, data);
+      });
     });
 
     socket.on("disconnect", (reason) => {
@@ -96,6 +101,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const emit = useCallback((event: string, data: any) => {
+    if (event === "chauffeur:register") {
+      persistentRegistrationsRef.current.set(event, data);
+    }
     if (socketRef.current?.connected) {
       socketRef.current.emit(event, data);
     } else {

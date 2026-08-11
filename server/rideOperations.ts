@@ -41,6 +41,13 @@ const MULTI_CATEGORY_MATCHES: Record<string, string[]> = {
   luxury_van: ["van"],
 };
 
+// VIP requests may fall back to V-Class, but only after VIP-compatible
+// vehicles have been exhausted. Keep this separate from the general hierarchy
+// so the reverse V-Class -> VIP match is never enabled.
+const FALLBACK_CATEGORY_MATCHES: Record<string, string[]> = {
+  luxury_van: ["business"],
+};
+
 export function normalizeVehicleType(vehicleType?: string | null) {
   const normalized = String(vehicleType || "budget")
     .trim()
@@ -50,10 +57,19 @@ export function normalizeVehicleType(vehicleType?: string | null) {
 }
 
 export function isVehicleEligibleForRide(requestedVehicleType?: string | null, activeVehicleType?: string | null) {
+  return getVehicleDispatchPriority(requestedVehicleType, activeVehicleType) !== null;
+}
+
+export function getVehicleDispatchPriority(
+  requestedVehicleType?: string | null,
+  activeVehicleType?: string | null,
+) {
   const requested = normalizeVehicleType(requestedVehicleType);
   const active = normalizeVehicleType(activeVehicleType);
-  if (requested === active) return true;
-  return (MULTI_CATEGORY_MATCHES[active] || []).includes(requested);
+  if (requested === active) return 0;
+  if ((MULTI_CATEGORY_MATCHES[active] || []).includes(requested)) return 1;
+  if ((FALLBACK_CATEGORY_MATCHES[active] || []).includes(requested)) return 2;
+  return null;
 }
 
 export function getRideOfferExpiresAt(now = new Date()) {

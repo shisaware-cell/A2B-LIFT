@@ -18,6 +18,7 @@ import {
   getVehicleCategories,
 } from "./luxuryPricingEngine";
 import {
+  getVehicleDispatchPriority,
   getRideOfferExpiresAt,
   isRideOfferActive,
   isVehicleEligibleForRide,
@@ -715,7 +716,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (hasPickup && !hasFreshChauffeurLocation(chauffeur)) continue;
 
       const activeVehicle = await getApprovedActiveVehicle(chauffeur);
-      if (!activeVehicle || !isVehicleEligibleForRide(ride.vehicleType || "budget", activeVehicle.vehicleType)) {
+      const categoryPriority = activeVehicle
+        ? getVehicleDispatchPriority(ride.vehicleType || "budget", activeVehicle.vehicleType)
+        : null;
+      if (!activeVehicle || categoryPriority === null) {
         continue;
       }
 
@@ -724,10 +728,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         : 0;
       if (hasPickup && distKm > RIDE_MATCH_RADIUS_KM) continue;
 
-      eligible.push({ ...chauffeur, activeVehicle, distKm });
+      eligible.push({ ...chauffeur, activeVehicle, distKm, categoryPriority });
     }
 
-    return eligible.sort((a, b) => Number(a.distKm || 0) - Number(b.distKm || 0));
+    return eligible.sort((a, b) =>
+      Number(a.categoryPriority || 0) - Number(b.categoryPriority || 0)
+      || Number(a.distKm || 0) - Number(b.distKm || 0)
+    );
   }
 
   async function countActiveDemandForRide(ride: any) {
@@ -924,12 +931,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     const pushTokens = await getDriverPushTokens([offered]);
+    const notificationTitle = "New Ride Request";
+    const notificationBody = `Pickup: ${latestRide.pickupAddress || "Nearby"} — 45 seconds to accept`;
+    if (offered.userId) {
+      await storage.createNotification({
+        userId: offered.userId,
+        title: notificationTitle,
+        body: notificationBody,
+        type: "ride_request",
+      }).catch((error: any) => {
+        console.error("[dispatch] failed to save ride notification:", error.message);
+      });
+    }
     if (pushTokens.length > 0) {
-      sendExpoPushNotification(
+      await sendExpoPushNotification(
         pushTokens,
-        "🚗 New Ride Request",
-        `Pickup: ${latestRide.pickupAddress || "Nearby"} — 45 seconds to accept`,
-        { rideId: latestRide.id, type: "ride:new" },
+        notificationTitle,
+        notificationBody,
+        { rideId: latestRide.id, type: "ride:new", vehicleType: latestRide.vehicleType },
         { urgent: true },
       );
     }

@@ -1776,15 +1776,23 @@ var MULTI_CATEGORY_MATCHES = {
   executive: ["business", "luxury", "budget", "a2b_lite", "luxury_van"],
   luxury_van: ["van"]
 };
+var FALLBACK_CATEGORY_MATCHES = {
+  luxury_van: ["business"]
+};
 function normalizeVehicleType(vehicleType) {
   const normalized = String(vehicleType || "budget").trim().toLowerCase().replace(/\s+/g, "_");
   return CATEGORY_ALIASES[normalized] || normalized || "budget";
 }
 function isVehicleEligibleForRide(requestedVehicleType, activeVehicleType) {
+  return getVehicleDispatchPriority(requestedVehicleType, activeVehicleType) !== null;
+}
+function getVehicleDispatchPriority(requestedVehicleType, activeVehicleType) {
   const requested = normalizeVehicleType(requestedVehicleType);
   const active = normalizeVehicleType(activeVehicleType);
-  if (requested === active) return true;
-  return (MULTI_CATEGORY_MATCHES[active] || []).includes(requested);
+  if (requested === active) return 0;
+  if ((MULTI_CATEGORY_MATCHES[active] || []).includes(requested)) return 1;
+  if ((FALLBACK_CATEGORY_MATCHES[active] || []).includes(requested)) return 2;
+  return null;
 }
 function getRideOfferExpiresAt(now = /* @__PURE__ */ new Date()) {
   return new Date(now.getTime() + RIDE_OFFER_WINDOW_MS);
@@ -2857,14 +2865,17 @@ async function registerRoutes(app2) {
       if (skipped?.has(chauffeur.id)) continue;
       if (hasPickup && !hasFreshChauffeurLocation(chauffeur)) continue;
       const activeVehicle = await getApprovedActiveVehicle(chauffeur);
-      if (!activeVehicle || !isVehicleEligibleForRide(ride.vehicleType || "budget", activeVehicle.vehicleType)) {
+      const categoryPriority = activeVehicle ? getVehicleDispatchPriority(ride.vehicleType || "budget", activeVehicle.vehicleType) : null;
+      if (!activeVehicle || categoryPriority === null) {
         continue;
       }
       const distKm = hasPickup ? calculateHaversineDistanceKm(pickupLat, pickupLng, Number(chauffeur.lat), Number(chauffeur.lng)) : 0;
       if (hasPickup && distKm > RIDE_MATCH_RADIUS_KM) continue;
-      eligible.push({ ...chauffeur, activeVehicle, distKm });
+      eligible.push({ ...chauffeur, activeVehicle, distKm, categoryPriority });
     }
-    return eligible.sort((a, b) => Number(a.distKm || 0) - Number(b.distKm || 0));
+    return eligible.sort(
+      (a, b) => Number(a.categoryPriority || 0) - Number(b.categoryPriority || 0) || Number(a.distKm || 0) - Number(b.distKm || 0)
+    );
   }
   async function countActiveDemandForRide(ride) {
     const pickupLat = Number(ride.pickupLat);
@@ -3029,12 +3040,24 @@ async function registerRoutes(app2) {
       }
     }
     const pushTokens = await getDriverPushTokens([offered]);
+    const notificationTitle = "New Ride Request";
+    const notificationBody = `Pickup: ${latestRide.pickupAddress || "Nearby"} \u2014 45 seconds to accept`;
+    if (offered.userId) {
+      await storage.createNotification({
+        userId: offered.userId,
+        title: notificationTitle,
+        body: notificationBody,
+        type: "ride_request"
+      }).catch((error) => {
+        console.error("[dispatch] failed to save ride notification:", error.message);
+      });
+    }
     if (pushTokens.length > 0) {
-      sendExpoPushNotification(
+      await sendExpoPushNotification(
         pushTokens,
-        "\u{1F697} New Ride Request",
-        `Pickup: ${latestRide.pickupAddress || "Nearby"} \u2014 45 seconds to accept`,
-        { rideId: latestRide.id, type: "ride:new" },
+        notificationTitle,
+        notificationBody,
+        { rideId: latestRide.id, type: "ride:new", vehicleType: latestRide.vehicleType },
         { urgent: true }
       );
     }

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isVehicleEligibleForRide, normalizeVehicleType } from "./rideOperations";
+import {
+  getVehicleDispatchPriority,
+  isVehicleEligibleForRide,
+  normalizeVehicleType,
+} from "./rideOperations";
 
 test("normalizes every rider and fleet category label used by the apps", () => {
   assert.equal(normalizeVehicleType("A2B Lite"), "a2b_lite");
@@ -22,4 +26,11 @@ test("matches exact categories and lets higher classes serve Lite requests", () 
   assert.equal(isVehicleEligibleForRide("VIP", "Luxury VIP"), true);
   assert.equal(isVehicleEligibleForRide("budget", "a2b_lite"), false);
   assert.equal(isVehicleEligibleForRide("van", "budget"), false);
+});
+
+test("falls VIP back to V-Class without allowing the reverse match", () => {
+  assert.equal(isVehicleEligibleForRide("VIP", "V-Class"), true);
+  assert.equal(isVehicleEligibleForRide("V-Class", "VIP"), false);
+  assert.equal(getVehicleDispatchPriority("VIP", "VIP"), 0);
+  assert.equal(getVehicleDispatchPriority("VIP", "V-Class"), 2);
 });
