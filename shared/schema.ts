@@ -370,6 +370,7 @@ export const documents = pgTable("documents", {
   applicationId: varchar("application_id").references(() => driverApplications.id),
   chauffeurId: varchar("chauffeur_id").references(() => chauffeurs.id),
   vehicleId: varchar("vehicle_id").references(() => vehicles.id),
+  payLaterApplicationId: varchar("pay_later_application_id"),
   type: text("type").notNull(),
   url: text("url").notNull(),
   status: text("status").notNull().default("pending"),
@@ -377,6 +378,34 @@ export const documents = pgTable("documents", {
   uploadedAt: timestamp("uploaded_at").defaultNow(),
   reviewedAt: timestamp("reviewed_at"),
   reviewerAdminId: varchar("reviewer_admin_id").references(() => users.id),
+});
+
+export const payLaterApplications = pgTable("pay_later_applications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().unique().references(() => users.id),
+  status: text("status").notNull().default("pending_review"),
+  creditLimit: real("credit_limit").notNull().default(0),
+  availableCredit: real("available_credit").notNull().default(0),
+  rejectionReason: text("rejection_reason"),
+  submittedAt: timestamp("submitted_at").defaultNow(),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewerAdminId: varchar("reviewer_admin_id").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const payLaterTransactions = pgTable("pay_later_transactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  applicationId: varchar("application_id").notNull().references(() => payLaterApplications.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  rideId: varchar("ride_id").references(() => rides.id),
+  type: text("type").notNull(),
+  amount: real("amount").notNull(),
+  balanceBefore: real("balance_before").notNull(),
+  balanceAfter: real("balance_after").notNull(),
+  description: text("description"),
+  adminUserId: varchar("admin_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const liftClubMemberships = pgTable("lift_club_memberships", {
@@ -649,6 +678,8 @@ export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type LiftClubRoute = typeof liftClubRoutes.$inferSelect;
 export type LiftClubBooking = typeof liftClubBookings.$inferSelect;
 export type Document = typeof documents.$inferSelect;
+export type PayLaterApplication = typeof payLaterApplications.$inferSelect;
+export type PayLaterTransaction = typeof payLaterTransactions.$inferSelect;
 export type RideRating = typeof rideRatings.$inferSelect;
 export type Earning = typeof earnings.$inferSelect;
 export type Withdrawal = typeof withdrawals.$inferSelect;

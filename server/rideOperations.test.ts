@@ -17,15 +17,26 @@ test("normalizes every rider and fleet category label used by the apps", () => {
   assert.equal(normalizeVehicleType("V-Class"), "luxury_van");
 });
 
-test("matches exact categories and lets higher classes serve Lite requests", () => {
+test("matches exact categories and only cross-matches Lite with Budget", () => {
   for (const category of ["a2b_lite", "budget", "luxury", "business", "van", "luxury_van"]) {
     assert.equal(isVehicleEligibleForRide(category, category), true, category);
   }
   assert.equal(isVehicleEligibleForRide("a2b_lite", "budget"), true);
-  assert.equal(isVehicleEligibleForRide("Luxury", "Luxury VIP"), true);
+  assert.equal(isVehicleEligibleForRide("budget", "a2b_lite"), true);
   assert.equal(isVehicleEligibleForRide("VIP", "Luxury VIP"), true);
-  assert.equal(isVehicleEligibleForRide("budget", "a2b_lite"), false);
+  assert.equal(isVehicleEligibleForRide("budget", "luxury"), false);
+  assert.equal(isVehicleEligibleForRide("a2b_lite", "business"), false);
+  assert.equal(isVehicleEligibleForRide("luxury", "business"), false);
+  assert.equal(isVehicleEligibleForRide("van", "luxury_van"), false);
   assert.equal(isVehicleEligibleForRide("van", "budget"), false);
+});
+
+test("normalizes legacy premium fleet values before dispatch", () => {
+  assert.equal(normalizeVehicleType("Premium"), "luxury");
+  assert.equal(normalizeVehicleType("Executive"), "business");
+  assert.equal(normalizeVehicleType("XL"), "van");
+  assert.equal(isVehicleEligibleForRide("Luxury", "Premium"), true);
+  assert.equal(isVehicleEligibleForRide("VIP", "Executive"), true);
 });
 
 test("falls VIP back to V-Class without allowing the reverse match", () => {

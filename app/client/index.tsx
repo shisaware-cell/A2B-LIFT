@@ -201,6 +201,7 @@ function getRoutePreferenceLabel(routeId?: string | null): string {
 function getPaymentMethodLabel(method?: string | null): string {
   if (method === "card") return "Card";
   if (method === "wallet") return "Wallet";
+  if (method === "pay_later") return "Pay Later";
   return "Cash";
 }
 
@@ -948,7 +949,8 @@ export default function ClientHomeScreen() {
   const [paymentMethodsLoading, setPaymentMethodsLoading] = useState(false);
   const [estimatingFare, setEstimatingFare] = useState(false);
   const [rideRequestLoading, setRideRequestLoading] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "card" | "wallet">("cash");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "card" | "wallet" | "pay_later">("cash");
+  const [payLaterApplication, setPayLaterApplication] = useState<any>(null);
   const [showCashSelfiePrompt, setShowCashSelfiePrompt] = useState(false);
   const [showCashSelfieCamera, setShowCashSelfieCamera] = useState(false);
   const [cashSelfieSaving, setCashSelfieSaving] = useState(false);
@@ -2175,9 +2177,16 @@ export default function ClientHomeScreen() {
     setShowPaymentPicker(true);
     setPaymentMethodsLoading(true);
     try {
-      const res = await apiRequest("GET", "/api/payments/cards");
+      const [res, payLaterRes] = await Promise.all([
+        apiRequest("GET", "/api/payments/cards"),
+        isLiftClubMember ? apiRequest("GET", "/api/pay-later/me").catch(() => null) : Promise.resolve(null),
+      ]);
       const cards = await res.json();
       setSavedCards(Array.isArray(cards) ? cards : []);
+      if (payLaterRes?.ok) {
+        const payLater = await payLaterRes.json();
+        setPayLaterApplication(payLater?.application || null);
+      }
     } catch (error) {
       if (isUnauthorizedError(error)) {
         await handleUnauthorizedRideRequest();
@@ -2190,7 +2199,7 @@ export default function ClientHomeScreen() {
   }
 
   async function createRideRecord(
-    method: "cash" | "card" | "wallet",
+    method: "cash" | "card" | "wallet" | "pay_later",
     extras: Record<string, unknown> = {},
   ) {
     if (!user || !location || !dropoffCoords) return null;
@@ -2232,7 +2241,7 @@ export default function ClientHomeScreen() {
   }
 
   /** Creates and dispatches a ride for any payment method */
-  async function proceedWithRide(method: "cash" | "card" | "wallet") {
+  async function proceedWithRide(method: "cash" | "card" | "wallet" | "pay_later") {
     if (rideRequestLoading) return;
     setRideRequestLoading(true);
     try {
@@ -2259,6 +2268,18 @@ export default function ClientHomeScreen() {
         setRideStatus("requested");
         queryClient.invalidateQueries({ queryKey: ["/api/rides/client", user!.id] });
         refreshUser().catch(() => {});
+        if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        return;
+      }
+
+      if (method === "pay_later") {
+        setCurrentRide(ride);
+        setRideStatus("requested");
+        queryClient.invalidateQueries({ queryKey: ["/api/rides/client", user!.id] });
+        setPayLaterApplication((current: any) => current ? {
+          ...current,
+          availableCredit: Math.max(0, Number(current.availableCredit || 0) - Number(ride.price || estimatedPrice || 0)),
+        } : current);
         if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         return;
       }
@@ -2306,7 +2327,7 @@ export default function ClientHomeScreen() {
     }
   }
 
-  async function handlePayAndRide(method: "cash" | "card" | "wallet") {
+  async function handlePayAndRide(method: "cash" | "card" | "wallet" | "pay_later") {
     if (!user || !location || !dropoffCoords) return;
     setPaymentMethod(method);
     setShowPaymentPicker(false);
@@ -3198,7 +3219,7 @@ export default function ClientHomeScreen() {
             </View>
             <View style={styles.selectionMetaChip}>
               <Ionicons
-                name={currentRide?.paymentMethod === "card" ? "card-outline" : currentRide?.paymentMethod === "wallet" ? "wallet-outline" : "cash-outline"}
+                name={currentRide?.paymentMethod === "card" ? "card-outline" : currentRide?.paymentMethod === "wallet" ? "wallet-outline" : currentRide?.paymentMethod === "pay_later" ? "time-outline" : "cash-outline"}
                 size={14}
                 color={Colors.white}
               />
@@ -3528,6 +3549,44 @@ export default function ClientHomeScreen() {
                 </Pressable>
               );
             })()}
+            {isLiftClubMember ? (
+              <Pressable
+                style={[
+                  styles.payMethodRow,
+                  paymentMethodsLoading && { opacity: 0.65 },
+                  payLaterApplication?.status === "approved" && Number(payLaterApplication.availableCredit || 0) < Number(selectedRouteChoice?.fare ?? estimatedPrice ?? 0) && { opacity: 0.45 },
+                ]}
+                disabled={paymentMethodsLoading}
+                onPress={() => {
+                  const fare = Number(selectedRouteChoice?.fare ?? estimatedPrice ?? 0);
+                  if (payLaterApplication?.status !== "approved") {
+                    setShowPaymentPicker(false);
+                    router.push("/client/pay-later" as any);
+                    return;
+                  }
+                  if (Number(payLaterApplication.availableCredit || 0) < fare) {
+                    Alert.alert("Not enough Pay Later credit", `R ${Number(payLaterApplication.availableCredit || 0).toFixed(2)} is available.`);
+                    return;
+                  }
+                  handlePayAndRide("pay_later");
+                }}
+              >
+                <View style={[styles.payMethodIcon, { backgroundColor: "#DBB42C" }]}>
+                  <Ionicons name="time" size={20} color="#000" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.payMethodName}>Pay Later</Text>
+                  <Text style={styles.payMethodSub}>
+                    {payLaterApplication?.status === "approved"
+                      ? `R ${Number(payLaterApplication.availableCredit || 0).toFixed(2)} credit available`
+                      : payLaterApplication?.status === "pending_review"
+                        ? "Application awaiting admin review"
+                        : "Apply and upload supporting documents"}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+              </Pressable>
+            ) : null}
             <Pressable style={styles.payMethodRow} onPress={() => handlePayAndRide("cash")}>
               <View style={[styles.payMethodIcon, { backgroundColor: Colors.accent }]}>
                 <Ionicons name="cash" size={20} color="#fff" />

@@ -23,22 +23,23 @@ const CATEGORY_ALIASES: Record<string, string> = {
   luxury_vip: "business",
   luxury_vip_car: "business",
   business_vip: "business",
+  executive: "business",
+  executive_car: "business",
   van: "van",
   minivan: "van",
+  xl: "van",
+  people_carrier: "van",
   luxury_van: "luxury_van",
   vclass: "luxury_van",
   v_class: "luxury_van",
   "v-class": "luxury_van",
 };
 
-// Vehicle categories that are eligible for MULTIPLE request categories.
-// e.g. an "executive" vehicle can serve both business and luxury requests.
+// Lite and Budget are the only interchangeable categories. Premium vehicles
+// must not receive economy requests simply because they are more expensive.
 const MULTI_CATEGORY_MATCHES: Record<string, string[]> = {
   budget: ["a2b_lite"],
-  luxury: ["budget", "a2b_lite"],
-  business: ["luxury", "budget", "a2b_lite"],
-  executive: ["business", "luxury", "budget", "a2b_lite", "luxury_van"],
-  luxury_van: ["van"],
+  a2b_lite: ["budget"],
 };
 
 // VIP requests may fall back to V-Class, but only after VIP-compatible

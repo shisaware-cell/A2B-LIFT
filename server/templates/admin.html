@@ -288,6 +288,10 @@ tbody tr:hover { background:#fafaf8; }
       <span class="nav-icon">🎟️</span> Lift Club
       <span class="nav-badge" id="nb-liftclub" style="display:none">0</span>
     </div>
+    <div class="nav-item" onclick="go('payLater',this);closeSidebar()">
+      <span class="nav-icon">◷</span> Pay Later
+      <span class="nav-badge" id="nb-paylater" style="display:none">0</span>
+    </div>
     <div class="nav-item" onclick="go('selfies',this);closeSidebar()">
       <span class="nav-icon">📸</span> Liveness Selfies
     </div>
@@ -434,7 +438,7 @@ tbody tr:hover { background:#fafaf8; }
 
     <!-- PAYMENTS -->
     <div class="view" id="view-payments">
-      <div id="pay-summary" class="stats-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px"></div>
+      <div id="pay-summary" class="stats-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:20px"></div>
       <div class="sec-head"><div class="sec-title">Rider Payments</div></div>
       <div class="table-card" id="pay-table"><div class="loading">Loading…</div></div>
     </div>
@@ -465,6 +469,12 @@ tbody tr:hover { background:#fafaf8; }
         </div>
       </div>
       <div class="table-card" id="liftclub-routes-table"><div class="loading">Loading…</div></div>
+    </div>
+
+    <div class="view" id="view-payLater">
+      <div class="notice"><span>Review Lift Club member documents, approve access, and allocate Pay Later credit. This balance is separate from the user's wallet.</span></div>
+      <div class="sec-head"><div class="sec-title">Pay Later applications</div></div>
+      <div class="table-card" id="paylater-table"><div class="loading">Loading...</div></div>
     </div>
 
     <!-- LIVENESS SELFIES -->
@@ -674,8 +684,8 @@ async function doLogout() {
 
 // ── NAV ──
 let curView = 'overview';
-let allChauf = [], allWd = [], allSafe = [], allApps = [], allPartners = [], allVehicles = [], allDocuments = [], allSelfies = [], allUsers = [], allReferrals = [], allLiftClubMemberships = [], allLiftClubRoutes = [], chaufFilter = 'all', wdFilter = 'all', safeFilter = 'all', appsFilter = 'all', partnersFilter = 'all', vehiclesFilter = 'all', documentsFilter = 'all', referralFilter = 'all', liftClubFilter = 'all', liftClubRouteFilter = 'all';
-const VIEW_TITLES = { overview:'Dashboard', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', documents:'Document Review', rides:'Rides', payments:'Payments', liftClubApplications:'Lift Club', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users', referrals:'Referral Summary' };
+let allChauf = [], allWd = [], allSafe = [], allApps = [], allPartners = [], allVehicles = [], allDocuments = [], allSelfies = [], allUsers = [], allReferrals = [], allLiftClubMemberships = [], allLiftClubRoutes = [], allPayLater = [], chaufFilter = 'all', wdFilter = 'all', safeFilter = 'all', appsFilter = 'all', partnersFilter = 'all', vehiclesFilter = 'all', documentsFilter = 'all', referralFilter = 'all', liftClubFilter = 'all', liftClubRouteFilter = 'all';
+const VIEW_TITLES = { overview:'Dashboard', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', documents:'Document Review', rides:'Rides', payments:'Payments', liftClubApplications:'Lift Club', payLater:'Pay Later', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users', referrals:'Referral Summary' };
 
 function go(view, el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -689,7 +699,7 @@ function go(view, el) {
 }
 
 function loadView() {
-  ({ overview:loadOverview, chauffeurs:loadChauf, applications:loadApps, partners:loadPartners, vehicles:loadVehicles, documents:loadDocuments, rides:loadRides, payments:loadPay, liftClubApplications:loadLiftClubApplications, selfies:loadSelfies, withdrawals:loadWd, safety:loadSafe, users:loadUsers, referrals:loadReferrals })[curView]?.();
+  ({ overview:loadOverview, chauffeurs:loadChauf, applications:loadApps, partners:loadPartners, vehicles:loadVehicles, documents:loadDocuments, rides:loadRides, payments:loadPay, liftClubApplications:loadLiftClubApplications, payLater:loadPayLater, selfies:loadSelfies, withdrawals:loadWd, safety:loadSafe, users:loadUsers, referrals:loadReferrals })[curView]?.();
 }
 
 function loadAll() {
@@ -702,6 +712,7 @@ function loadAll() {
   loadRides();
   loadPay();
   loadLiftClubApplications();
+  loadPayLater();
   loadSelfies();
   loadWd();
   loadSafe();
@@ -1942,14 +1953,17 @@ async function loadPay() {
     }
 
     const paid = payments.filter(p => p.status === 'paid');
-    const total = paid.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    const collected = paid.filter(p => p.method !== 'pay_later');
+    const total = collected.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
     const cardTotal = paid.filter(p => p.method === 'card').reduce((s, p) => s + parseFloat(p.amount || 0), 0);
     const walletTotal = paid.filter(p => p.method === 'wallet').reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    const payLaterTotal = paid.filter(p => p.method === 'pay_later').reduce((s, p) => s + parseFloat(p.amount || 0), 0);
 
     document.getElementById('pay-summary').innerHTML = `
-      <div class="stat-card"><div class="stat-top"><div class="stat-label">Total Collected</div><div class="stat-icon si-green">💰</div></div><div class="stat-value" style="color:var(--green)">R ${total.toFixed(2)}</div><div class="stat-foot">${paid.length} successful payments</div></div>
+      <div class="stat-card"><div class="stat-top"><div class="stat-label">Total Collected</div><div class="stat-icon si-green">💰</div></div><div class="stat-value" style="color:var(--green)">R ${total.toFixed(2)}</div><div class="stat-foot">Excludes Pay Later credit</div></div>
       <div class="stat-card"><div class="stat-top"><div class="stat-label">Via Card</div><div class="stat-icon si-blue">💳</div></div><div class="stat-value" style="font-size:22px">R ${cardTotal.toFixed(2)}</div><div class="stat-foot">Card payments</div></div>
       <div class="stat-card"><div class="stat-top"><div class="stat-label">Via Wallet</div><div class="stat-icon si-black">👛</div></div><div class="stat-value" style="font-size:22px">R ${walletTotal.toFixed(2)}</div><div class="stat-foot">Wallet payments</div></div>
+      <div class="stat-card"><div class="stat-top"><div class="stat-label">Pay Later Used</div><div class="stat-icon si-black">◷</div></div><div class="stat-value" style="font-size:22px">R ${payLaterTotal.toFixed(2)}</div><div class="stat-foot">Outstanding credit usage</div></div>
     `;
 
     if (!payments.length) {
@@ -2143,6 +2157,106 @@ async function deleteLiftClubMembership(id, label) {
       }
     }
   });
+}
+
+// ── PAY LATER ──
+async function loadPayLater() {
+  spin('paylater-table');
+  try {
+    const res = await apiFetch('/api/admin/pay-later');
+    if (!res.ok) throw new Error(await res.text());
+    allPayLater = await res.json();
+    if (!Array.isArray(allPayLater)) allPayLater = [];
+    const pending = allPayLater.filter(item => item.status === 'pending_review').length;
+    const badge = document.getElementById('nb-paylater');
+    if (badge) { badge.textContent = pending; badge.style.display = pending ? 'inline-flex' : 'none'; }
+    renderPayLater();
+  } catch(e) {
+    document.getElementById('paylater-table').innerHTML = emptyState('!', 'Failed to load Pay Later applications', e.message);
+  }
+}
+
+function renderPayLater() {
+  const target = document.getElementById('paylater-table');
+  if (!allPayLater.length) { target.innerHTML = emptyState('◷', 'No Pay Later applications', 'Submitted applications will appear here.'); return; }
+  target.innerHTML = `<table>
+    <thead><tr><th>Member</th><th>Status</th><th>Credit limit</th><th>Available</th><th>Documents</th><th>Submitted</th><th>Actions</th></tr></thead>
+    <tbody>${allPayLater.map(item => `<tr>
+      <td><strong>${escapeHtml(item.userName || '—')}</strong><div style="font-size:11px;color:var(--muted)">${escapeHtml(item.userEmail || '')}</div><div style="font-size:11px;color:var(--muted)">${escapeHtml(item.userPhone || '')}</div></td>
+      <td><span class="badge ${item.status === 'approved' ? 'b-approved' : item.status === 'rejected' ? 'b-rejected' : 'b-pending'}">${escapeHtml(String(item.status || '').replace(/_/g, ' '))}</span></td>
+      <td>R ${Number(item.creditLimit || 0).toFixed(2)}</td>
+      <td style="font-weight:700;color:var(--green)">R ${Number(item.availableCredit || 0).toFixed(2)}</td>
+      <td>${Array.isArray(item.documents) ? item.documents.length : 0}/4</td>
+      <td style="font-size:12px">${fmtFull(item.submittedAt)}</td>
+      <td><div class="action-cell"><button class="btn-sm btn-detail" onclick="openPayLater('${item.id}')">View</button>${item.status !== 'approved' ? `<button class="btn-sm btn-approve" onclick="updatePayLaterStatus('${item.id}','approved')">Approve</button>` : ''}<button class="btn-sm btn-delete" onclick="deletePayLater('${item.id}')">Delete</button></div></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+function payLaterDocumentLabel(type) {
+  return ({
+    'pay_later:id_copy':'ID copy',
+    'pay_later:employment_contract':'Employment contract',
+    'pay_later:payslip':'Payslip',
+    'pay_later:proof_of_address':'Proof of address'
+  })[type] || String(type || '').replace(/^pay_later:/, '').replace(/_/g, ' ');
+}
+
+function openPayLater(id) {
+  const item = allPayLater.find(value => value.id === id); if (!item) return;
+  document.getElementById('m-title').textContent = 'Pay Later application';
+  document.getElementById('m-sub').textContent = [item.userName, item.userEmail].filter(Boolean).join(' · ');
+  const docs = Array.isArray(item.documents) ? item.documents : [];
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid">
+      <div class="info-row"><div class="info-label">Status</div><div class="info-val">${escapeHtml(String(item.status || '').replace(/_/g, ' '))}</div></div>
+      <div class="info-row"><div class="info-label">Credit limit</div><div class="info-val">R ${Number(item.creditLimit || 0).toFixed(2)}</div></div>
+      <div class="info-row"><div class="info-label">Available credit</div><div class="info-val">R ${Number(item.availableCredit || 0).toFixed(2)}</div></div>
+      <div class="info-row"><div class="info-label">Submitted</div><div class="info-val">${fmtFull(item.submittedAt)}</div></div>
+    </div>
+    <div style="margin-top:18px;font-weight:600">Documents</div>
+    <div style="margin-top:8px">${docs.map(doc => `<div class="info-row" style="margin-bottom:8px"><div><div class="info-label">${escapeHtml(payLaterDocumentLabel(doc.type))}</div><div class="info-val">${escapeHtml(doc.status || 'pending')}</div></div><div class="action-cell"><a class="btn-sm btn-detail" href="${escapeHtml(doc.url)}" target="_blank" rel="noopener">View</a><a class="btn-sm btn-detail" href="${escapeHtml(doc.url)}" download>Download</a><button class="btn-sm btn-delete" onclick="deletePayLaterDocument('${item.id}','${doc.id}')">Delete</button></div></div>`).join('') || '<div class="muted">No documents.</div>'}</div>
+    <label class="field"><span>Rejection reason</span><textarea class="f-input" id="payLaterReason" rows="3">${escapeHtml(item.rejectionReason || '')}</textarea></label>
+    <label class="field"><span>Add credit</span><input class="f-input" id="payLaterCredit" type="number" min="1" step="0.01" placeholder="Amount in rand" /></label>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Close</button>
+    <button class="btn-lg btn-red" onclick="updatePayLaterStatus('${item.id}','rejected')">Reject</button>
+    <button class="btn-lg btn-green" onclick="updatePayLaterStatus('${item.id}','approved')">Approve</button>
+    <button class="btn-lg btn-black" onclick="creditPayLater('${item.id}')">Add credit</button>`;
+  openModal();
+}
+
+async function updatePayLaterStatus(id, status) {
+  const reason = String(document.getElementById('payLaterReason')?.value || '').trim();
+  if (status === 'rejected' && !reason) return toast('Rejection reason is required', 'err');
+  try {
+    const res = await apiFetch('/api/admin/pay-later/' + id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ status, rejectionReason: reason }) });
+    if (!res.ok) throw new Error(await res.text());
+    closeModal(); toast('Pay Later application updated', 'ok'); loadPayLater();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function creditPayLater(id) {
+  const amount = Number(document.getElementById('payLaterCredit')?.value || 0);
+  if (!(amount > 0)) return toast('Enter a valid credit amount', 'err');
+  try {
+    const res = await apiFetch('/api/admin/pay-later/' + id + '/credit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ amount }) });
+    if (!res.ok) throw new Error(await res.text());
+    closeModal(); toast('Pay Later credit added', 'ok'); loadPayLater();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function deletePayLaterDocument(id, documentId) {
+  try {
+    const res = await apiFetch('/api/admin/pay-later/' + id + '/documents/' + documentId, { method:'DELETE' });
+    if (!res.ok) throw new Error(await res.text());
+    closeModal(); toast('Document deleted', 'ok'); loadPayLater();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+function deletePayLater(id) {
+  showDeleteConfirm({ title:'Delete Pay Later application', subtitle:'Application and document records', message:'This action cannot be undone.', confirmLabel:'Delete application', onConfirm:async () => {
+    try { const res = await apiFetch('/api/admin/pay-later/' + id, { method:'DELETE' }); if (!res.ok) throw new Error(await res.text()); toast('Pay Later application deleted', 'ok'); loadPayLater(); } catch(e) { toast(e.message, 'err'); }
+  }});
 }
 
 async function loadLiftClubRoutes() {

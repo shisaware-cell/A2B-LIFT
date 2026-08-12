@@ -67,6 +67,8 @@ __export(schema_exports, {
   operatorProfiles: () => operatorProfiles,
   partnerProfiles: () => partnerProfiles,
   passwordResetTokens: () => passwordResetTokens,
+  payLaterApplications: () => payLaterApplications,
+  payLaterTransactions: () => payLaterTransactions,
   payments: () => payments,
   referralEvents: () => referralEvents,
   rewardCashouts: () => rewardCashouts,
@@ -359,6 +361,7 @@ var documents = (0, import_pg_core.pgTable)("documents", {
   applicationId: (0, import_pg_core.varchar)("application_id").references(() => driverApplications.id),
   chauffeurId: (0, import_pg_core.varchar)("chauffeur_id").references(() => chauffeurs.id),
   vehicleId: (0, import_pg_core.varchar)("vehicle_id").references(() => vehicles.id),
+  payLaterApplicationId: (0, import_pg_core.varchar)("pay_later_application_id"),
   type: (0, import_pg_core.text)("type").notNull(),
   url: (0, import_pg_core.text)("url").notNull(),
   status: (0, import_pg_core.text)("status").notNull().default("pending"),
@@ -366,6 +369,32 @@ var documents = (0, import_pg_core.pgTable)("documents", {
   uploadedAt: (0, import_pg_core.timestamp)("uploaded_at").defaultNow(),
   reviewedAt: (0, import_pg_core.timestamp)("reviewed_at"),
   reviewerAdminId: (0, import_pg_core.varchar)("reviewer_admin_id").references(() => users.id)
+});
+var payLaterApplications = (0, import_pg_core.pgTable)("pay_later_applications", {
+  id: (0, import_pg_core.varchar)("id").primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
+  userId: (0, import_pg_core.varchar)("user_id").notNull().unique().references(() => users.id),
+  status: (0, import_pg_core.text)("status").notNull().default("pending_review"),
+  creditLimit: (0, import_pg_core.real)("credit_limit").notNull().default(0),
+  availableCredit: (0, import_pg_core.real)("available_credit").notNull().default(0),
+  rejectionReason: (0, import_pg_core.text)("rejection_reason"),
+  submittedAt: (0, import_pg_core.timestamp)("submitted_at").defaultNow(),
+  reviewedAt: (0, import_pg_core.timestamp)("reviewed_at"),
+  reviewerAdminId: (0, import_pg_core.varchar)("reviewer_admin_id").references(() => users.id),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+});
+var payLaterTransactions = (0, import_pg_core.pgTable)("pay_later_transactions", {
+  id: (0, import_pg_core.varchar)("id").primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
+  applicationId: (0, import_pg_core.varchar)("application_id").notNull().references(() => payLaterApplications.id),
+  userId: (0, import_pg_core.varchar)("user_id").notNull().references(() => users.id),
+  rideId: (0, import_pg_core.varchar)("ride_id").references(() => rides.id),
+  type: (0, import_pg_core.text)("type").notNull(),
+  amount: (0, import_pg_core.real)("amount").notNull(),
+  balanceBefore: (0, import_pg_core.real)("balance_before").notNull(),
+  balanceAfter: (0, import_pg_core.real)("balance_after").notNull(),
+  description: (0, import_pg_core.text)("description"),
+  adminUserId: (0, import_pg_core.varchar)("admin_user_id").references(() => users.id),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
 });
 var liftClubMemberships = (0, import_pg_core.pgTable)("lift_club_memberships", {
   id: (0, import_pg_core.varchar)("id").primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
@@ -1762,8 +1791,12 @@ var CATEGORY_ALIASES = {
   luxury_vip: "business",
   luxury_vip_car: "business",
   business_vip: "business",
+  executive: "business",
+  executive_car: "business",
   van: "van",
   minivan: "van",
+  xl: "van",
+  people_carrier: "van",
   luxury_van: "luxury_van",
   vclass: "luxury_van",
   v_class: "luxury_van",
@@ -1771,10 +1804,7 @@ var CATEGORY_ALIASES = {
 };
 var MULTI_CATEGORY_MATCHES = {
   budget: ["a2b_lite"],
-  luxury: ["budget", "a2b_lite"],
-  business: ["luxury", "budget", "a2b_lite"],
-  executive: ["business", "luxury", "budget", "a2b_lite", "luxury_van"],
-  luxury_van: ["van"]
+  a2b_lite: ["budget"]
 };
 var FALLBACK_CATEGORY_MATCHES = {
   luxury_van: ["business"]
@@ -2775,6 +2805,39 @@ async function registerRoutes(app2) {
     await pool2.query("CREATE INDEX IF NOT EXISTS idx_lift_club_memberships_status ON lift_club_memberships(status)");
     await pool2.query("ALTER TABLE lift_club_memberships ALTER COLUMN fee_amount SET DEFAULT 200");
     await pool2.query("UPDATE lift_club_memberships SET fee_amount = 200, updated_at = now() WHERE status <> 'approved' AND fee_amount = 100");
+    await pool2.query(`
+      CREATE TABLE IF NOT EXISTS pay_later_applications (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id varchar NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        status text NOT NULL DEFAULT 'pending_review',
+        credit_limit real NOT NULL DEFAULT 0,
+        available_credit real NOT NULL DEFAULT 0,
+        rejection_reason text,
+        submitted_at timestamp DEFAULT now(),
+        reviewed_at timestamp,
+        reviewer_admin_id varchar REFERENCES users(id) ON DELETE SET NULL,
+        created_at timestamp DEFAULT now(),
+        updated_at timestamp DEFAULT now()
+      )
+    `);
+    await pool2.query(`
+      CREATE TABLE IF NOT EXISTS pay_later_transactions (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        application_id varchar NOT NULL REFERENCES pay_later_applications(id) ON DELETE CASCADE,
+        user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        ride_id varchar REFERENCES rides(id) ON DELETE SET NULL,
+        type text NOT NULL,
+        amount real NOT NULL,
+        balance_before real NOT NULL,
+        balance_after real NOT NULL,
+        description text,
+        admin_user_id varchar REFERENCES users(id) ON DELETE SET NULL,
+        created_at timestamp DEFAULT now()
+      )
+    `);
+    await pool2.query("ALTER TABLE documents ADD COLUMN IF NOT EXISTS pay_later_application_id varchar REFERENCES pay_later_applications(id) ON DELETE CASCADE");
+    await pool2.query("CREATE INDEX IF NOT EXISTS idx_pay_later_status ON pay_later_applications(status)");
+    await pool2.query("CREATE INDEX IF NOT EXISTS idx_pay_later_transactions_user ON pay_later_transactions(user_id, created_at DESC)");
   } catch (error) {
     console.warn("[routes] startup schema checks skipped:", error instanceof Error ? error.message : error);
   }
@@ -2840,8 +2903,12 @@ async function registerRoutes(app2) {
         for (const assignment of assignments) {
           const assignedVehicle = await storage.getVehicle(assignment.vehicleId).catch(() => void 0);
           if (assignedVehicle && assignedVehicle.status === "approved" && Number(assignedVehicle.vehicleYear || 0) >= 2015) {
-            await storage.updateChauffeur(chauffeur.id, { activeVehicleId: assignedVehicle.id }).catch(() => void 0);
-            return assignedVehicle;
+            const vehicleType = normalizeVehicleType(assignedVehicle.vehicleType);
+            await Promise.all([
+              storage.updateChauffeur(chauffeur.id, { activeVehicleId: assignedVehicle.id, vehicleType }).catch(() => void 0),
+              vehicleType !== assignedVehicle.vehicleType ? storage.updateVehicle(assignedVehicle.id, { vehicleType }).catch(() => void 0) : Promise.resolve(void 0)
+            ]);
+            return { ...assignedVehicle, vehicleType };
           }
         }
       }
@@ -2849,7 +2916,14 @@ async function registerRoutes(app2) {
     }
     const vehicle = await storage.getVehicle(activeVehicleId).catch(() => void 0);
     if (vehicle && vehicle.status === "approved" && Number(vehicle.vehicleYear || 0) >= 2015) {
-      return vehicle;
+      const vehicleType = normalizeVehicleType(vehicle.vehicleType);
+      if (vehicleType !== vehicle.vehicleType || chauffeur.vehicleType !== vehicleType) {
+        await Promise.all([
+          vehicleType !== vehicle.vehicleType ? storage.updateVehicle(vehicle.id, { vehicleType }).catch(() => void 0) : Promise.resolve(void 0),
+          chauffeur.vehicleType !== vehicleType ? storage.updateChauffeur(chauffeur.id, { vehicleType }).catch(() => void 0) : Promise.resolve(void 0)
+        ]);
+      }
+      return { ...vehicle, vehicleType };
     }
     return null;
   }
@@ -3323,6 +3397,113 @@ async function registerRoutes(app2) {
       membership: serializeLiftClubMembership(membership)
     });
     return null;
+  }
+  const PAY_LATER_DOCUMENT_TYPES = /* @__PURE__ */ new Set([
+    "pay_later:id_copy",
+    "pay_later:employment_contract",
+    "pay_later:payslip",
+    "pay_later:proof_of_address"
+  ]);
+  async function getPayLaterApplication(userId) {
+    const result = await pool2.query(
+      `SELECT p.*, u.name AS user_name, u.username AS user_username, u.phone AS user_phone
+       FROM pay_later_applications p
+       JOIN users u ON u.id = p.user_id
+       WHERE p.user_id = $1`,
+      [userId]
+    );
+    if (!result.rows[0]) return null;
+    const app3 = result.rows[0];
+    const docs = await pool2.query(
+      `SELECT id, type, url, status, review_reason, uploaded_at
+       FROM documents WHERE pay_later_application_id = $1 ORDER BY uploaded_at DESC`,
+      [app3.id]
+    );
+    return {
+      id: app3.id,
+      userId: app3.user_id,
+      userName: app3.user_name,
+      userEmail: app3.user_username,
+      userPhone: app3.user_phone,
+      status: app3.status,
+      creditLimit: Number(app3.credit_limit || 0),
+      availableCredit: Number(app3.available_credit || 0),
+      rejectionReason: app3.rejection_reason,
+      submittedAt: app3.submitted_at,
+      reviewedAt: app3.reviewed_at,
+      documents: docs.rows.map((doc) => ({
+        id: doc.id,
+        type: doc.type,
+        url: doc.url,
+        status: doc.status,
+        reviewReason: doc.review_reason,
+        uploadedAt: doc.uploaded_at
+      }))
+    };
+  }
+  async function reservePayLaterCredit(userId, rideId, amount) {
+    const client = await pool2.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `SELECT p.*
+         FROM pay_later_applications p
+         JOIN lift_club_memberships m ON m.user_id = p.user_id AND m.status = 'approved'
+         WHERE p.user_id = $1 AND p.status = 'approved'
+         FOR UPDATE OF p`,
+        [userId]
+      );
+      const application = result.rows[0];
+      if (!application) throw new Error("Approved Pay Later access and Lift Club membership are required.");
+      const before = Number(application.available_credit || 0);
+      if (before < amount) throw new Error(`Pay Later credit is insufficient. R${before.toFixed(2)} is available.`);
+      const after = Math.round((before - amount) * 100) / 100;
+      await client.query(
+        "UPDATE pay_later_applications SET available_credit = $1, updated_at = now() WHERE id = $2",
+        [after, application.id]
+      );
+      await client.query(
+        `INSERT INTO pay_later_transactions
+          (application_id, user_id, ride_id, type, amount, balance_before, balance_after, description)
+         VALUES ($1, $2, $3, 'ride_charge', $4, $5, $6, 'Pay Later ride charge')`,
+        [application.id, userId, rideId, -amount, before, after]
+      );
+      await client.query("COMMIT");
+      return { applicationId: application.id, balance: after };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async function refundPayLaterCredit(userId, rideId, amount) {
+    if (!(amount > 0)) return;
+    const client = await pool2.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        "SELECT * FROM pay_later_applications WHERE user_id = $1 FOR UPDATE",
+        [userId]
+      );
+      const application = result.rows[0];
+      if (!application) throw new Error("Pay Later application not found");
+      const before = Number(application.available_credit || 0);
+      const after = Math.round((before + amount) * 100) / 100;
+      await client.query("UPDATE pay_later_applications SET available_credit = $1, updated_at = now() WHERE id = $2", [after, application.id]);
+      await client.query(
+        `INSERT INTO pay_later_transactions
+          (application_id, user_id, ride_id, type, amount, balance_before, balance_after, description)
+         VALUES ($1, $2, $3, 'ride_refund', $4, $5, $6, 'Pay Later cancellation refund')`,
+        [application.id, userId, rideId, amount, before, after]
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   async function notifyAdmins(title, body, type = "admin") {
     const admins = (await storage.getAllUsers()).filter((admin) => admin.role === "admin");
@@ -6155,7 +6336,12 @@ If you did not request this, you can ignore this email.`,
       if (!assignment) {
         return res.status(403).json({ message: "This vehicle is no longer approved or assigned to you." });
       }
-      const updated = await storage.updateChauffeur(chauffeur.id, { activeVehicleId: vehicle.id });
+      const updated = await storage.updateChauffeur(chauffeur.id, {
+        activeVehicleId: vehicle.id,
+        // Keep the legacy chauffeur record aligned with the fleet vehicle so
+        // every dashboard and older client reports the category being dispatched.
+        vehicleType: normalizeVehicleType(vehicle.vehicleType)
+      });
       return res.json({ activeVehicleId: vehicle.id, chauffeur: updated });
     } catch (error) {
       return res.status(400).json({ message: error.message });
@@ -7480,6 +7666,162 @@ If you did not request this, you can ignore this email.`,
       return res.status(500).json({ message: error.message || "Unable to delete Lift Club membership" });
     }
   });
+  app2.get("/api/pay-later/me", requireAuth, async (req, res) => {
+    try {
+      const membership = await storage.getLiftClubMembershipByUser(req.auth.sub).catch(() => void 0);
+      const application = await getPayLaterApplication(req.auth.sub);
+      return res.json({
+        eligible: membership?.status === "approved",
+        membershipStatus: membership?.status || "not_applied",
+        application
+      });
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Unable to load Pay Later." });
+    }
+  });
+  app2.post("/api/pay-later/apply", requireAuth, async (req, res) => {
+    const client = await pool2.connect();
+    try {
+      const membership = await storage.getLiftClubMembershipByUser(req.auth.sub).catch(() => void 0);
+      if (membership?.status !== "approved") {
+        return res.status(403).json({ message: "Approved Lift Club membership is required before applying for Pay Later." });
+      }
+      const submittedDocuments = Array.isArray(req.body?.documents) ? req.body.documents : [];
+      const byType = /* @__PURE__ */ new Map();
+      for (const document of submittedDocuments) {
+        const type = String(document?.type || "").trim();
+        const url = String(document?.url || "").trim();
+        if (PAY_LATER_DOCUMENT_TYPES.has(type) && isAllowedSelfieUrl(url)) byType.set(type, url);
+      }
+      const missing = [...PAY_LATER_DOCUMENT_TYPES].filter((type) => !byType.has(type));
+      if (missing.length) return res.status(400).json({ message: "Upload ID copy, employment contract, payslip and proof of address." });
+      await client.query("BEGIN");
+      const applicationResult = await client.query(
+        `INSERT INTO pay_later_applications (user_id, status, submitted_at, rejection_reason, updated_at)
+         VALUES ($1, 'pending_review', now(), NULL, now())
+         ON CONFLICT (user_id) DO UPDATE SET
+           status = 'pending_review', rejection_reason = NULL, submitted_at = now(),
+           reviewed_at = NULL, reviewer_admin_id = NULL, updated_at = now()
+         RETURNING id`,
+        [req.auth.sub]
+      );
+      const applicationId = applicationResult.rows[0].id;
+      await client.query("DELETE FROM documents WHERE pay_later_application_id = $1", [applicationId]);
+      for (const [type, url] of byType) {
+        await client.query(
+          `INSERT INTO documents (user_id, pay_later_application_id, type, url, status)
+           VALUES ($1, $2, $3, $4, 'pending')`,
+          [req.auth.sub, applicationId, type, url]
+        );
+      }
+      await client.query("COMMIT");
+      await storage.createNotification({
+        userId: req.auth.sub,
+        title: "Pay Later application received",
+        body: "Your documents are ready for admin review.",
+        type: "pay_later"
+      }).catch(() => void 0);
+      return res.status(201).json(await getPayLaterApplication(req.auth.sub));
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => void 0);
+      return res.status(500).json({ message: error.message || "Unable to submit Pay Later application." });
+    } finally {
+      client.release();
+    }
+  });
+  app2.get("/api/admin/pay-later", requireAuth, requireRole(["admin"]), async (_req, res) => {
+    try {
+      const result = await pool2.query("SELECT user_id FROM pay_later_applications ORDER BY updated_at DESC");
+      const applications = await Promise.all(result.rows.map((row) => getPayLaterApplication(row.user_id)));
+      return res.json(applications.filter(Boolean));
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Unable to load Pay Later applications." });
+    }
+  });
+  app2.put("/api/admin/pay-later/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const status = String(req.body?.status || "").trim();
+      if (!["pending_review", "approved", "rejected", "suspended"].includes(status)) {
+        return res.status(400).json({ message: "Invalid Pay Later status." });
+      }
+      const reason = String(req.body?.rejectionReason || "").trim();
+      if (status === "rejected" && !reason) return res.status(400).json({ message: "A rejection reason is required." });
+      const result = await pool2.query(
+        `UPDATE pay_later_applications SET status = $1, rejection_reason = $2,
+         reviewed_at = now(), reviewer_admin_id = $3, updated_at = now()
+         WHERE id = $4 RETURNING user_id`,
+        [status, reason || null, req.auth.sub, req.params.id]
+      );
+      if (!result.rows[0]) return res.status(404).json({ message: "Pay Later application not found." });
+      await pool2.query(
+        "UPDATE documents SET status = $1, review_reason = $2, reviewed_at = now(), reviewer_admin_id = $3 WHERE pay_later_application_id = $4",
+        [status === "approved" ? "approved" : status === "rejected" ? "rejected" : "pending", reason || null, req.auth.sub, req.params.id]
+      );
+      await storage.createNotification({
+        userId: result.rows[0].user_id,
+        title: status === "approved" ? "Pay Later approved" : "Pay Later updated",
+        body: status === "approved" ? "Your Pay Later application is approved. Credit will appear after an admin allocation." : status === "rejected" ? `Your Pay Later application needs attention: ${reason}` : `Your Pay Later status is now ${status.replace(/_/g, " ")}.`,
+        type: "pay_later"
+      }).catch(() => void 0);
+      return res.json(await getPayLaterApplication(result.rows[0].user_id));
+    } catch (error) {
+      return res.status(500).json({ message: error.message || "Unable to update Pay Later application." });
+    }
+  });
+  app2.post("/api/admin/pay-later/:id/credit", requireAuth, requireRole(["admin"]), async (req, res) => {
+    const client = await pool2.connect();
+    try {
+      const amount = Number(req.body?.amount);
+      if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ message: "Enter a valid credit amount." });
+      await client.query("BEGIN");
+      const result = await client.query("SELECT * FROM pay_later_applications WHERE id = $1 FOR UPDATE", [req.params.id]);
+      const application = result.rows[0];
+      if (!application) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ message: "Pay Later application not found." });
+      }
+      if (application.status !== "approved") {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ message: "Approve the application before adding credit." });
+      }
+      const before = Number(application.available_credit || 0);
+      const after = Math.round((before + amount) * 100) / 100;
+      const limit = Math.round((Number(application.credit_limit || 0) + amount) * 100) / 100;
+      await client.query("UPDATE pay_later_applications SET credit_limit = $1, available_credit = $2, updated_at = now() WHERE id = $3", [limit, after, application.id]);
+      await client.query(
+        `INSERT INTO pay_later_transactions
+          (application_id, user_id, type, amount, balance_before, balance_after, description, admin_user_id)
+         VALUES ($1, $2, 'admin_credit', $3, $4, $5, 'Pay Later credit allocated by admin', $6)`,
+        [application.id, application.user_id, amount, before, after, req.auth.sub]
+      );
+      await client.query("COMMIT");
+      await storage.createNotification({ userId: application.user_id, title: "Pay Later credit added", body: `R${amount.toFixed(2)} was added. Available credit: R${after.toFixed(2)}.`, type: "pay_later" }).catch(() => void 0);
+      return res.json(await getPayLaterApplication(application.user_id));
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => void 0);
+      return res.status(500).json({ message: error.message || "Unable to add Pay Later credit." });
+    } finally {
+      client.release();
+    }
+  });
+  app2.delete("/api/admin/pay-later/:id/documents/:documentId", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const result = await pool2.query("DELETE FROM documents WHERE id = $1 AND pay_later_application_id = $2 RETURNING id", [req.params.documentId, req.params.id]);
+      if (!result.rows[0]) return res.status(404).json({ message: "Document not found." });
+      return res.json({ success: true });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.delete("/api/admin/pay-later/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const result = await pool2.query("DELETE FROM pay_later_applications WHERE id = $1 RETURNING id", [req.params.id]);
+      if (!result.rows[0]) return res.status(404).json({ message: "Pay Later application not found." });
+      return res.json({ success: true });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
   app2.get("/api/admin/lift-club-routes", requireAuth, requireRole(["admin"]), async (req, res) => {
     try {
       const status = typeof req.query.status === "string" && req.query.status !== "all" ? req.query.status : void 0;
@@ -8438,6 +8780,9 @@ If you did not request this, you can ignore this email.`,
       const safeFare = priceEstimate.totalPrice;
       const routeCurrency = typeof rideData.routeCurrency === "string" && rideData.routeCurrency.trim() ? rideData.routeCurrency.trim().toUpperCase() : priceEstimate.currency;
       const paymentMethod = rideData.paymentMethod || "cash";
+      if (!["cash", "card", "wallet", "pay_later"].includes(paymentMethod)) {
+        return res.status(400).json({ success: false, message: "Select a valid payment method." });
+      }
       let scheduledFor = null;
       if (rideData.scheduledFor) {
         const parsed = new Date(rideData.scheduledFor);
@@ -8497,6 +8842,30 @@ If you did not request this, you can ignore this email.`,
         routeSelectedAt: selectedRouteId ? /* @__PURE__ */ new Date() : null,
         ...livenessVerifiedAt ? { livenessVerifiedAt } : {}
       });
+      if (paymentMethod === "pay_later") {
+        let creditReserved = false;
+        try {
+          await reservePayLaterCredit(clientId, ride.id, safeFare);
+          creditReserved = true;
+          await storage.createPayment({
+            rideId: ride.id,
+            payerUserId: clientId,
+            amount: safeFare,
+            method: "pay_later",
+            status: "paid",
+            currency: "ZAR",
+            paidAt: /* @__PURE__ */ new Date()
+          });
+          await storage.updateRide(ride.id, { paymentStatus: "paid" });
+          ride.paymentStatus = "paid";
+        } catch (creditError) {
+          if (creditReserved) {
+            await refundPayLaterCredit(clientId, ride.id, safeFare).catch(() => void 0);
+          }
+          await storage.updateRide(ride.id, { status: "cancelled", paymentStatus: "failed" }).catch(() => void 0);
+          return res.status(402).json({ success: false, message: creditError.message || "Pay Later credit could not be reserved." });
+        }
+      }
       let clientFirstName = "Rider";
       let clientPhoto = null;
       try {
@@ -9118,8 +9487,19 @@ If you did not request this, you can ignore this email.`,
               }
             }
           }
+          const payLaterPayment = !cardPayment && !walletPayment ? payments2.find((p) => p.method === "pay_later" && p.status === "paid") : null;
+          if (payLaterPayment) {
+            await refundPayLaterCredit(rideBeforeUpdate.clientId, rideBeforeUpdate.id, refundableAmount);
+            await storage.updatePayment(payLaterPayment.id, { status: cancellationFee > 0 ? "partially_refunded" : "refunded" });
+            await storage.createNotification({
+              userId: rideBeforeUpdate.clientId,
+              title: "Pay Later credit restored",
+              body: `R${refundableAmount.toFixed(2)} was returned to your Pay Later credit.${cancellationFee > 0 ? ` Cancellation fee: R${cancellationFee.toFixed(2)}.` : ""}`,
+              type: "pay_later"
+            });
+          }
           const paymentMethod = rideBeforeUpdate.paymentMethod || "cash";
-          if (!cardPayment && !walletPayment && paymentMethod === "cash") {
+          if (!cardPayment && !walletPayment && !payLaterPayment && paymentMethod === "cash") {
             const rider = await storage.getUser(rideBeforeUpdate.clientId);
             if (rider && cancellationFee > 0) {
               const balanceBefore = rider.walletBalance || 0;
