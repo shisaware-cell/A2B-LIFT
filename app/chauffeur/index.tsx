@@ -58,6 +58,19 @@ const RIDE_ALERT_SUPPRESSION_MS = 30 * 60 * 1000;
 const DRIVER_LOCATION_TASK_NAME = "a2b-driver-location-task";
 const DRIVER_LOCATION_TASK_STATE_KEY = "a2b_driver_location_task_state";
 const DRIVER_LOCATION_REST_MIN_INTERVAL_MS = 10000;
+const VEHICLE_CATEGORY_LABELS: Record<string, string> = {
+  a2b_lite: "A2B Lite",
+  budget: "Budget",
+  luxury: "Luxury",
+  business: "VIP",
+  van: "Van",
+  luxury_van: "V-Class",
+};
+
+function getRequestedVehicleLabel(vehicleType: unknown) {
+  const key = String(vehicleType || "budget").trim().toLowerCase();
+  return VEHICLE_CATEGORY_LABELS[key] || key.replace(/_/g, " ");
+}
 
 type DriverLocationTaskState = {
   chauffeurId?: string;
@@ -246,11 +259,37 @@ export default function ChauffeurDashboard() {
   const lastForegroundLocationAtRef = useRef(0);
   const lastLocationRestPostRef = useRef(0);
   const currentRideRef = useRef<any>(null);
+  const incomingRideRef = useRef<any>(null);
+  const availableTripsRef = useRef<any[]>([]);
+  const incomingRideHydrationTokenRef = useRef(0);
+  const driverCancellationRideIdRef = useRef<string | null>(null);
   const stopConfirmationInFlightRef = useRef(false);
   const handledCancellationRideIdsRef = useRef(new Set<string>());
   const isOnlineRef = useRef(false);
   const chauffeurRef = useRef<any>(null);
   const isExpoGoAndroid = Platform.OS === "android" && Constants.appOwnership === "expo";
+
+  function clearIncomingRide() {
+    incomingRideHydrationTokenRef.current += 1;
+    incomingRideRef.current = null;
+    setIncomingRide(null);
+  }
+
+  async function presentIncomingRide(ride: any, allowSuppressed = false) {
+    if (!ride?.id) return null;
+    const token = ++incomingRideHydrationTokenRef.current;
+    const enrichedRide = await enrichRideClientDetails(ride, "Client");
+    if (
+      token !== incomingRideHydrationTokenRef.current ||
+      currentRideRef.current ||
+      (!allowSuppressed && isRideAlertSuppressed(ride.id))
+    ) {
+      return null;
+    }
+    incomingRideRef.current = enrichedRide;
+    setIncomingRide(enrichedRide);
+    return enrichedRide;
+  }
 
   async function openAcceptedRideNavigation() {
     if (!currentRide) return;
@@ -644,7 +683,7 @@ export default function ChauffeurDashboard() {
       if (remaining <= 0) {
         suppressRideAlert(incomingRide.id);
         stopTripAlert();
-        setIncomingRide(null);
+        clearIncomingRide();
       }
     };
     updateCountdown();
@@ -687,28 +726,31 @@ export default function ChauffeurDashboard() {
         if (ride?.currentOfferExpiresAt && new Date(ride.currentOfferExpiresAt).getTime() <= Date.now()) return;
         seenRideIdRef.current = ride.id || null;
         setAvailableTrips((prev) => prev.filter((trip) => trip.id !== ride.id));
-        void enrichRideClientDetails(ride, "Client").then((enrichedRide) => {
-          setIncomingRide(enrichedRide);
+        void presentIncomingRide(ride).then((presentedRide) => {
+          if (presentedRide && ride.id !== suppressedRideAlertIdRef.current) playTripAlert();
         });
-        if (ride?.id !== suppressedRideAlertIdRef.current) {
-          playTripAlert();
-        }
       }
     };
     on("ride:new", handleNewRide);
     return () => { off("ride:new", handleNewRide); };
   }, [isOnline, chauffeur, currentRide]);
 
-  // ─── Socket: rider cancellation ───────────────────────────────────────────
-  function handleRiderCancellation(ride: any) {
+  // ─── Socket: ride cancellation ────────────────────────────────────────────
+  function handleRideCancellation(ride: any, wasVisibleOffer = false) {
     const activeRide = currentRideRef.current;
     if (
       !ride?.id ||
       ride.status !== "cancelled" ||
-      !activeRide ||
-      ride.id !== activeRide.id ||
       handledCancellationRideIdsRef.current.has(ride.id)
     ) {
+      return;
+    }
+
+    if (!activeRide || ride.id !== activeRide.id) {
+      if (wasVisibleOffer) {
+        handledCancellationRideIdsRef.current.add(ride.id);
+        Alert.alert("Ride Request Cancelled", "The rider cancelled this request.");
+      }
       return;
     }
 
@@ -727,45 +769,47 @@ export default function ChauffeurDashboard() {
     AsyncStorage.removeItem("a2b_current_ride").catch(() => {});
     if (chauffeur?.id) void refreshChauffeur(chauffeur.id);
 
+    const wasCancelledHere = driverCancellationRideIdRef.current === ride.id;
+    if (wasCancelledHere) driverCancellationRideIdRef.current = null;
+    if (wasCancelledHere) return;
+
     const serverAmount = Number(ride.driverCancellationEarnings);
     const cancellationFee = Math.max(0, Number(ride.cancellationFee || 0));
     const amountDue = Number.isFinite(serverAmount) && serverAmount >= 0
       ? serverAmount
       : getDriverNetFare(cancellationFee, ride.commissionRate);
-    Alert.alert(
-      "Ride Cancelled",
-      amountDue > 0
-        ? `The rider cancelled this trip. R ${amountDue.toFixed(2)} has been added to your earnings.`
-        : "The rider cancelled this trip. No cancellation earnings are due.",
-    );
+    if (ride.cancelledBy === "client") {
+      Alert.alert(
+        "Ride Cancelled",
+        amountDue > 0
+          ? `The rider cancelled this trip. R ${amountDue.toFixed(2)} has been added to your earnings.`
+          : "The rider cancelled this trip. No cancellation earnings are due.",
+      );
+    } else {
+      Alert.alert("Ride Cancelled", "This trip was cancelled.");
+    }
   }
 
   useEffect(() => {
     const clearRideFromDiscovery = (ride: any) => {
-      if (!ride?.id) return;
+      if (!ride?.id) return false;
       suppressRideAlert(ride.id);
-      let clearedIncomingRide = false;
+      const clearedIncomingRide = incomingRideRef.current?.id === ride.id;
+      const clearedAvailableRide = availableTripsRef.current.some((trip) => trip.id === ride.id);
       setAvailableTrips((prev) => prev.filter((trip) => trip.id !== ride.id));
-      setIncomingRide((prev: any) => {
-        if (!prev || prev.id !== ride.id) return prev;
-        if (ride.status === "cancelled") {
-          clearedIncomingRide = true;
-          return null;
-        }
-        if (ride.chauffeurId && ride.chauffeurId !== chauffeur?.id) {
-          clearedIncomingRide = true;
-          return null;
-        }
-        return prev;
-      });
-      if (clearedIncomingRide) {
+      if (
+        clearedIncomingRide &&
+        (ride.status === "cancelled" || (ride.chauffeurId && ride.chauffeurId !== chauffeur?.id))
+      ) {
+        clearIncomingRide();
         void stopTripAlert();
       }
+      return clearedIncomingRide || clearedAvailableRide;
     };
 
     const handleRideUpdate = (ride: any) => {
-      clearRideFromDiscovery(ride);
-      handleRiderCancellation(ride);
+      const wasVisibleOffer = clearRideFromDiscovery(ride);
+      handleRideCancellation(ride, wasVisibleOffer);
     };
 
     const handleRideAccepted = (ride: any) => {
@@ -821,7 +865,7 @@ export default function ChauffeurDashboard() {
       try {
         const response = await apiRequest("GET", `/api/rides/${currentRide.id}`);
         const ride = await response.json();
-        if (active && ride?.status === "cancelled") handleRiderCancellation(ride);
+        if (active && ride?.status === "cancelled") handleRideCancellation(ride);
       } catch {}
     };
     const interval = setInterval(checkRideStatus, 4000);
@@ -840,6 +884,14 @@ export default function ChauffeurDashboard() {
       AsyncStorage.removeItem("a2b_current_ride").catch(() => {});
     }
   }, [currentRide]);
+
+  useEffect(() => {
+    incomingRideRef.current = incomingRide;
+  }, [incomingRide]);
+
+  useEffect(() => {
+    availableTripsRef.current = availableTrips;
+  }, [availableTrips]);
 
   useEffect(() => {
     isOnlineRef.current = isOnline;
@@ -1004,11 +1056,8 @@ export default function ChauffeurDashboard() {
         if (!ride?.id) return;
         if (isRideAlertSuppressed(ride.id)) return;
         seenRideIdRef.current = ride.id;
-        const enrichedRide = await enrichRideClientDetails(ride, "Client");
-        setIncomingRide(enrichedRide);
-        if (ride.id !== suppressedRideAlertIdRef.current) {
-          playTripAlert();
-        }
+        const presentedRide = await presentIncomingRide(ride);
+        if (presentedRide && ride.id !== suppressedRideAlertIdRef.current) playTripAlert();
       } catch {}
     }
 
@@ -1047,11 +1096,8 @@ export default function ChauffeurDashboard() {
         if (ride?.id && ride.id !== seenRideIdRef.current) {
           if (isRideAlertSuppressed(ride.id)) return;
           seenRideIdRef.current = ride.id;
-          const enrichedRide = await enrichRideClientDetails(ride, "Client");
-          setIncomingRide(enrichedRide);
-          if (ride.id !== suppressedRideAlertIdRef.current) {
-            playTripAlert();
-          }
+          const presentedRide = await presentIncomingRide(ride);
+          if (presentedRide && ride.id !== suppressedRideAlertIdRef.current) playTripAlert();
         }
       } catch {}
     }, 6000);
@@ -1191,7 +1237,7 @@ export default function ChauffeurDashboard() {
       }, "Client");
       if (freshRide.status === "cancelled") {
         currentRideRef.current = ride;
-        handleRiderCancellation(freshRide);
+        handleRideCancellation(freshRide);
       } else if (freshRide.status === "trip_completed") {
         await AsyncStorage.removeItem("a2b_current_ride");
       } else {
@@ -1640,13 +1686,13 @@ export default function ChauffeurDashboard() {
     if (!incomingRide || !chauffeur) return;
     const pendingRide = incomingRide;
     suppressRideAlert(pendingRide.id);
-    setIncomingRide(null);
+    clearIncomingRide();
     stopTripAlert();
     try {
       const res = await apiRequest("PUT", `/api/rides/${pendingRide.id}/accept`, { chauffeurId: chauffeur.id });
       if (res.status === 409) {
         Alert.alert("Too Late", "This ride was already taken by another driver.");
-        setIncomingRide(null);
+        clearIncomingRide();
         return;
       }
       const ride = await res.json();
@@ -1657,7 +1703,7 @@ export default function ChauffeurDashboard() {
         clientPhone: ride.clientPhone || pendingRide.clientPhone,
       }, "Client");
       setCurrentRide(enrichedRide);
-      setIncomingRide(null);
+      clearIncomingRide();
       if (enrichedRide.pickupLat && enrichedRide.pickupLng) {
         await fetchDriverRoute(parseFloat(enrichedRide.pickupLat), parseFloat(enrichedRide.pickupLng), {
           routeKey: [
@@ -1673,14 +1719,14 @@ export default function ChauffeurDashboard() {
     } catch {
       Alert.alert("Error", "Ride may have been taken by another chauffeur");
       const restoredRide = await enrichRideClientDetails(pendingRide, "Client");
-      setIncomingRide(restoredRide);
+      await presentIncomingRide(restoredRide, true);
     }
   }
 
   function declineRide() {
     suppressRideAlert(incomingRide?.id);
     stopTripAlert();
-    setIncomingRide(null);
+    clearIncomingRide();
     setRideEta(null);
   }
 
@@ -1705,7 +1751,7 @@ export default function ChauffeurDashboard() {
       }, "Client");
       setCurrentRide(enrichedRide);
       setAvailableTrips([]);
-      setIncomingRide(null);
+      clearIncomingRide();
       if (enrichedRide.pickupLat && enrichedRide.pickupLng) {
         await fetchDriverRoute(parseFloat(enrichedRide.pickupLat), parseFloat(enrichedRide.pickupLng), {
           routeKey: [
@@ -1727,6 +1773,7 @@ export default function ChauffeurDashboard() {
 
   async function updateRideStatus(status: string) {
     if (!currentRide || rideStatusUpdating) return;
+    if (status === "cancelled") driverCancellationRideIdRef.current = currentRide.id;
     setRideStatusUpdating(status);
     try {
       const actualDurationMin = status === "trip_completed" && currentRide.tripStartedAt
@@ -1767,6 +1814,7 @@ export default function ChauffeurDashboard() {
         routeContextRef.current = null;
         if (chauffeur) refreshChauffeur(chauffeur.id);
         if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        if (status === "cancelled") Alert.alert("Trip cancelled", "The rider has been notified.");
       } else {
         setCurrentRide(rideWithName);
         if (status === "trip_started") {
@@ -1785,6 +1833,7 @@ export default function ChauffeurDashboard() {
         }
       }
     } catch (error: any) {
+      if (status === "cancelled") driverCancellationRideIdRef.current = null;
       Alert.alert("Could not update trip", error?.message || "Failed to update ride status");
     } finally {
       setRideStatusUpdating(null);
@@ -2231,6 +2280,10 @@ export default function ChauffeurDashboard() {
                     <Text style={styles.tripAddrText} numberOfLines={1}>{trip.dropoffAddress || "Dropoff"}</Text>
                   </View>
                   <View style={styles.rideInfoPills}>
+                    <View style={styles.rideInfoPill}>
+                      <Ionicons name="car-sport-outline" size={12} color={Colors.white} />
+                      <Text style={styles.rideInfoPillText}>{getRequestedVehicleLabel(trip.vehicleType)}</Text>
+                    </View>
                     {normalizeRideStops(trip.stops).length > 0 ? (
                       <View style={styles.rideInfoPill}>
                         <Ionicons name="git-branch-outline" size={12} color={Colors.white} />
@@ -2340,6 +2393,10 @@ export default function ChauffeurDashboard() {
             <Text style={styles.addrText} numberOfLines={1}>{currentRide.dropoffAddress || "Dropoff"}</Text>
           </View>
           <View style={styles.rideInfoPills}>
+            <View style={styles.rideInfoPill}>
+              <Ionicons name="car-sport-outline" size={12} color={Colors.white} />
+              <Text style={styles.rideInfoPillText}>{getRequestedVehicleLabel(currentRide.vehicleType)}</Text>
+            </View>
             <View style={styles.rideInfoPill}>
               <Ionicons name={getRidePaymentIcon(currentRide.paymentMethod)} size={12} color={Colors.white} />
               <Text style={styles.rideInfoPillText}>{getRidePaymentLabel(currentRide.paymentMethod)}</Text>
@@ -2468,6 +2525,10 @@ export default function ChauffeurDashboard() {
               <Text style={styles.addrText} numberOfLines={1}>{incomingRide.dropoffAddress || "Dropoff"}</Text>
             </View>
             <View style={styles.rideInfoPills}>
+              <View style={styles.rideInfoPill}>
+                <Ionicons name="car-sport-outline" size={12} color={Colors.white} />
+                <Text style={styles.rideInfoPillText}>{getRequestedVehicleLabel(incomingRide.vehicleType)}</Text>
+              </View>
               {normalizeRideStops(incomingRide.stops).length > 0 ? (
                 <View style={styles.rideInfoPill}>
                   <Ionicons name="git-branch-outline" size={12} color={Colors.white} />

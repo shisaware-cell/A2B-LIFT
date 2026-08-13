@@ -83,7 +83,7 @@ export default function PayLaterScreen() {
   }
 
   const application = data?.application;
-  const canApply = data?.eligible && (!application || application.status === "rejected");
+  const canApply = !application || application.status === "rejected";
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}> 
@@ -97,16 +97,7 @@ export default function PayLaterScreen() {
 
       {loading ? <ActivityIndicator style={styles.loader} color={Colors.primary} /> : (
         <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 28 }]}>
-          {!data?.eligible ? (
-            <View style={styles.section}>
-              <Ionicons name="ribbon-outline" size={28} color={Colors.primary} />
-              <Text style={styles.sectionTitle}>Lift Club approval required</Text>
-              <Text style={styles.body}>Pay Later applications are available only to approved Lift Club members.</Text>
-              <Pressable style={styles.primaryButton} onPress={() => router.push("/client/lift-club" as any)}>
-                <Text style={styles.primaryButtonText}>Open Lift Club</Text>
-              </Pressable>
-            </View>
-          ) : application && application.status !== "rejected" ? (
+          {application && application.status !== "rejected" ? (
             <>
               <View style={styles.balancePanel}>
                 <Text style={styles.balanceLabel}>Available Pay Later credit</Text>

@@ -50,21 +50,43 @@ test("emits rider cancellations before slow refund processing", () => {
     'io.emit("ride:statusUpdate", {',
     immediateCancellationBlock,
   );
+  const cancellationResponse = routesSource.indexOf("if (!res.headersSent)", cancellationEmit);
+  const cancellationLedger = routesSource.indexOf("getEarningsByChauffeur", cancellationEmit);
   const refundRequest = routesSource.indexOf('"https://api.paystack.co/refund"');
 
   assert.ok(immediateCancellationBlock >= 0);
   assert.ok(cancellationEmit >= 0);
+  assert.ok(cancellationResponse > cancellationEmit);
+  assert.ok(cancellationLedger > cancellationResponse);
   assert.ok(refundRequest > cancellationEmit);
   assert.match(routesSource, /driverCancellationEarnings/);
+  assert.match(routesSource, /currentOfferedChauffeurId/);
+  assert.match(routesSource, /cancelledBy === "driver"/);
 });
 
 test("driver closes cancelled trips and shows any earnings due", () => {
   const driverSource = readProjectFile("app/chauffeur/index.tsx");
 
-  assert.match(driverSource, /handleRiderCancellation/);
+  assert.match(driverSource, /handleRideCancellation/);
   assert.match(driverSource, /No cancellation earnings are due/);
   assert.match(driverSource, /has been added to your earnings/);
+  assert.match(driverSource, /Ride Request Cancelled/);
+  assert.match(driverSource, /driverCancellationRideIdRef/);
   assert.match(driverSource, /setInterval\(checkRideStatus, 4000\)/);
+});
+
+test("new ride offers cannot be overwritten by an older category", () => {
+  const routesSource = readProjectFile("server/routes.ts");
+  const driverSource = readProjectFile("app/chauffeur/index.tsx");
+  const clientSource = readProjectFile("app/client/index.tsx");
+
+  assert.match(driverSource, /incomingRideHydrationTokenRef/);
+  assert.match(driverSource, /token !== incomingRideHydrationTokenRef\.current/);
+  assert.match(driverSource, /getRequestedVehicleLabel\(incomingRide\.vehicleType\)/);
+  assert.match(driverSource, /getRequestedVehicleLabel\(currentRide\.vehicleType\)/);
+  assert.match(routesSource, /enrichRide\(searching\[0\]\)/);
+  assert.match(clientSource, /vehicleType: requestedVehicleType/);
+  assert.match(clientSource, /getRideVehicle\(ride\?\.vehicleType\)/);
 });
 
 test("driver offers show net earnings and the completed popup shows trip total", () => {

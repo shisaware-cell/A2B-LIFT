@@ -56,6 +56,11 @@ const VEHICLE_TYPES = [
   { id: "van", name: "Van", desc: "Hyundai H1, Mercedes Vito, Staria", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.van },
 ];
 
+function getRideVehicle(vehicleType: unknown) {
+  const id = String(vehicleType || "").trim().toLowerCase();
+  return VEHICLE_TYPES.find((vehicle) => vehicle.id === id) || null;
+}
+
 type RideStatus = "idle" | "selecting" | "confirming" | "requested" | "assigned" | "arriving" | "in_trip" | "completed" | "no_drivers";
 
 type NearbyDriverState = { id: string; lat: number; lng: number };
@@ -998,6 +1003,7 @@ export default function ClientHomeScreen() {
 
   // Keep a ref so socket callbacks always see the latest ride without stale closure
   const currentRideRef = useRef<any>(null);
+  const clientCancellationRideIdRef = useRef<string | null>(null);
   const selectedRouteChoice = routeChoices.find((choice) => choice.id === selectedRouteId) || routeChoices[0] || null;
 
   useEffect(() => {
@@ -1686,7 +1692,8 @@ export default function ClientHomeScreen() {
   // Apply a ride status update received from socket or polling
   const applyRideUpdate = useCallback((ride: any) => {
     if (ride.status === "cancelled") {
-      // Driver or server cancelled — reset client UI and notify
+      const wasCancelledHere = clientCancellationRideIdRef.current === ride.id;
+      if (wasCancelledHere) clientCancellationRideIdRef.current = null;
       setCurrentRide(null);
       setRideStatus("idle");
       setRoutePolyline(null);
@@ -1695,13 +1702,20 @@ export default function ClientHomeScreen() {
       setLiveEtaMin(null);
       setInitialEtaMin(null);
       setChauffeurDetails(null);
-      Alert.alert(
-        "Ride Cancelled",
-        "Your ride has been cancelled by the driver. Please request a new ride.",
-        [{ text: "OK" }]
-      );
+      if (!wasCancelledHere) {
+        const cancelledBy = String(ride.cancelledBy || "driver");
+        Alert.alert(
+          "Ride Cancelled",
+          cancelledBy === "driver"
+            ? "Your driver cancelled the ride. You can request another vehicle now."
+            : "Your ride was cancelled. You can request another vehicle now.",
+          [{ text: "OK" }],
+        );
+      }
       return;
     }
+    const rideVehicle = getRideVehicle(ride.vehicleType);
+    if (rideVehicle) setSelectedVehicle(rideVehicle);
     setCurrentRide(ride);
     if (ride.status === "chauffeur_assigned") {
       setRideStatus("assigned");
@@ -2179,7 +2193,7 @@ export default function ClientHomeScreen() {
     try {
       const [res, payLaterRes] = await Promise.all([
         apiRequest("GET", "/api/payments/cards"),
-        isLiftClubMember ? apiRequest("GET", "/api/pay-later/me").catch(() => null) : Promise.resolve(null),
+        apiRequest("GET", "/api/pay-later/me").catch(() => null),
       ]);
       const cards = await res.json();
       setSavedCards(Array.isArray(cards) ? cards : []);
@@ -2205,6 +2219,7 @@ export default function ClientHomeScreen() {
     if (!user || !location || !dropoffCoords) return null;
     const activeRouteChoice = selectedRouteChoice;
     const distanceKm = activeRouteChoice?.distanceKm || estimatedDistance || 10;
+    const requestedVehicleType = selectedVehicle.id;
     const res = await apiRequest("POST", "/api/rides", {
       clientId: user.id,
       pickupLat: location.lat,
@@ -2213,7 +2228,7 @@ export default function ClientHomeScreen() {
       dropoffLat: dropoffCoords.lat,
       dropoffLng: dropoffCoords.lng,
       dropoffAddress,
-      vehicleType: selectedVehicle.id,
+      vehicleType: requestedVehicleType,
       distanceKm,
       paymentMethod: method,
       paymentStatus: method === "cash" ? "unpaid" : "pending",
@@ -2227,7 +2242,10 @@ export default function ClientHomeScreen() {
       ...extras,
     });
     const payload = await res.json();
-    return payload.ride ?? payload;
+    const ride = payload.ride ?? payload;
+    const confirmedVehicle = getRideVehicle(ride?.vehicleType);
+    if (confirmedVehicle) setSelectedVehicle(confirmedVehicle);
+    return ride;
   }
 
   async function handleUnauthorizedRideRequest() {
@@ -2458,11 +2476,13 @@ export default function ClientHomeScreen() {
   async function cancelRide() {
     let appliedFee = 0;
     if (currentRide) {
+      clientCancellationRideIdRef.current = currentRide.id;
       try {
         const response = await apiRequest("PUT", `/api/rides/${currentRide.id}/status`, { status: "cancelled" });
         const cancelledRide = await response.json();
         appliedFee = Math.max(0, Number(cancelledRide?.cancellationFee || 0));
       } catch (error: any) {
+        clientCancellationRideIdRef.current = null;
         Alert.alert("Cancellation failed", error?.message || "The trip could not be cancelled. Please try again.");
         return;
       }
@@ -2483,9 +2503,12 @@ export default function ClientHomeScreen() {
     setTripDurationMin(null);
     setDriverLocation(null);
     setEtaText(null);
-    if (appliedFee > 0) {
-      Alert.alert("Ride cancelled", `A smart-pricing cancellation fee of R${appliedFee.toFixed(2)} was charged.`);
-    }
+    Alert.alert(
+      "Ride cancelled",
+      appliedFee > 0
+        ? `A smart-pricing cancellation fee of R${appliedFee.toFixed(2)} was charged.`
+        : "Your ride has been cancelled.",
+    );
   }
 
   function getCancellationWarningText() {
@@ -3549,8 +3572,7 @@ export default function ClientHomeScreen() {
                 </Pressable>
               );
             })()}
-            {isLiftClubMember ? (
-              <Pressable
+            <Pressable
                 style={[
                   styles.payMethodRow,
                   paymentMethodsLoading && { opacity: 0.65 },
@@ -3586,7 +3608,6 @@ export default function ClientHomeScreen() {
                 </View>
                 <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
               </Pressable>
-            ) : null}
             <Pressable style={styles.payMethodRow} onPress={() => handlePayAndRide("cash")}>
               <View style={[styles.payMethodIcon, { backgroundColor: Colors.accent }]}>
                 <Ionicons name="cash" size={20} color="#fff" />

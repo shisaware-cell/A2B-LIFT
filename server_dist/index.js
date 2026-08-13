@@ -3201,7 +3201,16 @@ async function registerRoutes(app2) {
         }
       }
       const pushTokens = await getDriverPushTokens([offered]);
-      const notificationTitle = "New Ride Request";
+      const requestedVehicleType = normalizeVehicleType(latestRide.vehicleType || "budget");
+      const requestedCategory = {
+        a2b_lite: "A2B Lite",
+        budget: "Budget",
+        luxury: "Luxury",
+        business: "VIP",
+        van: "Van",
+        luxury_van: "V-Class"
+      }[requestedVehicleType] || requestedVehicleType.replace(/_/g, " ");
+      const notificationTitle = `New ${requestedCategory} Ride`;
       const notificationBody = `Pickup: ${latestRide.pickupAddress || "Nearby"} \u2014 45 seconds to accept`;
       if (offered.userId) {
         await storage.createNotification({
@@ -3538,13 +3547,12 @@ async function registerRoutes(app2) {
       const result = await client.query(
         `SELECT p.*
          FROM pay_later_applications p
-         JOIN lift_club_memberships m ON m.user_id = p.user_id AND m.status = 'approved'
          WHERE p.user_id = $1 AND p.status = 'approved'
          FOR UPDATE OF p`,
         [userId]
       );
       const application = result.rows[0];
-      if (!application) throw new Error("Approved Pay Later access and Lift Club membership are required.");
+      if (!application) throw new Error("Approved Pay Later access is required.");
       const before = Number(application.available_credit || 0);
       if (before < amount) throw new Error(`Pay Later credit is insufficient. R${before.toFixed(2)} is available.`);
       const after = Math.round((before - amount) * 100) / 100;
@@ -7825,11 +7833,9 @@ If you did not request this, you can ignore this email.`,
   });
   app2.get("/api/pay-later/me", requireAuth, async (req, res) => {
     try {
-      const membership = await storage.getLiftClubMembershipByUser(req.auth.sub).catch(() => void 0);
       const application = await getPayLaterApplication(req.auth.sub);
       return res.json({
-        eligible: membership?.status === "approved",
-        membershipStatus: membership?.status || "not_applied",
+        eligible: true,
         application
       });
     } catch (error) {
@@ -7839,10 +7845,6 @@ If you did not request this, you can ignore this email.`,
   app2.post("/api/pay-later/apply", requireAuth, async (req, res) => {
     const client = await pool2.connect();
     try {
-      const membership = await storage.getLiftClubMembershipByUser(req.auth.sub).catch(() => void 0);
-      if (membership?.status !== "approved") {
-        return res.status(403).json({ message: "Approved Lift Club membership is required before applying for Pay Later." });
-      }
       const submittedDocuments = Array.isArray(req.body?.documents) ? req.body.documents : [];
       const byType = /* @__PURE__ */ new Map();
       for (const document of submittedDocuments) {
@@ -9537,6 +9539,43 @@ If you did not request this, you can ignore this email.`,
         if (rideBeforeUpdate.chauffeurId && cancelledBy === "client" && cancellationFee > 0) {
           const cancellationEarnings = calculateChauffeurEarnings(cancellationFee, ride.commissionRate);
           cancellationDriverEarnings = cancellationEarnings.chauffeurEarnings;
+        }
+        io.emit("ride:statusUpdate", {
+          ...ride,
+          driverCancellationEarnings: cancellationDriverEarnings
+        });
+        if (!res.headersSent) {
+          res.json({
+            ...ride,
+            driverCancellationEarnings: cancellationDriverEarnings
+          });
+        }
+        const notifiedChauffeurId = rideBeforeUpdate.chauffeurId || rideBeforeUpdate.currentOfferedChauffeurId;
+        if (cancelledBy === "client" && notifiedChauffeurId) {
+          const assignedChauffeur = await storage.getChauffeur(notifiedChauffeurId).catch(() => void 0);
+          if (assignedChauffeur?.pushToken) {
+            sendExpoPushNotification(
+              [assignedChauffeur.pushToken],
+              "Ride Cancelled",
+              "The rider cancelled this trip.",
+              { rideId: ride.id, type: "ride:cancelled", cancelledBy },
+              { urgent: true }
+            );
+          }
+        } else if (cancelledBy === "driver") {
+          const rider = await storage.getUser(rideBeforeUpdate.clientId).catch(() => void 0);
+          if (rider?.pushToken) {
+            sendExpoPushNotification(
+              [rider.pushToken],
+              "Driver Cancelled Ride",
+              "Your driver cancelled the ride. You can request another vehicle now.",
+              { rideId: ride.id, type: "ride:cancelled", cancelledBy },
+              { urgent: true, channelId: "client-alerts" }
+            );
+          }
+        }
+        if (rideBeforeUpdate.chauffeurId && cancelledBy === "client" && cancellationFee > 0) {
+          const cancellationEarnings = calculateChauffeurEarnings(cancellationFee, ride.commissionRate);
           try {
             const existingEarnings = await storage.getEarningsByChauffeur(rideBeforeUpdate.chauffeurId);
             const alreadyCredited = existingEarnings.some(
@@ -9561,10 +9600,6 @@ If you did not request this, you can ignore this email.`,
             console.error("Cancellation earnings failed (non-fatal):", earningsError.message);
           }
         }
-        io.emit("ride:statusUpdate", {
-          ...ride,
-          driverCancellationEarnings: cancellationDriverEarnings
-        });
       }
       if (status === "cancelled" && rideBeforeUpdate) {
         try {
@@ -9683,17 +9718,8 @@ If you did not request this, you can ignore this email.`,
               body: `Your ride has been cancelled. ${feeMessage}`,
               type: "ride"
             });
-            if (rider?.pushToken) {
-              sendExpoPushNotification(
-                [rider.pushToken],
-                "Ride Cancelled",
-                `Your ride was cancelled. ${feeMessage}`,
-                { rideId: ride.id, type: "ride:cancelled" },
-                { urgent: true, channelId: "client-alerts" }
-              );
-            }
           }
-          if (rideBeforeUpdate.chauffeurId) {
+          if (rideBeforeUpdate.chauffeurId && cancelledBy === "client") {
             const chauffeur = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
             if (chauffeur?.userId) {
               await storage.createNotification({
@@ -9702,13 +9728,6 @@ If you did not request this, you can ignore this email.`,
                 body: cancellationFee > 0 ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee, ride.commissionRate).chauffeurEarnings.toFixed(2)} was added to your earnings.` : "The client has cancelled this trip.",
                 type: "ride"
               });
-            }
-            if (chauffeur?.pushToken) {
-              sendExpoPushNotification(
-                [chauffeur.pushToken],
-                "Ride Cancelled",
-                cancellationFee > 0 ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee, ride.commissionRate).chauffeurEarnings.toFixed(2)} was added to your earnings.` : "The client has cancelled this trip."
-              );
             }
           }
         } catch (refundErr) {
@@ -10130,7 +10149,7 @@ If you did not request this, you can ignore this email.`,
         if (!withDist.length) return res.status(204).end();
         return res.json(await enrichRide(withDist[0]));
       }
-      return res.json(await enrichRide(searching[searching.length - 1]));
+      return res.json(await enrichRide(searching[0]));
     } catch (error) {
       return res.status(500).json({ message: error.message });
     }

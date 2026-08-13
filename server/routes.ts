@@ -1065,7 +1065,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     const pushTokens = await getDriverPushTokens([offered]);
-    const notificationTitle = "New Ride Request";
+    const requestedVehicleType = normalizeVehicleType(latestRide.vehicleType || "budget");
+    const requestedCategory = ({
+      a2b_lite: "A2B Lite",
+      budget: "Budget",
+      luxury: "Luxury",
+      business: "VIP",
+      van: "Van",
+      luxury_van: "V-Class",
+    } as Record<string, string>)[requestedVehicleType] || requestedVehicleType.replace(/_/g, " ");
+    const notificationTitle = `New ${requestedCategory} Ride`;
     const notificationBody = `Pickup: ${latestRide.pickupAddress || "Nearby"} — 45 seconds to accept`;
     if (offered.userId) {
       await storage.createNotification({
@@ -1462,13 +1471,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const result = await client.query(
         `SELECT p.*
          FROM pay_later_applications p
-         JOIN lift_club_memberships m ON m.user_id = p.user_id AND m.status = 'approved'
          WHERE p.user_id = $1 AND p.status = 'approved'
          FOR UPDATE OF p`,
         [userId],
       );
       const application = result.rows[0];
-      if (!application) throw new Error("Approved Pay Later access and Lift Club membership are required.");
+      if (!application) throw new Error("Approved Pay Later access is required.");
       const before = Number(application.available_credit || 0);
       if (before < amount) throw new Error(`Pay Later credit is insufficient. R${before.toFixed(2)} is available.`);
       const after = Math.round((before - amount) * 100) / 100;
@@ -6568,14 +6576,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ─── Pay Later: Lift Club credit applications ──────────────────────────
+  // ─── Pay Later credit applications ─────────────────────────────────────
   app.get("/api/pay-later/me", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
-      const membership = await storage.getLiftClubMembershipByUser(req.auth!.sub).catch(() => undefined);
       const application = await getPayLaterApplication(req.auth!.sub);
       return res.json({
-        eligible: membership?.status === "approved",
-        membershipStatus: membership?.status || "not_applied",
+        eligible: true,
         application,
       });
     } catch (error: any) {
@@ -6586,10 +6592,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/pay-later/apply", requireAuth, async (req: AuthedRequest, res: Response) => {
     const client = await pool.connect();
     try {
-      const membership = await storage.getLiftClubMembershipByUser(req.auth!.sub).catch(() => undefined);
-      if (membership?.status !== "approved") {
-        return res.status(403).json({ message: "Approved Lift Club membership is required before applying for Pay Later." });
-      }
       const submittedDocuments = Array.isArray(req.body?.documents) ? req.body.documents : [];
       const byType = new Map<string, string>();
       for (const document of submittedDocuments) {
@@ -8549,6 +8551,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (rideBeforeUpdate.chauffeurId && cancelledBy === "client" && cancellationFee > 0) {
           const cancellationEarnings = calculateChauffeurEarnings(cancellationFee, ride.commissionRate);
           cancellationDriverEarnings = cancellationEarnings.chauffeurEarnings;
+        }
+
+        // Clear the active ride immediately. Refund APIs and notification writes
+        // can take several seconds and must not leave the driver's trip open.
+        io.emit("ride:statusUpdate", {
+          ...ride,
+          driverCancellationEarnings: cancellationDriverEarnings,
+        });
+        if (!res.headersSent) {
+          res.json({
+            ...ride,
+            driverCancellationEarnings: cancellationDriverEarnings,
+          });
+        }
+
+        // Push the cancellation to the other party before refund and ledger
+        // work. The socket event above handles foreground popups immediately.
+        const notifiedChauffeurId = rideBeforeUpdate.chauffeurId || (rideBeforeUpdate as any).currentOfferedChauffeurId;
+        if (cancelledBy === "client" && notifiedChauffeurId) {
+          const assignedChauffeur = await storage.getChauffeur(notifiedChauffeurId).catch(() => undefined);
+          if (assignedChauffeur?.pushToken) {
+            sendExpoPushNotification(
+              [assignedChauffeur.pushToken],
+              "Ride Cancelled",
+              "The rider cancelled this trip.",
+              { rideId: ride.id, type: "ride:cancelled", cancelledBy },
+              { urgent: true },
+            );
+          }
+        } else if (cancelledBy === "driver") {
+          const rider = await storage.getUser(rideBeforeUpdate.clientId).catch(() => undefined);
+          if ((rider as any)?.pushToken) {
+            sendExpoPushNotification(
+              [(rider as any).pushToken],
+              "Driver Cancelled Ride",
+              "Your driver cancelled the ride. You can request another vehicle now.",
+              { rideId: ride.id, type: "ride:cancelled", cancelledBy },
+              { urgent: true, channelId: "client-alerts" },
+            );
+          }
+        }
+
+        // The apps already have the authoritative cancelled ride. Complete the
+        // driver ledger work afterward so accounting latency cannot hold either
+        // screen open.
+        if (rideBeforeUpdate.chauffeurId && cancelledBy === "client" && cancellationFee > 0) {
+          const cancellationEarnings = calculateChauffeurEarnings(cancellationFee, ride.commissionRate);
           try {
             const existingEarnings = await storage.getEarningsByChauffeur(rideBeforeUpdate.chauffeurId);
             const alreadyCredited = existingEarnings.some((earning: any) =>
@@ -8573,13 +8622,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.error("Cancellation earnings failed (non-fatal):", earningsError.message);
           }
         }
-
-        // Clear the active ride immediately. Refund APIs and notification writes
-        // can take several seconds and must not leave the driver's trip open.
-        io.emit("ride:statusUpdate", {
-          ...ride,
-          driverCancellationEarnings: cancellationDriverEarnings,
-        });
       }
 
       // ── Cancellation: refunds + notifications for all parties ──
@@ -8712,19 +8754,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
               body: `Your ride has been cancelled. ${feeMessage}`,
               type: "ride",
             });
-            if ((rider as any)?.pushToken) {
-              sendExpoPushNotification(
-                [(rider as any).pushToken],
-                "Ride Cancelled",
-                `Your ride was cancelled. ${feeMessage}`,
-                { rideId: ride.id, type: "ride:cancelled" },
-                { urgent: true, channelId: "client-alerts" },
-              );
-            }
           }
 
           // ── Notify the assigned chauffeur (if any) ──
-          if (rideBeforeUpdate.chauffeurId) {
+          if (rideBeforeUpdate.chauffeurId && cancelledBy === "client") {
             const chauffeur = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
             if (chauffeur?.userId) {
               await storage.createNotification({
@@ -8735,15 +8768,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   : "The client has cancelled this trip.",
                 type: "ride",
               });
-            }
-            if ((chauffeur as any)?.pushToken) {
-              sendExpoPushNotification(
-                [(chauffeur as any).pushToken],
-                "Ride Cancelled",
-                cancellationFee > 0
-                  ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee, ride.commissionRate).chauffeurEarnings.toFixed(2)} was added to your earnings.`
-                  : "The client has cancelled this trip."
-              );
             }
           }
         } catch (refundErr: any) {
@@ -9230,8 +9254,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json(await enrichRide(withDist[0]));
       }
 
-      // No location on file — return the most recent searching ride
-      return res.json(await enrichRide(searching[searching.length - 1]));
+      // getAllRides is newest-first, so never revive an older offer when GPS
+      // is unavailable or still warming up.
+      return res.json(await enrichRide(searching[0]));
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
