@@ -23,6 +23,7 @@ import {
   isRideOfferActive,
   isVehicleEligibleForRide,
   normalizeVehicleType,
+  resolveVehicleDispatchCategory,
 } from "./rideOperations";
 import { getReleaseFingerprint } from "./release-info";
 import { validateAdminPassword } from "./admin-password-policy";
@@ -681,6 +682,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const skippedChauffeursByRide = new Map<string, Set<string>>();
   const dispatchTimers = new Map<string, NodeJS.Timeout>();
+  const dispatchingRideIds = new Set<string>();
+  const activeVehicleLookupCache = new Map<string, Promise<any>>();
 
   async function getDriverPushTokens(drivers: any[]) {
     const tokens = new Set<string>();
@@ -716,8 +719,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             assignedVehicle.status === "approved" &&
             Number(assignedVehicle.vehicleYear || 0) >= 2015
           ) {
-            const vehicleType = normalizeVehicleType(assignedVehicle.vehicleType);
-            await Promise.all([
+            const vehicleType = resolveVehicleDispatchCategory(assignedVehicle);
+            void Promise.all([
               storage.updateChauffeur(chauffeur.id, { activeVehicleId: assignedVehicle.id, vehicleType }).catch(() => undefined),
               vehicleType !== assignedVehicle.vehicleType
                 ? storage.updateVehicle(assignedVehicle.id, { vehicleType }).catch(() => undefined)
@@ -736,9 +739,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       vehicle.status === "approved" &&
       Number(vehicle.vehicleYear || 0) >= 2015
     ) {
-      const vehicleType = normalizeVehicleType(vehicle.vehicleType);
+      const vehicleType = resolveVehicleDispatchCategory(vehicle);
       if (vehicleType !== vehicle.vehicleType || chauffeur.vehicleType !== vehicleType) {
-        await Promise.all([
+        void Promise.all([
           vehicleType !== vehicle.vehicleType
             ? storage.updateVehicle(vehicle.id, { vehicleType }).catch(() => undefined)
             : Promise.resolve(undefined),
@@ -752,33 +755,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return null;
   }
 
-  async function getEligibleChauffeursForRide(ride: any, options: { excludeSkipped?: boolean } = {}) {
+  function getCachedApprovedActiveVehicle(chauffeur: any) {
+    const cacheKey = `${chauffeur.id}:${chauffeur.activeVehicleId || "unselected"}`;
+    let lookup = activeVehicleLookupCache.get(cacheKey);
+    if (!lookup) {
+      lookup = getApprovedActiveVehicle(chauffeur);
+      activeVehicleLookupCache.set(cacheKey, lookup);
+      setTimeout(() => activeVehicleLookupCache.delete(cacheKey), 2_000);
+      lookup.catch(() => activeVehicleLookupCache.delete(cacheKey));
+    }
+    return lookup;
+  }
+
+  async function reconcileApprovedFleetCategories() {
+    const approvedVehicles = await storage.getVehicles({ status: "approved" });
+    const resolvedByVehicleId = new Map<string, string>();
+    const vehicleUpdates: Promise<unknown>[] = [];
+
+    for (const vehicle of approvedVehicles) {
+      const resolvedCategory = resolveVehicleDispatchCategory(vehicle);
+      resolvedByVehicleId.set(vehicle.id, resolvedCategory);
+      if (resolvedCategory !== vehicle.vehicleType) {
+        vehicleUpdates.push(storage.updateVehicle(vehicle.id, { vehicleType: resolvedCategory }));
+      }
+    }
+
+    const chauffeurs = await storage.getAllChauffeurs();
+    const chauffeurUpdates = chauffeurs.flatMap((chauffeur) => {
+      const resolvedCategory = chauffeur.activeVehicleId
+        ? resolvedByVehicleId.get(chauffeur.activeVehicleId)
+        : null;
+      if (!resolvedCategory || chauffeur.vehicleType === resolvedCategory) return [];
+      return [storage.updateChauffeur(chauffeur.id, { vehicleType: resolvedCategory })];
+    });
+
+    await Promise.all([...vehicleUpdates, ...chauffeurUpdates]);
+    if (vehicleUpdates.length || chauffeurUpdates.length) {
+      console.log("[dispatch] reconciled approved fleet categories", {
+        vehicles: vehicleUpdates.length,
+        activeDrivers: chauffeurUpdates.length,
+      });
+    }
+  }
+
+  void reconcileApprovedFleetCategories().catch((error: any) => {
+    console.error("[dispatch] fleet category reconciliation failed:", error.message);
+  });
+
+  async function getEligibleChauffeursForRide(
+    ride: any,
+    options: { excludeSkipped?: boolean; logDiagnostics?: boolean } = {},
+  ) {
     const pickupLat = Number(ride.pickupLat);
     const pickupLng = Number(ride.pickupLng);
     const hasPickup = Number.isFinite(pickupLat) && Number.isFinite(pickupLng);
     const skipped = options.excludeSkipped ? skippedChauffeursByRide.get(ride.id) : null;
     const chauffeurs = await storage.getAllChauffeurs();
-    const eligible: any[] = [];
+    const evaluations = await Promise.all(chauffeurs.map(async (chauffeur) => {
+      if (!chauffeur?.isOnline) return { eligible: null, diagnostic: null };
+      if (!chauffeur?.isApproved) return { eligible: null, diagnostic: { chauffeurId: chauffeur.id, reason: "not_approved" } };
+      if (skipped?.has(chauffeur.id)) return { eligible: null, diagnostic: { chauffeurId: chauffeur.id, reason: "offer_skipped" } };
+      if (hasPickup && !hasFreshChauffeurLocation(chauffeur)) {
+        return { eligible: null, diagnostic: { chauffeurId: chauffeur.id, reason: "stale_location" } };
+      }
 
-    for (const chauffeur of chauffeurs) {
-      if (!chauffeur?.isOnline || !chauffeur?.isApproved) continue;
-      if (skipped?.has(chauffeur.id)) continue;
-      if (hasPickup && !hasFreshChauffeurLocation(chauffeur)) continue;
-
-      const activeVehicle = await getApprovedActiveVehicle(chauffeur);
-      const categoryPriority = activeVehicle
-        ? getVehicleDispatchPriority(ride.vehicleType || "budget", activeVehicle.vehicleType)
-        : null;
-      if (!activeVehicle || categoryPriority === null) {
-        continue;
+      const activeVehicle = await getCachedApprovedActiveVehicle(chauffeur);
+      if (!activeVehicle) {
+        return { eligible: null, diagnostic: { chauffeurId: chauffeur.id, reason: "no_approved_active_vehicle" } };
+      }
+      const categoryPriority = getVehicleDispatchPriority(
+        ride.vehicleType || "budget",
+        activeVehicle.vehicleType,
+      );
+      if (categoryPriority === null) {
+        return {
+          eligible: null,
+          diagnostic: {
+            chauffeurId: chauffeur.id,
+            reason: "category_mismatch",
+            activeCategory: activeVehicle.vehicleType,
+          },
+        };
       }
 
       const distKm = hasPickup
         ? calculateHaversineDistanceKm(pickupLat, pickupLng, Number(chauffeur.lat), Number(chauffeur.lng))
         : 0;
-      if (hasPickup && distKm > RIDE_MATCH_RADIUS_KM) continue;
+      if (hasPickup && distKm > RIDE_MATCH_RADIUS_KM) {
+        return { eligible: null, diagnostic: { chauffeurId: chauffeur.id, reason: "outside_radius", distanceKm: Number(distKm.toFixed(1)) } };
+      }
 
-      eligible.push({ ...chauffeur, activeVehicle, distKm, categoryPriority });
+      return {
+        eligible: { ...chauffeur, activeVehicle, distKm, categoryPriority },
+        diagnostic: null,
+      };
+    }));
+    const eligible = evaluations.map((result) => result.eligible).filter(Boolean) as any[];
+
+    if (options.logDiagnostics && eligible.length === 0) {
+      console.warn("[dispatch] no eligible driver", JSON.stringify({
+        rideId: ride.id,
+        requestedCategory: normalizeVehicleType(ride.vehicleType || "budget"),
+        onlineDriverChecks: evaluations.map((result) => result.diagnostic).filter(Boolean),
+      }));
     }
 
     return eligible.sort((a, b) =>
@@ -927,14 +1006,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   async function dispatchNextRideOffer(ride: any) {
+    if (dispatchingRideIds.has(ride.id)) {
+      return { offered: null, ride: await storage.getRide(ride.id) };
+    }
+    dispatchingRideIds.add(ride.id);
+    try {
     const latestRide = await storage.getRide(ride.id);
     if (!latestRide || latestRide.status !== "searching") return { offered: null, ride: latestRide };
 
-    let eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true });
+    let eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true, logDiagnostics: true });
     if (!eligible.length && skippedChauffeursByRide.get(latestRide.id)?.size) {
       // Everyone eligible has skipped/timed out — reset and give them another round.
       skippedChauffeursByRide.delete(latestRide.id);
-      eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true });
+      eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true, logDiagnostics: true });
     }
     if (!eligible.length) {
       const updated = await storage.updateRide(latestRide.id, {
@@ -1005,6 +1089,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     scheduleOfferExpiry(latestRide.id);
     return { offered, ride: updated || latestRide };
+    } finally {
+      dispatchingRideIds.delete(ride.id);
+    }
   }
 
   // Health check for Railway / Render uptime monitoring
@@ -4808,49 +4895,119 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  async function loadVehicleSelectionContext(userId: string, vehicleId: string) {
+    return pool.query(
+      `SELECT op.id AS operator_profile_id,
+              op.type AS operator_type,
+              op.status AS operator_status,
+              c.id AS chauffeur_id,
+              c.is_approved AS chauffeur_approved,
+              v.id AS vehicle_id,
+              v.owner_operator_profile_id,
+              v.status AS vehicle_status,
+              v.vehicle_year,
+              v.vehicle_type,
+              v.car_make,
+              v.vehicle_model,
+              active_assignment.id AS active_assignment_id,
+              previous_assignment.id AS previous_assignment_id
+         FROM operator_profiles op
+         JOIN chauffeurs c ON c.user_id = op.user_id
+         JOIN vehicles v ON v.id = $2
+         LEFT JOIN LATERAL (
+           SELECT va.id
+             FROM vehicle_assignments va
+            WHERE va.vehicle_id = v.id
+              AND va.driver_operator_profile_id = op.id
+              AND va.status = 'active'
+            LIMIT 1
+         ) active_assignment ON true
+         LEFT JOIN LATERAL (
+           SELECT va.id
+             FROM vehicle_assignments va
+            WHERE va.vehicle_id = v.id
+              AND va.driver_operator_profile_id = op.id
+            ORDER BY (va.status = 'active') DESC, va.created_at DESC
+            LIMIT 1
+         ) previous_assignment ON true
+        WHERE op.user_id = $1
+        LIMIT 1`,
+      [userId, vehicleId],
+    );
+  }
+
   app.post("/api/vehicles/:id/select-active", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
-      const profile = await ensureDriverOperatorForChauffeur(req.auth!.sub);
-      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
-      if (profile.type !== "driver" || profile.status !== "approved") {
+      let selection = await loadVehicleSelectionContext(req.auth!.sub, req.params.id);
+
+      if (!selection.rows[0]) {
+        await ensureDriverOperatorForChauffeur(req.auth!.sub);
+        selection = await loadVehicleSelectionContext(req.auth!.sub, req.params.id);
+      }
+
+      const row = selection.rows[0];
+      if (!row) return res.status(404).json({ message: "Vehicle or operator profile not found" });
+      if (row.operator_type !== "driver" || (!row.chauffeur_approved && row.operator_status !== "approved")) {
         return res.status(403).json({ message: "Only approved drivers can select a driving vehicle." });
       }
-      const [vehicle, chauffeur] = await Promise.all([
-        storage.getVehicle(req.params.id),
-        storage.getChauffeurByUserId(req.auth!.sub),
-      ]);
-      if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
-      if (!chauffeur) return res.status(404).json({ message: "Driver profile not found" });
-      if (vehicle.status !== "approved") {
+      if (row.vehicle_status !== "approved") {
         return res.status(400).json({ message: "Select an approved vehicle before going online." });
       }
-      let assignment = await storage.getActiveVehicleAssignment(vehicle.id, profile.id);
-      const ownsVehicle = vehicle.ownerOperatorProfileId === profile.id;
-      if (!assignment && ownsVehicle) {
-        const previousAssignments = await storage.getVehicleAssignments({
-          vehicleId: vehicle.id,
-          driverOperatorProfileId: profile.id,
-        });
-        const previousAssignment = previousAssignments[0];
-        assignment = previousAssignment
-          ? await storage.updateVehicleAssignment(previousAssignment.id, { status: "active", removedAt: null })
-          : await storage.createVehicleAssignment({
-              vehicleId: vehicle.id,
-              driverOperatorProfileId: profile.id,
-              assignedByOperatorProfileId: profile.id,
-              status: "active",
-            });
-      }
-      if (!assignment) {
+      const ownsVehicle = row.owner_operator_profile_id === row.operator_profile_id;
+      if (!row.active_assignment_id && !ownsVehicle) {
         return res.status(403).json({ message: "This vehicle is no longer approved or assigned to you." });
       }
-      const updated = await storage.updateChauffeur(chauffeur.id, {
-        activeVehicleId: vehicle.id,
-        // Keep the legacy chauffeur record aligned with the fleet vehicle so
-        // every dashboard and older client reports the category being dispatched.
-        vehicleType: normalizeVehicleType(vehicle.vehicleType),
+
+      const vehicleType = resolveVehicleDispatchCategory({
+        carMake: row.car_make,
+        vehicleModel: row.vehicle_model,
+        vehicleType: row.vehicle_type,
       });
-      return res.json({ activeVehicleId: vehicle.id, chauffeur: updated });
+      await pool.query(
+        `WITH activated AS (
+           UPDATE vehicle_assignments
+              SET status = 'active', removed_at = NULL
+            WHERE id = $1
+            RETURNING id
+         ), created AS (
+           INSERT INTO vehicle_assignments
+             (vehicle_id, driver_operator_profile_id, assigned_by_operator_profile_id, status)
+           SELECT $2, $3, $3, 'active'
+            WHERE $4::boolean
+              AND NOT EXISTS (SELECT 1 FROM activated)
+           RETURNING id
+         ), aligned_vehicle AS (
+           UPDATE vehicles
+              SET vehicle_type = $5, updated_at = now()
+            WHERE id = $2 AND vehicle_type IS DISTINCT FROM $5
+         ), aligned_profile AS (
+           UPDATE operator_profiles
+              SET status = 'approved', reviewed_at = COALESCE(reviewed_at, now()), updated_at = now()
+            WHERE id = $3 AND type = 'driver' AND status <> 'approved' AND $6::boolean
+         )
+         UPDATE chauffeurs
+            SET active_vehicle_id = $2, vehicle_type = $5
+          WHERE id = $7`,
+        [
+          row.previous_assignment_id,
+          row.vehicle_id,
+          row.operator_profile_id,
+          ownsVehicle,
+          vehicleType,
+          row.chauffeur_approved,
+          row.chauffeur_id,
+        ],
+      );
+
+      activeVehicleLookupCache.clear();
+      void pumpUnassignedSearchingRides().catch((error: any) => {
+        console.error("[dispatch] vehicle selection pump failed:", error.message);
+      });
+      return res.json({
+        activeVehicleId: row.vehicle_id,
+        vehicleType,
+        chauffeur: { id: row.chauffeur_id, activeVehicleId: row.vehicle_id, vehicleType },
+      });
     } catch (error: any) {
       return res.status(400).json({ message: error.message });
     }
@@ -7778,18 +7935,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const dispatch = await dispatchNextRideOffer(enrichedRide);
+      // Dispatch notifications and socket delivery continue after the request
+      // is acknowledged. The rider should never wait for every online driver,
+      // database notification, or push provider before seeing "searching".
+      void dispatchNextRideOffer(enrichedRide).catch((dispatchError: any) => {
+        console.error("[dispatch] initial ride offer failed:", dispatchError.message);
+        scheduleDispatchRetry(ride.id);
+      });
 
-      // Always return success immediately — client shows "searching" UI
       return res.json({
         success: true,
-        status: dispatch.ride?.status || ride.status,
-        message: dispatch.offered
-          ? "Offering your trip to the nearest matching driver..."
-          : "Searching for drivers...",
-        firstMatchedDriverId: dispatch.offered?.id || null,
-        currentOfferExpiresAt: (dispatch.ride as any)?.currentOfferExpiresAt || null,
-        ride: dispatch.ride || ride,
+        status: ride.status,
+        message: "Searching for drivers...",
+        firstMatchedDriverId: null,
+        currentOfferExpiresAt: null,
+        ride: enrichedRide,
       });
     } catch (error: any) {
       console.error("Ride creation error:", error);

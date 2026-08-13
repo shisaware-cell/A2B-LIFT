@@ -1813,6 +1813,19 @@ function normalizeVehicleType(vehicleType) {
   const normalized = String(vehicleType || "budget").trim().toLowerCase().replace(/\s+/g, "_");
   return CATEGORY_ALIASES[normalized] || normalized || "budget";
 }
+function normalizeVehicleName(vehicle) {
+  return `${vehicle.carMake || ""} ${vehicle.vehicleModel || ""}`.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ");
+}
+function resolveVehicleDispatchCategory(vehicle) {
+  const name = normalizeVehicleName(vehicle);
+  const matches = (pattern) => pattern.test(name);
+  if (matches(/\b(v class|vclass)\b/)) return "luxury_van";
+  if (matches(/\b(h1|staria|vito|rumion)\b/)) return "van";
+  if (matches(/\b(s class|e class|bmw (5|7) series|audi (a6|a8))\b/)) return "business";
+  if (matches(/\b(c class|bmw 3 series|audi a4)\b/)) return "luxury";
+  if (matches(/\b(i10|agya|vitz)\b/)) return "a2b_lite";
+  return normalizeVehicleType(vehicle.vehicleType);
+}
 function isVehicleEligibleForRide(requestedVehicleType, activeVehicleType) {
   return getVehicleDispatchPriority(requestedVehicleType, activeVehicleType) !== null;
 }
@@ -2880,6 +2893,8 @@ async function registerRoutes(app2) {
   });
   const skippedChauffeursByRide = /* @__PURE__ */ new Map();
   const dispatchTimers = /* @__PURE__ */ new Map();
+  const dispatchingRideIds = /* @__PURE__ */ new Set();
+  const activeVehicleLookupCache = /* @__PURE__ */ new Map();
   async function getDriverPushTokens(drivers) {
     const tokens = /* @__PURE__ */ new Set();
     await Promise.all(drivers.map(async (driver) => {
@@ -2903,8 +2918,8 @@ async function registerRoutes(app2) {
         for (const assignment of assignments) {
           const assignedVehicle = await storage.getVehicle(assignment.vehicleId).catch(() => void 0);
           if (assignedVehicle && assignedVehicle.status === "approved" && Number(assignedVehicle.vehicleYear || 0) >= 2015) {
-            const vehicleType = normalizeVehicleType(assignedVehicle.vehicleType);
-            await Promise.all([
+            const vehicleType = resolveVehicleDispatchCategory(assignedVehicle);
+            void Promise.all([
               storage.updateChauffeur(chauffeur.id, { activeVehicleId: assignedVehicle.id, vehicleType }).catch(() => void 0),
               vehicleType !== assignedVehicle.vehicleType ? storage.updateVehicle(assignedVehicle.id, { vehicleType }).catch(() => void 0) : Promise.resolve(void 0)
             ]);
@@ -2916,9 +2931,9 @@ async function registerRoutes(app2) {
     }
     const vehicle = await storage.getVehicle(activeVehicleId).catch(() => void 0);
     if (vehicle && vehicle.status === "approved" && Number(vehicle.vehicleYear || 0) >= 2015) {
-      const vehicleType = normalizeVehicleType(vehicle.vehicleType);
+      const vehicleType = resolveVehicleDispatchCategory(vehicle);
       if (vehicleType !== vehicle.vehicleType || chauffeur.vehicleType !== vehicleType) {
-        await Promise.all([
+        void Promise.all([
           vehicleType !== vehicle.vehicleType ? storage.updateVehicle(vehicle.id, { vehicleType }).catch(() => void 0) : Promise.resolve(void 0),
           chauffeur.vehicleType !== vehicleType ? storage.updateChauffeur(chauffeur.id, { vehicleType }).catch(() => void 0) : Promise.resolve(void 0)
         ]);
@@ -2927,25 +2942,92 @@ async function registerRoutes(app2) {
     }
     return null;
   }
+  function getCachedApprovedActiveVehicle(chauffeur) {
+    const cacheKey = `${chauffeur.id}:${chauffeur.activeVehicleId || "unselected"}`;
+    let lookup = activeVehicleLookupCache.get(cacheKey);
+    if (!lookup) {
+      lookup = getApprovedActiveVehicle(chauffeur);
+      activeVehicleLookupCache.set(cacheKey, lookup);
+      setTimeout(() => activeVehicleLookupCache.delete(cacheKey), 2e3);
+      lookup.catch(() => activeVehicleLookupCache.delete(cacheKey));
+    }
+    return lookup;
+  }
+  async function reconcileApprovedFleetCategories() {
+    const approvedVehicles = await storage.getVehicles({ status: "approved" });
+    const resolvedByVehicleId = /* @__PURE__ */ new Map();
+    const vehicleUpdates = [];
+    for (const vehicle of approvedVehicles) {
+      const resolvedCategory = resolveVehicleDispatchCategory(vehicle);
+      resolvedByVehicleId.set(vehicle.id, resolvedCategory);
+      if (resolvedCategory !== vehicle.vehicleType) {
+        vehicleUpdates.push(storage.updateVehicle(vehicle.id, { vehicleType: resolvedCategory }));
+      }
+    }
+    const chauffeurs2 = await storage.getAllChauffeurs();
+    const chauffeurUpdates = chauffeurs2.flatMap((chauffeur) => {
+      const resolvedCategory = chauffeur.activeVehicleId ? resolvedByVehicleId.get(chauffeur.activeVehicleId) : null;
+      if (!resolvedCategory || chauffeur.vehicleType === resolvedCategory) return [];
+      return [storage.updateChauffeur(chauffeur.id, { vehicleType: resolvedCategory })];
+    });
+    await Promise.all([...vehicleUpdates, ...chauffeurUpdates]);
+    if (vehicleUpdates.length || chauffeurUpdates.length) {
+      console.log("[dispatch] reconciled approved fleet categories", {
+        vehicles: vehicleUpdates.length,
+        activeDrivers: chauffeurUpdates.length
+      });
+    }
+  }
+  void reconcileApprovedFleetCategories().catch((error) => {
+    console.error("[dispatch] fleet category reconciliation failed:", error.message);
+  });
   async function getEligibleChauffeursForRide(ride, options = {}) {
     const pickupLat = Number(ride.pickupLat);
     const pickupLng = Number(ride.pickupLng);
     const hasPickup = Number.isFinite(pickupLat) && Number.isFinite(pickupLng);
     const skipped = options.excludeSkipped ? skippedChauffeursByRide.get(ride.id) : null;
     const chauffeurs2 = await storage.getAllChauffeurs();
-    const eligible = [];
-    for (const chauffeur of chauffeurs2) {
-      if (!chauffeur?.isOnline || !chauffeur?.isApproved) continue;
-      if (skipped?.has(chauffeur.id)) continue;
-      if (hasPickup && !hasFreshChauffeurLocation(chauffeur)) continue;
-      const activeVehicle = await getApprovedActiveVehicle(chauffeur);
-      const categoryPriority = activeVehicle ? getVehicleDispatchPriority(ride.vehicleType || "budget", activeVehicle.vehicleType) : null;
-      if (!activeVehicle || categoryPriority === null) {
-        continue;
+    const evaluations = await Promise.all(chauffeurs2.map(async (chauffeur) => {
+      if (!chauffeur?.isOnline) return { eligible: null, diagnostic: null };
+      if (!chauffeur?.isApproved) return { eligible: null, diagnostic: { chauffeurId: chauffeur.id, reason: "not_approved" } };
+      if (skipped?.has(chauffeur.id)) return { eligible: null, diagnostic: { chauffeurId: chauffeur.id, reason: "offer_skipped" } };
+      if (hasPickup && !hasFreshChauffeurLocation(chauffeur)) {
+        return { eligible: null, diagnostic: { chauffeurId: chauffeur.id, reason: "stale_location" } };
+      }
+      const activeVehicle = await getCachedApprovedActiveVehicle(chauffeur);
+      if (!activeVehicle) {
+        return { eligible: null, diagnostic: { chauffeurId: chauffeur.id, reason: "no_approved_active_vehicle" } };
+      }
+      const categoryPriority = getVehicleDispatchPriority(
+        ride.vehicleType || "budget",
+        activeVehicle.vehicleType
+      );
+      if (categoryPriority === null) {
+        return {
+          eligible: null,
+          diagnostic: {
+            chauffeurId: chauffeur.id,
+            reason: "category_mismatch",
+            activeCategory: activeVehicle.vehicleType
+          }
+        };
       }
       const distKm = hasPickup ? calculateHaversineDistanceKm(pickupLat, pickupLng, Number(chauffeur.lat), Number(chauffeur.lng)) : 0;
-      if (hasPickup && distKm > RIDE_MATCH_RADIUS_KM) continue;
-      eligible.push({ ...chauffeur, activeVehicle, distKm, categoryPriority });
+      if (hasPickup && distKm > RIDE_MATCH_RADIUS_KM) {
+        return { eligible: null, diagnostic: { chauffeurId: chauffeur.id, reason: "outside_radius", distanceKm: Number(distKm.toFixed(1)) } };
+      }
+      return {
+        eligible: { ...chauffeur, activeVehicle, distKm, categoryPriority },
+        diagnostic: null
+      };
+    }));
+    const eligible = evaluations.map((result) => result.eligible).filter(Boolean);
+    if (options.logDiagnostics && eligible.length === 0) {
+      console.warn("[dispatch] no eligible driver", JSON.stringify({
+        rideId: ride.id,
+        requestedCategory: normalizeVehicleType(ride.vehicleType || "budget"),
+        onlineDriverChecks: evaluations.map((result) => result.diagnostic).filter(Boolean)
+      }));
     }
     return eligible.sort(
       (a, b) => Number(a.categoryPriority || 0) - Number(b.categoryPriority || 0) || Number(a.distKm || 0) - Number(b.distKm || 0)
@@ -3066,77 +3148,85 @@ async function registerRoutes(app2) {
     dispatchTimers.set(rideId, timer);
   }
   async function dispatchNextRideOffer(ride) {
-    const latestRide = await storage.getRide(ride.id);
-    if (!latestRide || latestRide.status !== "searching") return { offered: null, ride: latestRide };
-    let eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true });
-    if (!eligible.length && skippedChauffeursByRide.get(latestRide.id)?.size) {
-      skippedChauffeursByRide.delete(latestRide.id);
-      eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true });
+    if (dispatchingRideIds.has(ride.id)) {
+      return { offered: null, ride: await storage.getRide(ride.id) };
     }
-    if (!eligible.length) {
-      const updated2 = await storage.updateRide(latestRide.id, {
-        currentOfferedChauffeurId: null,
-        currentOfferExpiresAt: null
-      });
-      if (Date.now() - getRideCreatedAtMs(latestRide) <= DISPATCH_MAX_SEARCH_WINDOW_MS) {
-        scheduleDispatchRetry(latestRide.id);
-      }
-      return { offered: null, ride: updated2 || latestRide };
-    }
-    const offered = eligible[0];
-    const expiresAt = getRideOfferExpiresAt();
-    const updated = await storage.updateRide(latestRide.id, {
-      dispatchStartedAt: latestRide.dispatchStartedAt || /* @__PURE__ */ new Date(),
-      currentOfferedChauffeurId: offered.id,
-      currentOfferExpiresAt: expiresAt
-    });
-    let clientFirstName = "Rider";
-    let clientPhoto = null;
+    dispatchingRideIds.add(ride.id);
     try {
-      const client = await storage.getUser(latestRide.clientId);
-      clientFirstName = getUserFirstName(client, "Rider");
-      clientPhoto = client?.profilePhoto || null;
-    } catch {
-    }
-    const offerPayload = {
-      ...updated || latestRide,
-      clientFirstName,
-      clientPhoto,
-      distanceToPickup: offered.distKm,
-      currentOfferExpiresAt: expiresAt,
-      assignedVehicleType: offered.activeVehicle?.vehicleType || null
-    };
-    const sockets = await io.fetchSockets();
-    for (const socket of sockets) {
-      const socketData = socket.data;
-      if (socketData?.chauffeurId === offered.id) {
-        socket.emit("ride:new", offerPayload);
+      const latestRide = await storage.getRide(ride.id);
+      if (!latestRide || latestRide.status !== "searching") return { offered: null, ride: latestRide };
+      let eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true, logDiagnostics: true });
+      if (!eligible.length && skippedChauffeursByRide.get(latestRide.id)?.size) {
+        skippedChauffeursByRide.delete(latestRide.id);
+        eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true, logDiagnostics: true });
       }
-    }
-    const pushTokens = await getDriverPushTokens([offered]);
-    const notificationTitle = "New Ride Request";
-    const notificationBody = `Pickup: ${latestRide.pickupAddress || "Nearby"} \u2014 45 seconds to accept`;
-    if (offered.userId) {
-      await storage.createNotification({
-        userId: offered.userId,
-        title: notificationTitle,
-        body: notificationBody,
-        type: "ride_request"
-      }).catch((error) => {
-        console.error("[dispatch] failed to save ride notification:", error.message);
+      if (!eligible.length) {
+        const updated2 = await storage.updateRide(latestRide.id, {
+          currentOfferedChauffeurId: null,
+          currentOfferExpiresAt: null
+        });
+        if (Date.now() - getRideCreatedAtMs(latestRide) <= DISPATCH_MAX_SEARCH_WINDOW_MS) {
+          scheduleDispatchRetry(latestRide.id);
+        }
+        return { offered: null, ride: updated2 || latestRide };
+      }
+      const offered = eligible[0];
+      const expiresAt = getRideOfferExpiresAt();
+      const updated = await storage.updateRide(latestRide.id, {
+        dispatchStartedAt: latestRide.dispatchStartedAt || /* @__PURE__ */ new Date(),
+        currentOfferedChauffeurId: offered.id,
+        currentOfferExpiresAt: expiresAt
       });
+      let clientFirstName = "Rider";
+      let clientPhoto = null;
+      try {
+        const client = await storage.getUser(latestRide.clientId);
+        clientFirstName = getUserFirstName(client, "Rider");
+        clientPhoto = client?.profilePhoto || null;
+      } catch {
+      }
+      const offerPayload = {
+        ...updated || latestRide,
+        clientFirstName,
+        clientPhoto,
+        distanceToPickup: offered.distKm,
+        currentOfferExpiresAt: expiresAt,
+        assignedVehicleType: offered.activeVehicle?.vehicleType || null
+      };
+      const sockets = await io.fetchSockets();
+      for (const socket of sockets) {
+        const socketData = socket.data;
+        if (socketData?.chauffeurId === offered.id) {
+          socket.emit("ride:new", offerPayload);
+        }
+      }
+      const pushTokens = await getDriverPushTokens([offered]);
+      const notificationTitle = "New Ride Request";
+      const notificationBody = `Pickup: ${latestRide.pickupAddress || "Nearby"} \u2014 45 seconds to accept`;
+      if (offered.userId) {
+        await storage.createNotification({
+          userId: offered.userId,
+          title: notificationTitle,
+          body: notificationBody,
+          type: "ride_request"
+        }).catch((error) => {
+          console.error("[dispatch] failed to save ride notification:", error.message);
+        });
+      }
+      if (pushTokens.length > 0) {
+        await sendExpoPushNotification(
+          pushTokens,
+          notificationTitle,
+          notificationBody,
+          { rideId: latestRide.id, type: "ride:new", vehicleType: latestRide.vehicleType },
+          { urgent: true }
+        );
+      }
+      scheduleOfferExpiry(latestRide.id);
+      return { offered, ride: updated || latestRide };
+    } finally {
+      dispatchingRideIds.delete(ride.id);
     }
-    if (pushTokens.length > 0) {
-      await sendExpoPushNotification(
-        pushTokens,
-        notificationTitle,
-        notificationBody,
-        { rideId: latestRide.id, type: "ride:new", vehicleType: latestRide.vehicleType },
-        { urgent: true }
-      );
-    }
-    scheduleOfferExpiry(latestRide.id);
-    return { offered, ride: updated || latestRide };
   }
   app2.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: (/* @__PURE__ */ new Date()).toISOString() });
@@ -6302,47 +6392,114 @@ If you did not request this, you can ignore this email.`,
       return res.status(400).json({ message: error.message });
     }
   });
+  async function loadVehicleSelectionContext(userId, vehicleId) {
+    return pool2.query(
+      `SELECT op.id AS operator_profile_id,
+              op.type AS operator_type,
+              op.status AS operator_status,
+              c.id AS chauffeur_id,
+              c.is_approved AS chauffeur_approved,
+              v.id AS vehicle_id,
+              v.owner_operator_profile_id,
+              v.status AS vehicle_status,
+              v.vehicle_year,
+              v.vehicle_type,
+              v.car_make,
+              v.vehicle_model,
+              active_assignment.id AS active_assignment_id,
+              previous_assignment.id AS previous_assignment_id
+         FROM operator_profiles op
+         JOIN chauffeurs c ON c.user_id = op.user_id
+         JOIN vehicles v ON v.id = $2
+         LEFT JOIN LATERAL (
+           SELECT va.id
+             FROM vehicle_assignments va
+            WHERE va.vehicle_id = v.id
+              AND va.driver_operator_profile_id = op.id
+              AND va.status = 'active'
+            LIMIT 1
+         ) active_assignment ON true
+         LEFT JOIN LATERAL (
+           SELECT va.id
+             FROM vehicle_assignments va
+            WHERE va.vehicle_id = v.id
+              AND va.driver_operator_profile_id = op.id
+            ORDER BY (va.status = 'active') DESC, va.created_at DESC
+            LIMIT 1
+         ) previous_assignment ON true
+        WHERE op.user_id = $1
+        LIMIT 1`,
+      [userId, vehicleId]
+    );
+  }
   app2.post("/api/vehicles/:id/select-active", requireAuth, async (req, res) => {
     try {
-      const profile = await ensureDriverOperatorForChauffeur(req.auth.sub);
-      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
-      if (profile.type !== "driver" || profile.status !== "approved") {
+      let selection = await loadVehicleSelectionContext(req.auth.sub, req.params.id);
+      if (!selection.rows[0]) {
+        await ensureDriverOperatorForChauffeur(req.auth.sub);
+        selection = await loadVehicleSelectionContext(req.auth.sub, req.params.id);
+      }
+      const row = selection.rows[0];
+      if (!row) return res.status(404).json({ message: "Vehicle or operator profile not found" });
+      if (row.operator_type !== "driver" || !row.chauffeur_approved && row.operator_status !== "approved") {
         return res.status(403).json({ message: "Only approved drivers can select a driving vehicle." });
       }
-      const [vehicle, chauffeur] = await Promise.all([
-        storage.getVehicle(req.params.id),
-        storage.getChauffeurByUserId(req.auth.sub)
-      ]);
-      if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
-      if (!chauffeur) return res.status(404).json({ message: "Driver profile not found" });
-      if (vehicle.status !== "approved") {
+      if (row.vehicle_status !== "approved") {
         return res.status(400).json({ message: "Select an approved vehicle before going online." });
       }
-      let assignment = await storage.getActiveVehicleAssignment(vehicle.id, profile.id);
-      const ownsVehicle = vehicle.ownerOperatorProfileId === profile.id;
-      if (!assignment && ownsVehicle) {
-        const previousAssignments = await storage.getVehicleAssignments({
-          vehicleId: vehicle.id,
-          driverOperatorProfileId: profile.id
-        });
-        const previousAssignment = previousAssignments[0];
-        assignment = previousAssignment ? await storage.updateVehicleAssignment(previousAssignment.id, { status: "active", removedAt: null }) : await storage.createVehicleAssignment({
-          vehicleId: vehicle.id,
-          driverOperatorProfileId: profile.id,
-          assignedByOperatorProfileId: profile.id,
-          status: "active"
-        });
-      }
-      if (!assignment) {
+      const ownsVehicle = row.owner_operator_profile_id === row.operator_profile_id;
+      if (!row.active_assignment_id && !ownsVehicle) {
         return res.status(403).json({ message: "This vehicle is no longer approved or assigned to you." });
       }
-      const updated = await storage.updateChauffeur(chauffeur.id, {
-        activeVehicleId: vehicle.id,
-        // Keep the legacy chauffeur record aligned with the fleet vehicle so
-        // every dashboard and older client reports the category being dispatched.
-        vehicleType: normalizeVehicleType(vehicle.vehicleType)
+      const vehicleType = resolveVehicleDispatchCategory({
+        carMake: row.car_make,
+        vehicleModel: row.vehicle_model,
+        vehicleType: row.vehicle_type
       });
-      return res.json({ activeVehicleId: vehicle.id, chauffeur: updated });
+      await pool2.query(
+        `WITH activated AS (
+           UPDATE vehicle_assignments
+              SET status = 'active', removed_at = NULL
+            WHERE id = $1
+            RETURNING id
+         ), created AS (
+           INSERT INTO vehicle_assignments
+             (vehicle_id, driver_operator_profile_id, assigned_by_operator_profile_id, status)
+           SELECT $2, $3, $3, 'active'
+            WHERE $4::boolean
+              AND NOT EXISTS (SELECT 1 FROM activated)
+           RETURNING id
+         ), aligned_vehicle AS (
+           UPDATE vehicles
+              SET vehicle_type = $5, updated_at = now()
+            WHERE id = $2 AND vehicle_type IS DISTINCT FROM $5
+         ), aligned_profile AS (
+           UPDATE operator_profiles
+              SET status = 'approved', reviewed_at = COALESCE(reviewed_at, now()), updated_at = now()
+            WHERE id = $3 AND type = 'driver' AND status <> 'approved' AND $6::boolean
+         )
+         UPDATE chauffeurs
+            SET active_vehicle_id = $2, vehicle_type = $5
+          WHERE id = $7`,
+        [
+          row.previous_assignment_id,
+          row.vehicle_id,
+          row.operator_profile_id,
+          ownsVehicle,
+          vehicleType,
+          row.chauffeur_approved,
+          row.chauffeur_id
+        ]
+      );
+      activeVehicleLookupCache.clear();
+      void pumpUnassignedSearchingRides().catch((error) => {
+        console.error("[dispatch] vehicle selection pump failed:", error.message);
+      });
+      return res.json({
+        activeVehicleId: row.vehicle_id,
+        vehicleType,
+        chauffeur: { id: row.chauffeur_id, activeVehicleId: row.vehicle_id, vehicleType }
+      });
     } catch (error) {
       return res.status(400).json({ message: error.message });
     }
@@ -8883,14 +9040,17 @@ If you did not request this, you can ignore this email.`,
           ride: enrichedRide
         });
       }
-      const dispatch = await dispatchNextRideOffer(enrichedRide);
+      void dispatchNextRideOffer(enrichedRide).catch((dispatchError) => {
+        console.error("[dispatch] initial ride offer failed:", dispatchError.message);
+        scheduleDispatchRetry(ride.id);
+      });
       return res.json({
         success: true,
-        status: dispatch.ride?.status || ride.status,
-        message: dispatch.offered ? "Offering your trip to the nearest matching driver..." : "Searching for drivers...",
-        firstMatchedDriverId: dispatch.offered?.id || null,
-        currentOfferExpiresAt: dispatch.ride?.currentOfferExpiresAt || null,
-        ride: dispatch.ride || ride
+        status: ride.status,
+        message: "Searching for drivers...",
+        firstMatchedDriverId: null,
+        currentOfferExpiresAt: null,
+        ride: enrichedRide
       });
     } catch (error) {
       console.error("Ride creation error:", error);

@@ -4,6 +4,7 @@ import {
   getVehicleDispatchPriority,
   isVehicleEligibleForRide,
   normalizeVehicleType,
+  resolveVehicleDispatchCategory,
 } from "./rideOperations";
 
 test("normalizes every rider and fleet category label used by the apps", () => {
@@ -44,4 +45,13 @@ test("falls VIP back to V-Class without allowing the reverse match", () => {
   assert.equal(isVehicleEligibleForRide("V-Class", "VIP"), false);
   assert.equal(getVehicleDispatchPriority("VIP", "VIP"), 0);
   assert.equal(getVehicleDispatchPriority("VIP", "V-Class"), 2);
+});
+
+test("reconciles production fleet models whose stored category is stale", () => {
+  assert.equal(resolveVehicleDispatchCategory({ carMake: "BMW", vehicleModel: "3 Series", vehicleType: "budget" }), "luxury");
+  assert.equal(resolveVehicleDispatchCategory({ carMake: "Mercedes-Benz", vehicleModel: "S Class", vehicleType: "budget" }), "business");
+  assert.equal(resolveVehicleDispatchCategory({ carMake: "Mercedes", vehicleModel: "V CLASS", vehicleType: "business" }), "luxury_van");
+  assert.equal(resolveVehicleDispatchCategory({ carMake: "Hyundai", vehicleModel: "H1", vehicleType: "budget" }), "van");
+  assert.equal(resolveVehicleDispatchCategory({ carMake: "Hyundai", vehicleModel: "i10", vehicleType: "budget" }), "a2b_lite");
+  assert.equal(resolveVehicleDispatchCategory({ carMake: "Toyota", vehicleModel: "Corolla", vehicleType: "budget" }), "budget");
 });

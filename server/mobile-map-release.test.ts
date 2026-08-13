@@ -115,13 +115,13 @@ test("uses the iOS Google Maps key for iOS builds even when Android key is prese
   assert.equal(appConfig.extra.googleMapsApiKey, "ios-key");
 });
 
-test("uses a2blift.com as the app and website API host", () => {
+test("keeps mobile API traffic on Railway and referral links on a2blift.com", () => {
   const easConfig = JSON.parse(readProjectFile("eas.json"));
   for (const [profileName, profile] of Object.entries<any>(easConfig.build)) {
     assert.equal(
       profile.env?.EXPO_PUBLIC_DOMAIN,
-      "https://a2blift.com",
-      `${profileName} should call the live a2blift.com backend`,
+      "https://a2b-lift-backend-production-4fea.up.railway.app",
+      `${profileName} should call the live Railway backend directly`,
     );
     assert.equal(
       profile.env?.EXPO_PUBLIC_REFERRAL_BASE_URL,
@@ -143,7 +143,8 @@ test("uses a2blift.com as the app and website API host", () => {
   const apiClientSource = readProjectFile("lib/query-client.ts");
   assert.match(apiClientSource, /normalizedDomain === "https:\/\/api\.a2blift\.com"/);
   assert.match(apiClientSource, /normalizedDomain === "https:\/\/api-production-0783\.up\.railway\.app"/);
-  assert.match(apiClientSource, /return "https:\/\/a2blift\.com\/"/);
+  assert.match(apiClientSource, /normalizedDomain === "https:\/\/a2blift\.com"/);
+  assert.match(apiClientSource, /return PRODUCTION_API_URL/);
 });
 
 test("keeps the QR code inside a padded card with room for its copy", () => {

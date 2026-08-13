@@ -181,8 +181,9 @@ test("lets drivers select every approved owned or assigned fleet vehicle", () =>
   const routesSource = readProjectFile("server/routes.ts");
   const vehiclesSource = readProjectFile("app/chauffeur/vehicles.tsx");
 
-  assert.match(routesSource, /const ownsVehicle = vehicle\.ownerOperatorProfileId === profile\.id/);
-  assert.match(routesSource, /previousAssignment[\s\S]*?status: "active"/);
+  assert.match(routesSource, /const ownsVehicle = row\.owner_operator_profile_id === row\.operator_profile_id/);
+  assert.match(routesSource, /SET status = 'active', removed_at = NULL/);
+  assert.match(routesSource, /INSERT INTO vehicle_assignments/);
   assert.match(vehiclesSource, /\(assigned \|\| ownsVehicle\)/);
 });
 

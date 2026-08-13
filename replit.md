@@ -160,7 +160,7 @@ Commission rate: 15%
 
 ## App Store Publishing
 - **EAS Build**: `eas.json` configured with development/preview/production profiles
-- All builds point to Railway API: `EXPO_PUBLIC_DOMAIN=https://api-production-0783.up.railway.app`
+- All mobile builds point directly to Railway API: `EXPO_PUBLIC_DOMAIN=https://a2b-lift-backend-production-4fea.up.railway.app`
 - iOS: bundle ID `com.a2blift`, buildNumber auto-increments
 - Android: package `com.a2blift`, versionCode auto-increments
 - Required before submitting to stores:

@@ -68,3 +68,24 @@ test("keeps both mobile variants awake while the shared app root is mounted", ()
     /useKeepAwake\("a2b-active-app", \{ suppressDeactivateWarnings: true \}\)/,
   );
 });
+
+test("reconciles fleet models during vehicle selection and dispatch", () => {
+  const routesSource = readProjectFile("server/routes.ts");
+
+  assert.match(routesSource, /resolveVehicleDispatchCategory\(assignedVehicle\)/);
+  assert.match(routesSource, /resolveVehicleDispatchCategory\(vehicle\)/);
+  assert.match(routesSource, /reconcileApprovedFleetCategories\(\)/);
+  assert.match(routesSource, /vehicle_type = \$5, updated_at = now\(\)/);
+  assert.match(routesSource, /SET active_vehicle_id = \$2, vehicle_type = \$5/);
+});
+
+test("checks online drivers concurrently and acknowledges rides before push delivery", () => {
+  const routesSource = readProjectFile("server/routes.ts");
+
+  assert.match(routesSource, /Promise\.all\(chauffeurs\.map\(async \(chauffeur\) =>/);
+  assert.match(routesSource, /activeVehicleLookupCache/);
+  assert.match(routesSource, /dispatchingRideIds\.has\(ride\.id\)/);
+  assert.match(routesSource, /\[dispatch\] no eligible driver/);
+  assert.match(routesSource, /void dispatchNextRideOffer\(enrichedRide\)\.catch/);
+  assert.doesNotMatch(routesSource, /const dispatch = await dispatchNextRideOffer\(enrichedRide\)/);
+});

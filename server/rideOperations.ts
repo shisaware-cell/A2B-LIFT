@@ -57,6 +57,38 @@ export function normalizeVehicleType(vehicleType?: string | null) {
   return CATEGORY_ALIASES[normalized] || normalized || "budget";
 }
 
+type DispatchVehicle = {
+  carMake?: string | null;
+  vehicleModel?: string | null;
+  vehicleType?: string | null;
+};
+
+function normalizeVehicleName(vehicle: DispatchVehicle) {
+  return `${vehicle.carMake || ""} ${vehicle.vehicleModel || ""}`
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * Reconcile legacy fleet rows whose selected category conflicts with the
+ * make/model approved by A2B. The explicit category remains authoritative for
+ * unknown vehicles; these rules only cover models named by the fleet UI.
+ */
+export function resolveVehicleDispatchCategory(vehicle: DispatchVehicle) {
+  const name = normalizeVehicleName(vehicle);
+  const matches = (pattern: RegExp) => pattern.test(name);
+
+  if (matches(/\b(v class|vclass)\b/)) return "luxury_van";
+  if (matches(/\b(h1|staria|vito|rumion)\b/)) return "van";
+  if (matches(/\b(s class|e class|bmw (5|7) series|audi (a6|a8))\b/)) return "business";
+  if (matches(/\b(c class|bmw 3 series|audi a4)\b/)) return "luxury";
+  if (matches(/\b(i10|agya|vitz)\b/)) return "a2b_lite";
+
+  return normalizeVehicleType(vehicle.vehicleType);
+}
+
 export function isVehicleEligibleForRide(requestedVehicleType?: string | null, activeVehicleType?: string | null) {
   return getVehicleDispatchPriority(requestedVehicleType, activeVehicleType) !== null;
 }

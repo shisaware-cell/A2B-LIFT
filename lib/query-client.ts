@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
 const API_REQUEST_TIMEOUT_MS = 12000;
+const PRODUCTION_API_URL = "https://a2b-lift-backend-production-4fea.up.railway.app/";
 const inFlightGetRequests = new Map<string, Promise<Response>>();
 
 /**
@@ -16,10 +17,12 @@ export function getApiUrl(): string {
 
   if (
     !normalizedDomain ||
+    normalizedDomain === "https://a2blift.com" ||
+    normalizedDomain === "https://www.a2blift.com" ||
     normalizedDomain === "https://api.a2blift.com" ||
     normalizedDomain === "https://api-production-0783.up.railway.app"
   ) {
-    return "https://a2blift.com/";
+    return PRODUCTION_API_URL;
   }
 
   // If already a full URL with protocol, use it directly
