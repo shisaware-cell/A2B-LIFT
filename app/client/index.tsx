@@ -3748,9 +3748,24 @@ export default function ClientHomeScreen() {
         visible={showCashSelfiePrompt}
         transparent
         animationType="fade"
+        navigationBarTranslucent={false}
         onRequestClose={() => setShowCashSelfiePrompt(false)}
       >
-        <View style={styles.cashSelfiePromptOverlay}>
+        <ScrollView
+          style={styles.cashSelfiePromptScroll}
+          contentContainerStyle={[
+            styles.cashSelfiePromptOverlay,
+            {
+              paddingTop: Math.max(insets.top, 16) + 12,
+              paddingBottom: Math.max(
+                insets.bottom,
+                Platform.OS === "android" ? 24 : 16,
+              ) + 16,
+            },
+          ]}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+        >
           <View style={styles.cashSelfiePromptCard}>
             <Pressable
               style={styles.cashSelfiePromptClose}
@@ -3828,12 +3843,13 @@ export default function ClientHomeScreen() {
               </Pressable>
             </View>
           </View>
-        </View>
+        </ScrollView>
       </Modal>
 
       <Modal
         visible={showCashSelfieCamera}
         animationType="slide"
+        navigationBarTranslucent={false}
         onRequestClose={() => {
           if (cashSelfieSaving) return;
           setShowCashSelfieCamera(false);
@@ -6044,9 +6060,12 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_500Medium",
     color: Colors.white,
   },
-  cashSelfiePromptOverlay: {
+  cashSelfiePromptScroll: {
     flex: 1,
     backgroundColor: "rgba(4,10,18,0.76)",
+  },
+  cashSelfiePromptOverlay: {
+    flexGrow: 1,
     justifyContent: "center",
     paddingHorizontal: 18,
   },

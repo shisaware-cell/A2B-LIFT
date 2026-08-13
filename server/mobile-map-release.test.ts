@@ -92,6 +92,19 @@ test("requires ML Kit face validation before a selfie can be used", () => {
   assert.doesNotMatch(cameraSource, /onCapture\(\{ uri: capturedUri, passed: true/);
 });
 
+test("keeps every selfie action above Android system navigation", () => {
+  const cameraSource = readProjectFile("components/LivenessCamera.tsx");
+  const clientSource = readProjectFile("app/client/index.tsx");
+
+  assert.match(cameraSource, /const insets = useSafeAreaInsets\(\)/);
+  assert.match(cameraSource, /const bottomActionInset = Math\.max\(/);
+  assert.match(cameraSource, /styles\.bottomArea, \{ paddingBottom: bottomActionInset \}/);
+  assert.match(cameraSource, /styles\.reviewPanel, \{ bottom: bottomActionInset \}/);
+  assert.match(clientSource, /navigationBarTranslucent=\{false\}/);
+  assert.match(clientSource, /styles\.cashSelfiePromptOverlay,[\s\S]*?insets\.bottom/);
+  assert.match(clientSource, /cashSelfiePromptOverlay: \{\s*flexGrow: 1/);
+});
+
 test("moves referral funds atomically and records both ledgers", () => {
   const routesSource = readProjectFile("server/routes.ts");
 

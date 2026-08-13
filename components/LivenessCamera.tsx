@@ -25,6 +25,7 @@ import {
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   useFacesInPhoto,
   type RNMLKitFace,
@@ -175,6 +176,7 @@ function validateFace(
 /* ─── component ──────────────────────────────────────────────────────────── */
 
 export default function LivenessCamera({ challenge, onCapture, onCancel }: Props) {
+  const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [step, setStep] = useState<"ready" | "capturing" | "review">("ready");
@@ -183,6 +185,10 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
   const [detectionTimedOut, setDetectionTimedOut] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const capturingRef = useRef(false);
+  const bottomActionInset = Math.max(
+    insets.bottom + 20,
+    Platform.OS === "android" ? 56 : 40,
+  );
 
   // The challenge never changes for the lifetime of this capture session, so
   // the on-screen instruction stays consistent between retakes.
@@ -311,7 +317,12 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
 
   if (!permission.granted) {
     return (
-      <View style={styles.permissionContainer}>
+      <View
+        style={[
+          styles.permissionContainer,
+          { paddingTop: insets.top + 24, paddingBottom: bottomActionInset },
+        ]}
+      >
         <Ionicons name="camera-outline" size={56} color={Colors.white} />
         <Text style={styles.permissionTitle}>Camera Access Required</Text>
         <Text style={styles.permissionBody}>
@@ -349,7 +360,7 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
       <View style={styles.root}>
         <Image source={{ uri: capturedUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
         <View style={styles.reviewDim} />
-        <View style={styles.reviewPanel}>
+        <View style={[styles.reviewPanel, { bottom: bottomActionInset }]}>
           <View style={styles.reviewHeader}>
             {checkComplete && (
               <Ionicons
@@ -441,7 +452,7 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
         />
       ))}
 
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { paddingTop: Math.max(insets.top + 12, 32) }]}>
         <Pressable onPress={onCancel} style={styles.closeBtn} hitSlop={12}>
           <Ionicons name="close" size={22} color="#fff" />
         </Pressable>
@@ -454,7 +465,7 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
         <Text style={styles.challengeText}>{CHALLENGE_LABELS[activeChallenge]}</Text>
       </View>
 
-      <View style={styles.bottomArea}>
+      <View style={[styles.bottomArea, { paddingBottom: bottomActionInset }]}>
         <Text style={styles.instruction}>
           {step === "capturing" ? "Hold still…" : "Position your face in the oval"}
         </Text>
@@ -504,7 +515,7 @@ const styles = StyleSheet.create({
 
   topBar: {
     position: "absolute", top: 0, left: 0, right: 0,
-    paddingTop: 56, paddingBottom: 16, paddingHorizontal: 20,
+    paddingBottom: 16, paddingHorizontal: 20,
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
   },
   closeBtn: {
@@ -526,7 +537,7 @@ const styles = StyleSheet.create({
 
   bottomArea: {
     position: "absolute", bottom: 0, left: 0, right: 0,
-    paddingBottom: 52, paddingHorizontal: 24,
+    paddingHorizontal: 24,
     alignItems: "center", gap: 10,
   },
   instruction: { fontSize: 20, fontFamily: "Inter_700Bold", color: "#fff", textAlign: "center" },
@@ -546,7 +557,7 @@ const styles = StyleSheet.create({
   // Review screen
   reviewDim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.55)" },
   reviewPanel: {
-    position: "absolute", left: 20, right: 20, bottom: 40,
+    position: "absolute", left: 20, right: 20,
     backgroundColor: "rgba(10,10,10,0.92)",
     borderRadius: 22, padding: 20,
     borderWidth: 1, borderColor: "rgba(255,255,255,0.1)",
