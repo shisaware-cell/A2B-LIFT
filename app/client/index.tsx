@@ -40,7 +40,7 @@ import Colors from "@/constants/colors";
 import A2BMap from "@/components/A2BMap";
 import LivenessCamera, { type LivenessChallenge, type LivenessCaptureResult } from "@/components/LivenessCamera";
 import LiftClubMembershipRequiredModal from "@/components/LiftClubMembershipRequiredModal";
-import { VEHICLE_CATEGORY_PRICING, getBillableDistanceKm } from "@shared/fare-policy";
+import { VEHICLE_CATEGORY_PRICING, getBillableDistanceKm, normalizeVehicleType } from "@shared/fare-policy";
 import { encodeStopsQuery, normalizeRideStops, type RideStop } from "@shared/ride-stops";
 
 const CATEGORY_SEDAN_ART = require("../../assets/images/nearby-car-marker.png");
@@ -57,8 +57,8 @@ const VEHICLE_TYPES = [
 ];
 
 function getRideVehicle(vehicleType: unknown) {
-  const id = String(vehicleType || "").trim().toLowerCase();
-  return VEHICLE_TYPES.find((vehicle) => vehicle.id === id) || null;
+  const normalizedId = normalizeVehicleType(vehicleType as any);
+  return VEHICLE_TYPES.find((vehicle) => vehicle.id === normalizedId) || null;
 }
 
 type RideStatus = "idle" | "selecting" | "confirming" | "requested" | "assigned" | "arriving" | "in_trip" | "completed" | "no_drivers";
@@ -979,6 +979,7 @@ export default function ClientHomeScreen() {
   // Live driver ETA notification state
   const [liveEtaMin, setLiveEtaMin] = useState<number | null>(null);
   const [initialEtaMin, setInitialEtaMin] = useState<number | null>(null);
+  const [clientWaitingElapsedSec, setClientWaitingElapsedSec] = useState(0);
 
   // ETA to nearest available driver (shown on map in idle/selecting state)
   const [nearestDriverEta, setNearestDriverEta] = useState<string | null>(null);
@@ -1015,6 +1016,23 @@ export default function ClientHomeScreen() {
   useEffect(() => {
     currentRideRef.current = currentRide;
   }, [currentRide]);
+
+  // ─── 5-Minute Waiting Countdown Timer ─────────────────────────────────────
+  useEffect(() => {
+    const isArrived = currentRide?.status === "chauffeur_arrived" || rideStatus === "arriving";
+    if (!isArrived) {
+      setClientWaitingElapsedSec(0);
+      return;
+    }
+    const arrivedAt = currentRide?.arrivedAt ? new Date(currentRide.arrivedAt).getTime() : Date.now();
+    const updateWaiting = () => {
+      const elapsed = Math.max(0, Math.floor((Date.now() - arrivedAt) / 1000));
+      setClientWaitingElapsedSec(elapsed);
+    };
+    updateWaiting();
+    const interval = setInterval(updateWaiting, 1000);
+    return () => clearInterval(interval);
+  }, [currentRide?.id, currentRide?.status, currentRide?.arrivedAt, rideStatus]);
 
   useEffect(() => {
     requestLocation();
@@ -3113,10 +3131,21 @@ export default function ClientHomeScreen() {
               {rideStatus === "assigned"
                 ? `${chauffeurDetails?.driverName || "Driver"} is on the way`
                 : rideStatus === "arriving"
-                  ? `${chauffeurDetails?.driverName || "Driver"} is arriving`
+                  ? `${chauffeurDetails?.driverName || "Driver"} has arrived`
                   : "Trip In Progress"}
             </Text>
           </View>
+
+          {(currentRide?.status === "chauffeur_arrived" || (rideStatus === "arriving" && currentRide?.arrivedAt)) && (
+            <View style={[styles.clientWaitingBadge, clientWaitingElapsedSec >= 300 && styles.clientWaitingBadgeCharged]}>
+              <Ionicons name="time" size={14} color={clientWaitingElapsedSec >= 300 ? "#F59E0B" : "#10B981"} />
+              <Text style={[styles.clientWaitingText, clientWaitingElapsedSec >= 300 && styles.clientWaitingTextCharged]}>
+                {clientWaitingElapsedSec < 300
+                  ? `Free waiting time: ${Math.floor((300 - clientWaitingElapsedSec) / 60)}:${String((300 - clientWaitingElapsedSec) % 60).padStart(2, "0")} remaining`
+                  : `Waiting fee: +R ${(Math.ceil((clientWaitingElapsedSec - 300) / 60) * 1).toFixed(2)} (${Math.floor(clientWaitingElapsedSec / 60)}m)`}
+              </Text>
+            </View>
+          )}
 
           <View style={styles.chauffeurCard}>
             <Pressable style={styles.chauffeurAvatarBtn} onPress={openDriverProfile}>
@@ -6500,5 +6529,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Inter_700Bold",
     color: Colors.primary,
+  },
+  clientWaitingBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(16, 185, 129, 0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.35)",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 8,
+    alignSelf: "flex-start",
+  },
+  clientWaitingBadgeCharged: {
+    backgroundColor: "rgba(245, 158, 11, 0.15)",
+    borderColor: "rgba(245, 158, 11, 0.4)",
+  },
+  clientWaitingText: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    color: "#10B981",
+  },
+  clientWaitingTextCharged: {
+    color: "#F59E0B",
   },
 });

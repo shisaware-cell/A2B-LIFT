@@ -32,6 +32,7 @@ import { authOptional, requireAuth, requireRole, type AuthedRequest } from "./au
 import { signAccessToken, type UserRole } from "./auth";
 import { externalApiService } from "./external-api-service";
 import { sendEmail, sendSms, renderBrandedEmail, emailEnabled, smsEnabled } from "./notification-service";
+import { sendTripInvoiceEmail } from "./trip-invoice";
 import { normalizeRideStops } from "../shared/ride-stops";
 import {
   calculateWaitingFee,
@@ -8504,8 +8505,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ? Math.max(0, (now.getTime() - new Date(acceptedAt).getTime()) / 60000)
             : 0;
           const arrivedAt = (existingRide as any).arrivedAt;
+          const minutesSinceArrival = arrivedAt
+            ? Math.max(0, (now.getTime() - new Date(arrivedAt).getTime()) / 60000)
+            : 0;
           const waitingFeeCents = arrivedAt
-            ? calculateWaitingFee(Math.max(0, (now.getTime() - new Date(arrivedAt).getTime()) / 60000))
+            ? calculateWaitingFee(minutesSinceArrival)
             : 0;
           const baseFare = Math.max(0, Number(existingRide.baseFare || 0));
           const category = getVehicleCategories()[normalizeVehicleType(existingRide.vehicleType || "budget")];
@@ -8520,6 +8524,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const pricingMultiplier = unadjustedFare > 0
             ? Math.max(1, lockedFare / unadjustedFare)
             : Math.max(1, Number((existingRide as any).demandMultiplier || existingRide.surgeMultiplier || 1));
+
+          const isTripStarted = existingRide.status === "trip_started";
+          const actualDistanceKm = Number((existingRide as any).actualDistanceKm || req.body?.actualDistanceKm || 0);
+          const pricePerKmCents = Math.round(Number(existingRide.pricePerKm || category?.pricePerKm || 0) * 100);
+
           const cancellation = resolveCancellation({
             actor: cancelledBy === "client" ? "rider" : "driver",
             baseFareCents: Math.round(baseFare * 100),
@@ -8527,6 +8536,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             waitingFeeCents,
             pricingMultiplier,
             arrived: Boolean(arrivedAt),
+            minutesSinceArrival,
+            tripStarted: isTripStarted,
+            distanceTraveledKm: actualDistanceKm,
+            pricePerKmCents,
           });
           updateData.waitingFee = waitingFeeCents / 100;
           updateData.cancellationFee = cancellation.feeCents / 100;
@@ -8554,6 +8567,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const immediateRide = { ...ride, clientFirstName: "Client" };
         io.emit("ride:statusUpdate", immediateRide);
         res.json(immediateRide);
+
+        // Send trip invoice email to the rider asynchronously
+        void (async () => {
+          try {
+            const clientUser = await storage.getUser(ride.clientId);
+            if (clientUser?.username && clientUser.username.includes("@")) {
+              let driverInfo = null;
+              if (ride.chauffeurId) {
+                const ch = await storage.getChauffeur(ride.chauffeurId);
+                const chUser = ch?.userId ? await storage.getUser(ch.userId) : null;
+                driverInfo = {
+                  name: chUser?.name || "Your Driver",
+                  carMake: ch?.carMake || null,
+                  vehicleModel: ch?.vehicleModel || null,
+                  plateNumber: ch?.plateNumber || null,
+                };
+              }
+              await sendTripInvoiceEmail({
+                trip: ride,
+                recipient: {
+                  email: clientUser.username,
+                  name: clientUser.name,
+                },
+                driver: driverInfo,
+              });
+            }
+          } catch (invError: any) {
+            console.error("[invoice] email send failed (non-fatal):", invError?.message || invError);
+          }
+        })();
       }
 
       if (status === "cancelled" && rideBeforeUpdate) {
@@ -9267,6 +9310,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // getAllRides is newest-first, so never revive an older offer when GPS
       // is unavailable or still warming up.
       return res.json(await enrichRide(searching[0]));
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/rides/chauffeur-active/:chauffeurId", async (req: Request, res: Response) => {
+    try {
+      const chauffeur = await storage.getChauffeur(req.params.chauffeurId);
+      if (!chauffeur) return res.status(204).end();
+      const allRides = await storage.getAllRides();
+      const activeRide = allRides.find((r) =>
+        r.chauffeurId === chauffeur.id &&
+        !["trip_completed", "cancelled"].includes(r.status as string)
+      );
+      if (!activeRide) return res.status(204).end();
+      const client = await storage.getUser(activeRide.clientId).catch(() => null);
+      const clientFirstName = getUserFirstName(client, "Rider");
+      return res.json({
+        ...activeRide,
+        clientFirstName,
+        clientName: client?.name || "Rider",
+        clientPhone: client?.phone || null,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/chauffeurs/:id/active-ride", async (req: Request, res: Response) => {
+    try {
+      const chauffeur = await storage.getChauffeur(req.params.id);
+      if (!chauffeur) return res.status(204).end();
+      const allRides = await storage.getAllRides();
+      const activeRide = allRides.find((r) =>
+        r.chauffeurId === chauffeur.id &&
+        !["trip_completed", "cancelled"].includes(r.status as string)
+      );
+      if (!activeRide) return res.status(204).end();
+      const client = await storage.getUser(activeRide.clientId).catch(() => null);
+      const clientFirstName = getUserFirstName(client, "Rider");
+      return res.json({
+        ...activeRide,
+        clientFirstName,
+        clientName: client?.name || "Rider",
+        clientPhone: client?.phone || null,
+      });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }

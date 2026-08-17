@@ -1637,9 +1637,59 @@ function getBillableDistanceKm(distanceKm, includedKm = 0) {
   if (!Number.isFinite(distance) || distance <= 0) return 0;
   return Math.max(0, distance - (Number.isFinite(included) ? Math.max(0, included) : 0));
 }
-function getVehicleCategoryCommissionRate(vehicleType) {
+var CATEGORY_ALIASES = {
+  a2b_lite: "a2b_lite",
+  "a2b-lite": "a2b_lite",
+  lite: "a2b_lite",
+  economy_lite: "a2b_lite",
+  budget: "budget",
+  budget_car: "budget",
+  economy_car: "budget",
+  compact: "budget",
+  economy: "budget",
+  standard: "budget",
+  sedan: "budget",
+  luxury: "luxury",
+  luxury_car: "luxury",
+  luxury_sedan: "luxury",
+  premium: "luxury",
+  business: "business",
+  business_class: "business",
+  vip: "business",
+  vip_car: "business",
+  luxury_vip: "business",
+  luxury_vip_car: "business",
+  business_vip: "business",
+  executive: "business",
+  executive_car: "business",
+  van: "van",
+  minivan: "van",
+  xl: "van",
+  people_carrier: "van",
+  luxury_van: "luxury_van",
+  vclass: "luxury_van",
+  v_class: "luxury_van",
+  "v-class": "luxury_van"
+};
+var VEHICLE_CATEGORY_TITLES = {
+  a2b_lite: "A2B Lite",
+  budget: "Budget",
+  luxury: "Luxury",
+  business: "VIP",
+  van: "Van",
+  luxury_van: "V-Class"
+};
+function normalizeVehicleType(vehicleType) {
   const normalized = String(vehicleType || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-  return normalized === "a2b_lite" || normalized === "lite" ? A2B_LITE_COMMISSION_RATE : PLATFORM_COMMISSION_RATE;
+  return CATEGORY_ALIASES[normalized] || CATEGORY_ALIASES[String(vehicleType || "").trim().toLowerCase()] || "budget";
+}
+function getVehicleCategoryTitle(vehicleType) {
+  const key = normalizeVehicleType(vehicleType);
+  return VEHICLE_CATEGORY_TITLES[key] || key.replace(/_/g, " ");
+}
+function getVehicleCategoryCommissionRate(vehicleType) {
+  const normalized = normalizeVehicleType(vehicleType);
+  return normalized === "a2b_lite" ? A2B_LITE_COMMISSION_RATE : PLATFORM_COMMISSION_RATE;
 }
 function roundCurrency(amount) {
   return Math.round(amount * 100) / 100;
@@ -1768,7 +1818,7 @@ function getPricingConfig() {
 
 // server/rideOperations.ts
 var RIDE_OFFER_WINDOW_MS = 45e3;
-var CATEGORY_ALIASES = {
+var CATEGORY_ALIASES2 = {
   a2b_lite: "a2b_lite",
   "a2b-lite": "a2b_lite",
   lite: "a2b_lite",
@@ -1809,9 +1859,9 @@ var MULTI_CATEGORY_MATCHES = {
 var FALLBACK_CATEGORY_MATCHES = {
   luxury_van: ["business"]
 };
-function normalizeVehicleType(vehicleType) {
+function normalizeVehicleType2(vehicleType) {
   const normalized = String(vehicleType || "budget").trim().toLowerCase().replace(/\s+/g, "_");
-  return CATEGORY_ALIASES[normalized] || normalized || "budget";
+  return CATEGORY_ALIASES2[normalized] || normalized || "budget";
 }
 function normalizeVehicleName(vehicle) {
   return `${vehicle.carMake || ""} ${vehicle.vehicleModel || ""}`.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ");
@@ -1824,14 +1874,14 @@ function resolveVehicleDispatchCategory(vehicle) {
   if (matches(/\b(s class|e class|bmw (5|7) series|audi (a6|a8))\b/)) return "business";
   if (matches(/\b(c class|bmw 3 series|audi a4)\b/)) return "luxury";
   if (matches(/\b(i10|agya|vitz)\b/)) return "a2b_lite";
-  return normalizeVehicleType(vehicle.vehicleType);
+  return normalizeVehicleType2(vehicle.vehicleType);
 }
 function isVehicleEligibleForRide(requestedVehicleType, activeVehicleType) {
   return getVehicleDispatchPriority(requestedVehicleType, activeVehicleType) !== null;
 }
 function getVehicleDispatchPriority(requestedVehicleType, activeVehicleType) {
-  const requested = normalizeVehicleType(requestedVehicleType);
-  const active = normalizeVehicleType(activeVehicleType);
+  const requested = normalizeVehicleType2(requestedVehicleType);
+  const active = normalizeVehicleType2(activeVehicleType);
   if (requested === active) return 0;
   if ((MULTI_CATEGORY_MATCHES[active] || []).includes(requested)) return 1;
   if ((FALLBACK_CATEGORY_MATCHES[active] || []).includes(requested)) return 2;
@@ -2215,6 +2265,152 @@ function normalizeRideStops(value) {
   });
 }
 
+// server/trip-invoice.ts
+function formatZarCurrency(amount) {
+  return `R ${Math.max(0, Number(amount || 0)).toFixed(2)}`;
+}
+function generateTripInvoiceHtml(opts) {
+  const { trip, recipient, driver } = opts;
+  const totalFare = Number(trip.finalFare ?? trip.price ?? 0);
+  const baseFare = Number(trip.baseFare ?? 0);
+  const waitingFee = Number(trip.waitingFee ?? 0);
+  const distanceKm = Number(trip.distanceKm ?? 0);
+  const durationMin = Math.round(Number(trip.actualDurationMin ?? trip.durationMin ?? 0));
+  const categoryTitle = getVehicleCategoryTitle(trip.vehicleType || "budget");
+  const stops = normalizeRideStops(trip.stops);
+  const paymentMethodLabel = String(trip.paymentMethod || "cash").toUpperCase().replace(/_/g, " ");
+  const tripDate = trip.completedAt ? new Date(trip.completedAt) : /* @__PURE__ */ new Date();
+  const formattedDate = tripDate.toLocaleDateString("en-ZA", {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  });
+  const formattedTime = tripDate.toLocaleTimeString("en-ZA", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+  const stopsHtml = stops.length > 0 ? stops.map((stop, idx) => `
+      <div style="margin-top:6px;padding-left:14px;border-left:2px solid #e0e0e0;font-size:13px;color:#555;">
+        <strong>Stop ${idx + 1}:</strong> ${stop.address || "En route stop"}
+      </div>
+    `).join("") : "";
+  const driverSection = driver?.name ? `
+      <div style="background:#f8f9fa;border-radius:10px;padding:12px 16px;margin:16px 0;border:1px solid #eef0f2;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:13px;color:#333;">
+          <tr>
+            <td style="font-weight:600;">Driver:</td>
+            <td style="text-align:right;">${driver.name}</td>
+          </tr>
+          ${driver.vehicleModel || driver.plateNumber ? `
+          <tr>
+            <td style="color:#666;padding-top:4px;">Vehicle:</td>
+            <td style="text-align:right;color:#666;padding-top:4px;">
+              ${[driver.carMake, driver.vehicleModel].filter(Boolean).join(" ")} ${driver.plateNumber ? `(${driver.plateNumber})` : ""}
+            </td>
+          </tr>
+          ` : ""}
+        </table>
+      </div>
+    ` : "";
+  const bodyHtml = `
+    <div style="margin-bottom:16px;">
+      <p style="margin:0 0 8px;font-size:15px;color:#333;">Hi ${recipient.name || "there"},</p>
+      <p style="margin:0;font-size:14px;color:#555;">Thanks for riding with A2B LIFT. Here is your trip receipt and tax invoice.</p>
+    </div>
+
+    <!-- Trip Total Highlight -->
+    <div style="background:#0b0b0f;border-radius:12px;padding:20px;text-align:center;color:#ffffff;margin:16px 0;">
+      <div style="font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#a0a0a0;">Total Amount Paid</div>
+      <div style="font-size:32px;font-weight:800;color:#ffffff;margin:6px 0;">${formatZarCurrency(totalFare)}</div>
+      <div style="font-size:12px;color:#34d399;">\u2713 Paid via ${paymentMethodLabel}</div>
+    </div>
+
+    <!-- Trip Details Card -->
+    <div style="border:1px solid #eef0f2;border-radius:10px;padding:16px;margin-bottom:16px;">
+      <div style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">Trip Summary</div>
+      
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:13px;color:#333;margin-bottom:12px;">
+        <tr>
+          <td style="color:#666;">Date & Time:</td>
+          <td style="text-align:right;font-weight:500;">${formattedDate} at ${formattedTime}</td>
+        </tr>
+        <tr>
+          <td style="color:#666;padding-top:4px;">Trip Reference:</td>
+          <td style="text-align:right;font-family:monospace;font-size:12px;padding-top:4px;">#${trip.id.slice(0, 8).toUpperCase()}</td>
+        </tr>
+        <tr>
+          <td style="color:#666;padding-top:4px;">Vehicle Category:</td>
+          <td style="text-align:right;font-weight:500;padding-top:4px;">${categoryTitle}</td>
+        </tr>
+        <tr>
+          <td style="color:#666;padding-top:4px;">Distance & Duration:</td>
+          <td style="text-align:right;font-weight:500;padding-top:4px;">${distanceKm.toFixed(1)} km \xB7 ${durationMin} min</td>
+        </tr>
+      </table>
+
+      <!-- Route details -->
+      <div style="background:#fafafa;border-radius:8px;padding:12px;margin-top:12px;">
+        <div style="font-size:13px;color:#222;margin-bottom:6px;">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:8px;"></span>
+          <strong>Pickup:</strong> ${trip.pickupAddress || "Pickup location"}
+        </div>
+        ${stopsHtml}
+        <div style="font-size:13px;color:#222;margin-top:6px;">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:8px;"></span>
+          <strong>Dropoff:</strong> ${trip.dropoffAddress || "Destination"}
+        </div>
+      </div>
+
+      ${driverSection}
+    </div>
+
+    <!-- Fare Breakdown Table -->
+    <div style="border:1px solid #eef0f2;border-radius:10px;padding:16px;margin-bottom:16px;">
+      <div style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">Fare Breakdown</div>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:13px;color:#333;">
+        ${baseFare > 0 ? `
+        <tr>
+          <td style="padding:4px 0;color:#555;">Base fare</td>
+          <td style="padding:4px 0;text-align:right;">${formatZarCurrency(baseFare)}</td>
+        </tr>
+        ` : ""}
+        <tr>
+          <td style="padding:4px 0;color:#555;">Distance fare (${distanceKm.toFixed(1)} km)</td>
+          <td style="padding:4px 0;text-align:right;">${formatZarCurrency(Math.max(0, totalFare - baseFare - waitingFee))}</td>
+        </tr>
+        ${waitingFee > 0 ? `
+        <tr>
+          <td style="padding:4px 0;color:#555;">Waiting time fee</td>
+          <td style="padding:4px 0;text-align:right;">${formatZarCurrency(waitingFee)}</td>
+        </tr>
+        ` : ""}
+        <tr style="border-top:1px solid #eef0f2;font-weight:700;font-size:14px;">
+          <td style="padding:10px 0 0 0;">Total (incl. VAT)</td>
+          <td style="padding:10px 0 0 0;text-align:right;">${formatZarCurrency(totalFare)}</td>
+        </tr>
+      </table>
+    </div>
+  `;
+  return renderBrandedEmail({
+    heading: `Trip Invoice \u2014 ${formatZarCurrency(totalFare)}`,
+    bodyHtml
+  });
+}
+async function sendTripInvoiceEmail(opts) {
+  if (!opts.recipient.email || !opts.recipient.email.includes("@")) {
+    return { status: "skipped", error: "No recipient email address." };
+  }
+  const html = generateTripInvoiceHtml(opts);
+  const tripRef = opts.trip.id.slice(0, 8).toUpperCase();
+  const subject = `Your A2B LIFT Trip Receipt [#${tripRef}]`;
+  return sendEmail({
+    to: opts.recipient.email,
+    subject,
+    html
+  });
+}
+
 // server/ride-operations-policy.ts
 var WAITING_GRACE_MINUTES = 5;
 var WAITING_RATE_CENTS_PER_MINUTE = 100;
@@ -2229,8 +2425,36 @@ function calculateRiderCancellationFee(options) {
   const multiplier = Number.isFinite(options.pricingMultiplier) ? Math.max(1, Number(options.pricingMultiplier)) : 1;
   return Math.round(Math.max(0, options.baseFareCents) * multiplier) + Math.max(0, options.waitingFeeCents);
 }
+function calculateUnfinishedTripFare(options) {
+  const multiplier = Number.isFinite(options.pricingMultiplier) ? Math.max(1, Number(options.pricingMultiplier)) : 1;
+  const distanceFareCents = Math.round(
+    Math.max(0, options.distanceTraveledKm) * Math.max(0, options.pricePerKmCents) * multiplier
+  );
+  const baseCents = Math.round(Math.max(0, options.baseFareCents) * multiplier);
+  const waitingCents = Math.max(0, options.waitingFeeCents || 0);
+  return baseCents + distanceFareCents + waitingCents;
+}
 function resolveCancellation(options) {
-  if (options.actor === "driver") return { feeCents: 0, cashDebtCents: 0 };
+  if (options.tripStarted) {
+    const feeCents2 = calculateUnfinishedTripFare({
+      baseFareCents: options.baseFareCents,
+      pricePerKmCents: options.pricePerKmCents || 0,
+      distanceTraveledKm: options.distanceTraveledKm || 0,
+      waitingFeeCents: options.waitingFeeCents,
+      pricingMultiplier: options.pricingMultiplier
+    });
+    return { feeCents: feeCents2, cashDebtCents: feeCents2 };
+  }
+  if (options.actor === "driver") {
+    if (options.arrived && (options.minutesSinceArrival || 0) >= WAITING_GRACE_MINUTES) {
+      const feeCents2 = calculateRiderCancellationFee({
+        ...options,
+        minutesDrivingToPickup: RIDER_CANCELLATION_TRAVEL_MINUTES
+      });
+      return { feeCents: feeCents2, cashDebtCents: feeCents2 };
+    }
+    return { feeCents: 0, cashDebtCents: 0 };
+  }
   const feeCents = options.arrived ? calculateRiderCancellationFee({
     ...options,
     minutesDrivingToPickup: RIDER_CANCELLATION_TRAVEL_MINUTES
@@ -3074,7 +3298,7 @@ async function registerRoutes(app2) {
     if (options.logDiagnostics && eligible.length === 0) {
       console.warn("[dispatch] no eligible driver", JSON.stringify({
         rideId: ride.id,
-        requestedCategory: normalizeVehicleType(ride.vehicleType || "budget"),
+        requestedCategory: normalizeVehicleType2(ride.vehicleType || "budget"),
         onlineDriverChecks: evaluations.map((result) => result.diagnostic).filter(Boolean)
       }));
     }
@@ -3250,7 +3474,7 @@ async function registerRoutes(app2) {
         }
       }
       const pushTokens = await getDriverPushTokens([offered]);
-      const requestedVehicleType = normalizeVehicleType(latestRide.vehicleType || "budget");
+      const requestedVehicleType = normalizeVehicleType2(latestRide.vehicleType || "budget");
       const requestedCategory = {
         a2b_lite: "A2B Lite",
         budget: "Budget",
@@ -6106,7 +6330,7 @@ If you did not request this, you can ignore this email.`,
         vehicleModel: String(chauffeur.vehicleModel || "Vehicle").trim(),
         vehicleYear,
         plateNumber: String(chauffeur.plateNumber || `LEGACY-${chauffeur.id.slice(0, 6)}`).trim().toUpperCase(),
-        vehicleType: normalizeVehicleType(chauffeur.vehicleType || "budget"),
+        vehicleType: normalizeVehicleType2(chauffeur.vehicleType || "budget"),
         carColor: String(chauffeur.carColor || "Unknown").trim(),
         passengerCapacity: chauffeur.passengerCapacity || 4,
         luggageCapacity: chauffeur.luggageCapacity || 2
@@ -6319,7 +6543,7 @@ If you did not request this, you can ignore this email.`,
       if (!Number.isFinite(vehicleYear) || vehicleYear < 2015 || vehicleYear > currentYear + 1) {
         return res.status(400).json({ message: `Please enter a vehicle model year between 2015 and ${currentYear + 1}.` });
       }
-      const vehicleType = normalizeVehicleType(requireStringField(req.body, "vehicleType"));
+      const vehicleType = normalizeVehicleType2(requireStringField(req.body, "vehicleType"));
       if (!getVehicleCategories()[vehicleType]) {
         return res.status(400).json({ message: "Select a valid vehicle category." });
       }
@@ -6383,7 +6607,7 @@ If you did not request this, you can ignore this email.`,
         if (req.body[field] !== void 0) update[field] = String(req.body[field]).trim();
       }
       if (req.body.vehicleType !== void 0) {
-        const vehicleType = normalizeVehicleType(req.body.vehicleType);
+        const vehicleType = normalizeVehicleType2(req.body.vehicleType);
         if (!getVehicleCategories()[vehicleType]) {
           return res.status(400).json({ message: "Select a valid vehicle category." });
         }
@@ -8940,7 +9164,7 @@ If you did not request this, you can ignore this email.`,
           }
         }
       }
-      const categoryId = normalizeVehicleType(rideData.vehicleType || "budget");
+      const categoryId = normalizeVehicleType2(rideData.vehicleType || "budget");
       if (!getVehicleCategories()[categoryId]) {
         return res.status(400).json({ success: false, message: "Select a valid vehicle category." });
       }
@@ -9544,22 +9768,30 @@ If you did not request this, you can ignore this email.`,
           const acceptedAt = existingRide.pickupTravelStartedAt || existingRide.acceptedAt;
           const elapsedMinutes = acceptedAt ? Math.max(0, (now.getTime() - new Date(acceptedAt).getTime()) / 6e4) : 0;
           const arrivedAt = existingRide.arrivedAt;
-          const waitingFeeCents = arrivedAt ? calculateWaitingFee(Math.max(0, (now.getTime() - new Date(arrivedAt).getTime()) / 6e4)) : 0;
+          const minutesSinceArrival = arrivedAt ? Math.max(0, (now.getTime() - new Date(arrivedAt).getTime()) / 6e4) : 0;
+          const waitingFeeCents = arrivedAt ? calculateWaitingFee(minutesSinceArrival) : 0;
           const baseFare = Math.max(0, Number(existingRide.baseFare || 0));
-          const category = getVehicleCategories()[normalizeVehicleType(existingRide.vehicleType || "budget")];
+          const category = getVehicleCategories()[normalizeVehicleType2(existingRide.vehicleType || "budget")];
           const unadjustedFare = baseFare + getBillableDistanceKm(existingRide.distanceKm, category?.includedKm || 0) * Math.max(0, Number(existingRide.pricePerKm || 0));
           const lockedFare = Math.max(
             0,
             Number(existingRide.quotedFare || existingRide.price || 0)
           );
           const pricingMultiplier = unadjustedFare > 0 ? Math.max(1, lockedFare / unadjustedFare) : Math.max(1, Number(existingRide.demandMultiplier || existingRide.surgeMultiplier || 1));
+          const isTripStarted = existingRide.status === "trip_started";
+          const actualDistanceKm = Number(existingRide.actualDistanceKm || req.body?.actualDistanceKm || 0);
+          const pricePerKmCents = Math.round(Number(existingRide.pricePerKm || category?.pricePerKm || 0) * 100);
           const cancellation = resolveCancellation({
             actor: cancelledBy === "client" ? "rider" : "driver",
             baseFareCents: Math.round(baseFare * 100),
             minutesDrivingToPickup: elapsedMinutes,
             waitingFeeCents,
             pricingMultiplier,
-            arrived: Boolean(arrivedAt)
+            arrived: Boolean(arrivedAt),
+            minutesSinceArrival,
+            tripStarted: isTripStarted,
+            distanceTraveledKm: actualDistanceKm,
+            pricePerKmCents
           });
           updateData.waitingFee = waitingFeeCents / 100;
           updateData.cancellationFee = cancellation.feeCents / 100;
@@ -9582,6 +9814,34 @@ If you did not request this, you can ignore this email.`,
         const immediateRide = { ...ride, clientFirstName: "Client" };
         io.emit("ride:statusUpdate", immediateRide);
         res.json(immediateRide);
+        void (async () => {
+          try {
+            const clientUser = await storage.getUser(ride.clientId);
+            if (clientUser?.username && clientUser.username.includes("@")) {
+              let driverInfo = null;
+              if (ride.chauffeurId) {
+                const ch = await storage.getChauffeur(ride.chauffeurId);
+                const chUser = ch?.userId ? await storage.getUser(ch.userId) : null;
+                driverInfo = {
+                  name: chUser?.name || "Your Driver",
+                  carMake: ch?.carMake || null,
+                  vehicleModel: ch?.vehicleModel || null,
+                  plateNumber: ch?.plateNumber || null
+                };
+              }
+              await sendTripInvoiceEmail({
+                trip: ride,
+                recipient: {
+                  email: clientUser.username,
+                  name: clientUser.name
+                },
+                driver: driverInfo
+              });
+            }
+          } catch (invError) {
+            console.error("[invoice] email send failed (non-fatal):", invError?.message || invError);
+          }
+        })();
       }
       if (status === "cancelled" && rideBeforeUpdate) {
         const cancellationFee = Math.max(0, Number(ride.cancellationFee || 0));
@@ -10199,6 +10459,48 @@ If you did not request this, you can ignore this email.`,
         return res.json(await enrichRide(withDist[0]));
       }
       return res.json(await enrichRide(searching[0]));
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.get("/api/rides/chauffeur-active/:chauffeurId", async (req, res) => {
+    try {
+      const chauffeur = await storage.getChauffeur(req.params.chauffeurId);
+      if (!chauffeur) return res.status(204).end();
+      const allRides = await storage.getAllRides();
+      const activeRide = allRides.find(
+        (r) => r.chauffeurId === chauffeur.id && !["trip_completed", "cancelled"].includes(r.status)
+      );
+      if (!activeRide) return res.status(204).end();
+      const client = await storage.getUser(activeRide.clientId).catch(() => null);
+      const clientFirstName = getUserFirstName(client, "Rider");
+      return res.json({
+        ...activeRide,
+        clientFirstName,
+        clientName: client?.name || "Rider",
+        clientPhone: client?.phone || null
+      });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.get("/api/chauffeurs/:id/active-ride", async (req, res) => {
+    try {
+      const chauffeur = await storage.getChauffeur(req.params.id);
+      if (!chauffeur) return res.status(204).end();
+      const allRides = await storage.getAllRides();
+      const activeRide = allRides.find(
+        (r) => r.chauffeurId === chauffeur.id && !["trip_completed", "cancelled"].includes(r.status)
+      );
+      if (!activeRide) return res.status(204).end();
+      const client = await storage.getUser(activeRide.clientId).catch(() => null);
+      const clientFirstName = getUserFirstName(client, "Rider");
+      return res.json({
+        ...activeRide,
+        clientFirstName,
+        clientName: client?.name || "Rider",
+        clientPhone: client?.phone || null
+      });
     } catch (error) {
       return res.status(500).json({ message: error.message });
     }

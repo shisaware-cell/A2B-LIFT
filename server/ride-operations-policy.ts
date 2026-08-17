@@ -32,6 +32,24 @@ export function calculateRiderCancellationFee(options: {
   return Math.round(Math.max(0, options.baseFareCents) * multiplier) + Math.max(0, options.waitingFeeCents);
 }
 
+export function calculateUnfinishedTripFare(options: {
+  baseFareCents: number;
+  pricePerKmCents: number;
+  distanceTraveledKm: number;
+  waitingFeeCents?: number;
+  pricingMultiplier?: number;
+}): number {
+  const multiplier = Number.isFinite(options.pricingMultiplier)
+    ? Math.max(1, Number(options.pricingMultiplier))
+    : 1;
+  const distanceFareCents = Math.round(
+    Math.max(0, options.distanceTraveledKm) * Math.max(0, options.pricePerKmCents) * multiplier
+  );
+  const baseCents = Math.round(Math.max(0, options.baseFareCents) * multiplier);
+  const waitingCents = Math.max(0, options.waitingFeeCents || 0);
+  return baseCents + distanceFareCents + waitingCents;
+}
+
 export function resolveCancellation(options: {
   actor: "rider" | "driver";
   baseFareCents: number;
@@ -39,8 +57,37 @@ export function resolveCancellation(options: {
   waitingFeeCents: number;
   pricingMultiplier?: number;
   arrived?: boolean;
+  minutesSinceArrival?: number;
+  tripStarted?: boolean;
+  distanceTraveledKm?: number;
+  pricePerKmCents?: number;
 }): { feeCents: number; cashDebtCents: number } {
-  if (options.actor === "driver") return { feeCents: 0, cashDebtCents: 0 };
+  // If the trip was already in progress (trip_started) and cancelled mid-way
+  if (options.tripStarted) {
+    const feeCents = calculateUnfinishedTripFare({
+      baseFareCents: options.baseFareCents,
+      pricePerKmCents: options.pricePerKmCents || 0,
+      distanceTraveledKm: options.distanceTraveledKm || 0,
+      waitingFeeCents: options.waitingFeeCents,
+      pricingMultiplier: options.pricingMultiplier,
+    });
+    return { feeCents, cashDebtCents: feeCents };
+  }
+
+  // Driver cancelled
+  if (options.actor === "driver") {
+    // If driver waited >= 5 minutes (WAITING_GRACE_MINUTES) after arriving at pickup (client no-show)
+    if (options.arrived && (options.minutesSinceArrival || 0) >= WAITING_GRACE_MINUTES) {
+      const feeCents = calculateRiderCancellationFee({
+        ...options,
+        minutesDrivingToPickup: RIDER_CANCELLATION_TRAVEL_MINUTES,
+      });
+      return { feeCents, cashDebtCents: feeCents };
+    }
+    return { feeCents: 0, cashDebtCents: 0 };
+  }
+
+  // Rider cancelled
   const feeCents = options.arrived
     ? calculateRiderCancellationFee({
         ...options,
@@ -48,6 +95,28 @@ export function resolveCancellation(options: {
       })
     : calculateRiderCancellationFee(options);
   return { feeCents, cashDebtCents: feeCents };
+}
+
+export function isDriverNearLocation(
+  driverLat: number,
+  driverLng: number,
+  targetLat: number,
+  targetLng: number,
+  maxDistanceMeters = 250,
+): boolean {
+  if (!isValidLocationSample(driverLat, driverLng) || !isValidLocationSample(targetLat, targetLng)) {
+    return false;
+  }
+  const R = 6371000;
+  const dLat = ((targetLat - driverLat) * Math.PI) / 180;
+  const dLng = ((targetLng - driverLng) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((driverLat * Math.PI) / 180) *
+      Math.cos((targetLat * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  const distMeters = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return distMeters <= maxDistanceMeters;
 }
 
 export function reconcileDriverProfileStatus(options: {

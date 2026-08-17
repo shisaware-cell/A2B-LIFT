@@ -55,6 +55,7 @@ import {
   setNavigationVoiceEnabled as persistNavigationVoiceEnabled,
   subscribeNavigationVoiceEnabled,
 } from "@/lib/navigation-voice";
+import { getVehicleCategoryTitle } from "@shared/fare-policy";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const ROUTE_REFRESH_MIN_DISTANCE_KM = 0.2;
@@ -63,18 +64,9 @@ const RIDE_ALERT_SUPPRESSION_MS = 30 * 60 * 1000;
 const DRIVER_LOCATION_TASK_NAME = "a2b-driver-location-task";
 const DRIVER_LOCATION_TASK_STATE_KEY = "a2b_driver_location_task_state";
 const DRIVER_LOCATION_REST_MIN_INTERVAL_MS = 10000;
-const VEHICLE_CATEGORY_LABELS: Record<string, string> = {
-  a2b_lite: "A2B Lite",
-  budget: "Budget",
-  luxury: "Luxury",
-  business: "VIP",
-  van: "Van",
-  luxury_van: "V-Class",
-};
 
 function getRequestedVehicleLabel(vehicleType: unknown) {
-  const key = String(vehicleType || "budget").trim().toLowerCase();
-  return VEHICLE_CATEGORY_LABELS[key] || key.replace(/_/g, " ");
+  return getVehicleCategoryTitle(vehicleType as any);
 }
 
 type DriverLocationTaskState = {
@@ -242,11 +234,13 @@ export default function ChauffeurDashboard() {
   const [stopProgressLoading, setStopProgressLoading] = useState(false);
   const [rideStatusUpdating, setRideStatusUpdating] = useState<string | null>(null);
   const [navigationVoiceEnabled, setNavigationVoiceEnabledState] = useState<boolean | null>(null);
+  const [waitingElapsedSec, setWaitingElapsedSec] = useState(0);
 
   const soundRef = useRef<TripAlertSound | null>(null);
   const tripAlertTokenRef = useRef(0);
   const tripAlertEnabledRef = useRef(false);
   const seenRideIdRef = useRef<string | null>(null);
+  const destinationArrivalPromptedRideIdRef = useRef<string | null>(null);
   const suppressedRideAlertIdRef = useRef<string | null>(null);
   const suppressedRideIdsRef = useRef<Record<string, number>>({});
   const clientSummaryCacheRef = useRef<Record<string, ClientSummary>>({});
@@ -1257,27 +1251,112 @@ export default function ChauffeurDashboard() {
     myLocation?.lng,
   ]);
 
+  // ─── Destination Arrival Geofence Detection & End Trip Prompt ────────────
+  useEffect(() => {
+    if (
+      !currentRide ||
+      currentRide.status !== "trip_started" ||
+      hasPendingStop ||
+      !myLocation ||
+      !currentRide.dropoffLat ||
+      !currentRide.dropoffLng
+    ) {
+      return;
+    }
+    const dropoffLat = parseFloat(currentRide.dropoffLat);
+    const dropoffLng = parseFloat(currentRide.dropoffLng);
+    if (!Number.isFinite(dropoffLat) || !Number.isFinite(dropoffLng)) return;
+
+    const distanceKm = haversineDistance(myLocation.lat, myLocation.lng, dropoffLat, dropoffLng);
+    // If driver is within 75 meters of the destination and has not yet been prompted for this ride
+    if (distanceKm <= 0.075 && destinationArrivalPromptedRideIdRef.current !== currentRide.id) {
+      destinationArrivalPromptedRideIdRef.current = currentRide.id;
+      if (Platform.OS !== "web") {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        try {
+          Speech.speak("You have arrived at your destination.", { language: "en-ZA", rate: 0.95 });
+        } catch {}
+      }
+      Alert.alert(
+        "Arrived at Destination",
+        "You have reached the final destination. Would you like to end the trip now?",
+        [
+          { text: "Not Yet", style: "cancel" },
+          {
+            text: "End Trip",
+            style: "default",
+            onPress: () => updateRideStatus("trip_completed"),
+          },
+        ],
+      );
+    }
+  }, [
+    currentRide?.id,
+    currentRide?.status,
+    hasPendingStop,
+    myLocation?.lat,
+    myLocation?.lng,
+    currentRide?.dropoffLat,
+    currentRide?.dropoffLng,
+  ]);
+
+  // ─── 5-Minute Waiting Timer (when arrived at pickup) ───────────────────────
+  useEffect(() => {
+    if (currentRide?.status !== "chauffeur_arrived") {
+      setWaitingElapsedSec(0);
+      return;
+    }
+    const arrivedAt = currentRide.arrivedAt ? new Date(currentRide.arrivedAt).getTime() : Date.now();
+    const updateWaiting = () => {
+      const elapsed = Math.max(0, Math.floor((Date.now() - arrivedAt) / 1000));
+      setWaitingElapsedSec(elapsed);
+    };
+    updateWaiting();
+    const interval = setInterval(updateWaiting, 1000);
+    return () => clearInterval(interval);
+  }, [currentRide?.id, currentRide?.status, currentRide?.arrivedAt]);
+
   // ─── Data ─────────────────────────────────────────────────────────────────
-  async function restoreActiveRide() {
+  async function restoreActiveRide(chauffeurId?: string) {
+    const targetChauffeurId = chauffeurId || chauffeur?.id || chauffeurRef.current?.id;
     try {
       const saved = await AsyncStorage.getItem("a2b_current_ride");
-      if (!saved) return;
-      const ride = JSON.parse(saved);
-      const rideRes = await apiRequest("GET", `/api/rides/${ride.id}`);
-      if (!rideRes.ok) { await AsyncStorage.removeItem("a2b_current_ride"); return; }
-      const fetchedRide = await rideRes.json();
-      const freshRide = await enrichRideClientDetails({
-        ...fetchedRide,
-        clientFirstName: fetchedRide.clientFirstName || ride.clientFirstName,
-        clientName: fetchedRide.clientName || ride.clientName,
-      }, "Client");
-      if (freshRide.status === "cancelled") {
-        currentRideRef.current = ride;
-        handleRideCancellation(freshRide);
-      } else if (freshRide.status === "trip_completed") {
-        await AsyncStorage.removeItem("a2b_current_ride");
-      } else {
-        setCurrentRide(freshRide);
+      if (saved) {
+        const ride = JSON.parse(saved);
+        if (ride?.id) {
+          const rideRes = await apiRequest("GET", `/api/rides/${ride.id}`);
+          if (rideRes.ok) {
+            const fetchedRide = await rideRes.json();
+            const freshRide = await enrichRideClientDetails({
+              ...fetchedRide,
+              clientFirstName: fetchedRide.clientFirstName || ride.clientFirstName,
+              clientName: fetchedRide.clientName || ride.clientName,
+            }, "Client");
+            if (freshRide.status === "cancelled") {
+              currentRideRef.current = ride;
+              handleRideCancellation(freshRide);
+              return;
+            } else if (freshRide.status === "trip_completed") {
+              await AsyncStorage.removeItem("a2b_current_ride");
+            } else {
+              setCurrentRide(freshRide);
+              return;
+            }
+          }
+        }
+      }
+
+      // If no local active ride or local ride was completed, query server for ongoing active ride
+      if (targetChauffeurId) {
+        const activeRes = await apiRequest("GET", `/api/rides/chauffeur-active/${targetChauffeurId}`);
+        if (activeRes.status === 200) {
+          const activeRide = await activeRes.json();
+          if (activeRide?.id && !["trip_completed", "cancelled"].includes(activeRide.status)) {
+            const freshRide = await enrichRideClientDetails(activeRide, "Client");
+            setCurrentRide(freshRide);
+            await AsyncStorage.setItem("a2b_current_ride", JSON.stringify(freshRide));
+          }
+        }
       }
     } catch {}
   }
@@ -1312,14 +1391,14 @@ export default function ChauffeurDashboard() {
         if (refreshed) {
           await loadDriverVehicles();
           await loadFleetOverview();
-          restoreActiveRide();
+          restoreActiveRide(refreshed.id);
           return;
         }
         // Refresh failed (may be offline) — keep showing cached profile instead of bouncing.
         if (cached?.id && !definitelyNoProfile) {
           setChauffeur(cached);
           setIsOnline(cached.isOnline || false);
-          restoreActiveRide();
+          restoreActiveRide(cached.id);
           return;
         }
         await AsyncStorage.removeItem("a2b_chauffeur");
@@ -1328,7 +1407,7 @@ export default function ChauffeurDashboard() {
       if (c?.id) {
         await loadDriverVehicles();
         await loadFleetOverview();
-        restoreActiveRide();
+        restoreActiveRide(c.id);
         return;
       }
       // Route to onboarding ONLY when the server definitively said 404 —
@@ -1876,6 +1955,29 @@ export default function ChauffeurDashboard() {
     }
   }
 
+  function handleDriverArrivedAtPickup() {
+    if (!currentRide) return;
+    if (myLocation && currentRide.pickupLat && currentRide.pickupLng) {
+      const pLat = parseFloat(currentRide.pickupLat);
+      const pLng = parseFloat(currentRide.pickupLng);
+      if (Number.isFinite(pLat) && Number.isFinite(pLng)) {
+        const distKm = haversineDistance(myLocation.lat, myLocation.lng, pLat, pLng);
+        if (distKm > 0.35) {
+          Alert.alert(
+            "Pickup Proximity Check",
+            `You appear to be ${Math.round(distKm * 1000)}m away from the pickup point. Confirm that you have arrived?`,
+            [
+              { text: "Not Yet", style: "cancel" },
+              { text: "Confirm Arrival", onPress: () => updateRideStatus("chauffeur_arrived") },
+            ],
+          );
+          return;
+        }
+      }
+    }
+    updateRideStatus("chauffeur_arrived");
+  }
+
   function confirmCurrentStop() {
     const activeRide = currentRideRef.current || currentRide;
     if (!activeRide || stopProgressLoading || stopConfirmationInFlightRef.current) return;
@@ -2177,8 +2279,18 @@ export default function ChauffeurDashboard() {
             </View>
           )}
           <View style={[styles.navModalFooter, { paddingBottom: insets.bottom + 16 }]}>
+            {currentRide?.status === "chauffeur_arrived" && (
+              <View style={[styles.waitingTimerBadge, waitingElapsedSec >= 300 && styles.waitingTimerBadgeCharged, { alignSelf: "center", marginBottom: 8 }]}>
+                <Ionicons name="time" size={14} color={waitingElapsedSec >= 300 ? "#F59E0B" : "#10B981"} />
+                <Text style={[styles.waitingTimerText, waitingElapsedSec >= 300 && styles.waitingTimerTextCharged]}>
+                  {waitingElapsedSec < 300
+                    ? `Free waiting: ${Math.floor((300 - waitingElapsedSec) / 60)}:${String((300 - waitingElapsedSec) % 60).padStart(2, "0")} remaining`
+                    : `Waiting fee: +R ${(Math.ceil((waitingElapsedSec - 300) / 60) * 1).toFixed(2)} (${Math.floor(waitingElapsedSec / 60)}m)`}
+                </Text>
+              </View>
+            )}
             {(currentRide?.status === "chauffeur_assigned" || currentRide?.status === "chauffeur_arriving") && (
-              <Pressable style={[styles.actionBtn, styles.completeBtnStyle]} onPress={() => updateRideStatus("chauffeur_arrived")}>
+              <Pressable style={[styles.actionBtn, styles.completeBtnStyle]} onPress={handleDriverArrivedAtPickup}>
                 <Text style={styles.actionBtnText}>I've Arrived</Text>
               </Pressable>
             )}
@@ -2479,6 +2591,16 @@ export default function ChauffeurDashboard() {
               </ScrollView>
             </View>
           )}
+          {currentRide.status === "chauffeur_arrived" && (
+            <View style={[styles.waitingTimerBadge, waitingElapsedSec >= 300 && styles.waitingTimerBadgeCharged, { marginBottom: 10 }]}>
+              <Ionicons name="time" size={14} color={waitingElapsedSec >= 300 ? "#F59E0B" : "#10B981"} />
+              <Text style={[styles.waitingTimerText, waitingElapsedSec >= 300 && styles.waitingTimerTextCharged]}>
+                {waitingElapsedSec < 300
+                  ? `Free waiting: ${Math.floor((300 - waitingElapsedSec) / 60)}:${String((300 - waitingElapsedSec) % 60).padStart(2, "0")} remaining`
+                  : `Waiting fee: +R ${(Math.ceil((waitingElapsedSec - 300) / 60) * 1).toFixed(2)} (${Math.floor(waitingElapsedSec / 60)}m)`}
+              </Text>
+            </View>
+          )}
           {getRideFare(currentRide) ? <Text style={styles.priceText}>R {getRideFare(currentRide).toFixed(0)}</Text> : null}
           <View style={styles.rideActions}>
             <Pressable style={styles.rideSecBtn} onPress={() => router.push({ pathname: "/chauffeur/chat", params: { rideId: currentRide.id, riderName: currentRide.clientFirstName || currentRide.clientName || "Client" } })}>
@@ -2495,6 +2617,16 @@ export default function ChauffeurDashboard() {
             </Pressable>
           </View>
           {(currentRide.status === "chauffeur_assigned" || currentRide.status === "chauffeur_arriving") && (
+            <View style={{ gap: 8 }}>
+              <Pressable style={[styles.actionBtn, styles.completeBtnStyle]} onPress={handleDriverArrivedAtPickup}>
+                <Text style={styles.actionBtnText}>I've Arrived</Text>
+              </Pressable>
+              <Pressable style={styles.actionBtn} onPress={startTripToDestination}>
+                <Text style={styles.actionBtnText}>Start Trip — Rider On Board</Text>
+              </Pressable>
+            </View>
+          )}
+          {currentRide.status === "chauffeur_arrived" && (
             <Pressable style={styles.actionBtn} onPress={startTripToDestination}>
               <Text style={styles.actionBtnText}>Start Trip — Rider On Board</Text>
             </Pressable>
@@ -3071,4 +3203,28 @@ const styles = StyleSheet.create({
   cardRouteOptionMeta: { fontSize: 11, fontFamily: "Inter_400Regular", color: Colors.textMuted },
   cardRouteOptionMetaSelected: { color: "rgba(255,255,255,0.82)" },
   cardRouteOptionPrice: { fontSize: 13, fontFamily: "Inter_700Bold", color: Colors.white, marginTop: 2 },
+  waitingTimerBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(16, 185, 129, 0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.35)",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    alignSelf: "flex-start",
+  },
+  waitingTimerBadgeCharged: {
+    backgroundColor: "rgba(245, 158, 11, 0.15)",
+    borderColor: "rgba(245, 158, 11, 0.4)",
+  },
+  waitingTimerText: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    color: "#10B981",
+  },
+  waitingTimerTextCharged: {
+    color: "#F59E0B",
+  },
 });

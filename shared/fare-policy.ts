@@ -24,12 +24,66 @@ export function getBillableDistanceKm(distanceKm: unknown, includedKm: unknown =
   return Math.max(0, distance - (Number.isFinite(included) ? Math.max(0, included) : 0));
 }
 
-export function getVehicleCategoryCommissionRate(vehicleType: unknown) {
+export const CATEGORY_ALIASES: Record<string, string> = {
+  a2b_lite: "a2b_lite",
+  "a2b-lite": "a2b_lite",
+  lite: "a2b_lite",
+  economy_lite: "a2b_lite",
+  budget: "budget",
+  budget_car: "budget",
+  economy_car: "budget",
+  compact: "budget",
+  economy: "budget",
+  standard: "budget",
+  sedan: "budget",
+  luxury: "luxury",
+  luxury_car: "luxury",
+  luxury_sedan: "luxury",
+  premium: "luxury",
+  business: "business",
+  business_class: "business",
+  vip: "business",
+  vip_car: "business",
+  luxury_vip: "business",
+  luxury_vip_car: "business",
+  business_vip: "business",
+  executive: "business",
+  executive_car: "business",
+  van: "van",
+  minivan: "van",
+  xl: "van",
+  people_carrier: "van",
+  luxury_van: "luxury_van",
+  vclass: "luxury_van",
+  v_class: "luxury_van",
+  "v-class": "luxury_van",
+};
+
+export const VEHICLE_CATEGORY_TITLES: Record<string, string> = {
+  a2b_lite: "A2B Lite",
+  budget: "Budget",
+  luxury: "Luxury",
+  business: "VIP",
+  van: "Van",
+  luxury_van: "V-Class",
+};
+
+export function normalizeVehicleType(vehicleType?: string | null): string {
   const normalized = String(vehicleType || "")
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
-  return normalized === "a2b_lite" || normalized === "lite"
+  return CATEGORY_ALIASES[normalized] || CATEGORY_ALIASES[String(vehicleType || "").trim().toLowerCase()] || "budget";
+}
+
+export function getVehicleCategoryTitle(vehicleType?: string | null): string {
+  const key = normalizeVehicleType(vehicleType);
+  return VEHICLE_CATEGORY_TITLES[key] || key.replace(/_/g, " ");
+}
+
+export function getVehicleCategoryCommissionRate(vehicleType: unknown) {
+  const normalized = normalizeVehicleType(vehicleType as any);
+  return normalized === "a2b_lite"
     ? A2B_LITE_COMMISSION_RATE
     : PLATFORM_COMMISSION_RATE;
 }
