@@ -488,13 +488,18 @@ function setupErrorHandler(app: express.Application) {
       ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS long_distance_date text;
       ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS long_distance_price_per_seat real;
       ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS long_distance_seats_available integer DEFAULT 0;
+      ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS active_device_id text;
+      ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS last_driver_login_at timestamp;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS active_driver_device_id text;
     `);
-    console.log("[MIGRATION] Long-distance columns ensured ✅");
+    console.log("[MIGRATION] Long-distance and driver device columns ensured ✅");
   } catch (err: any) {
-    console.error("[MIGRATION] Warning: could not apply long-distance migration:", err.message);
+    console.error("[MIGRATION] Warning: could not apply migration:", err.message);
   }
 
   try {
+    await pool.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS active_device_id text`);
+    await pool.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS last_driver_login_at timestamp`);
     await pool.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS active_vehicle_id varchar`);
     await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS vehicle_id varchar`);
     await pool.query(`ALTER TABLE documents ADD COLUMN IF NOT EXISTS vehicle_id varchar`);

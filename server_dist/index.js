@@ -3083,7 +3083,10 @@ async function registerRoutes(app2) {
   const httpServer = (0, import_node_http.createServer)(app2);
   try {
     await pool2.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo text");
+    await pool2.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS active_driver_device_id text");
     await pool2.query("ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS vehicle_year integer");
+    await pool2.query("ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS active_device_id text");
+    await pool2.query("ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS last_driver_login_at timestamp");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS dispatch_started_at timestamp");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS current_offered_chauffeur_id varchar REFERENCES chauffeurs(id) ON DELETE SET NULL");
     await pool2.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS current_offer_expires_at timestamp");
@@ -4069,26 +4072,32 @@ async function registerRoutes(app2) {
         console.warn(`[auth/login] password mismatch for "${user.username}"`);
         return res.status(401).json({ message: "Invalid credentials" });
       }
-      const incomingDeviceId = String(req.body.deviceId || req.headers["x-device-id"] || "").trim();
-      const isDriverLogin = req.body.appVariant === "driver" || req.headers["x-app-variant"] === "driver" || user.role === "chauffeur";
-      if (isDriverLogin) {
-        const chauffeur = await storage.getChauffeurByUserId(user.id);
-        if (chauffeur) {
-          const currentActiveDevice = chauffeur.activeDeviceId;
-          if (currentActiveDevice && incomingDeviceId && currentActiveDevice !== incomingDeviceId) {
-            console.warn(`[auth/login] driver "${user.username}" session conflict: active on ${currentActiveDevice}, attempt from ${incomingDeviceId}`);
-            return res.status(409).json({
-              message: "This driver account is already active on another device. Please log out from your previous device first, or contact an administrator to reset your device session.",
-              code: "DRIVER_SESSION_CONFLICT"
-            });
-          }
-          if (incomingDeviceId) {
-            await storage.updateChauffeur(chauffeur.id, {
-              activeDeviceId: incomingDeviceId,
-              lastDriverLoginAt: /* @__PURE__ */ new Date()
-            });
+      try {
+        const incomingDeviceId = String(req.body.deviceId || req.headers["x-device-id"] || "").trim();
+        const isDriverLogin = req.body.appVariant === "driver" || req.headers["x-app-variant"] === "driver" || user.role === "chauffeur";
+        if (isDriverLogin) {
+          const chauffeur = await storage.getChauffeurByUserId(user.id);
+          if (chauffeur) {
+            const currentActiveDevice = chauffeur.activeDeviceId;
+            if (currentActiveDevice && incomingDeviceId && currentActiveDevice !== incomingDeviceId) {
+              console.warn(`[auth/login] driver "${user.username}" session conflict: active on ${currentActiveDevice}, attempt from ${incomingDeviceId}`);
+              return res.status(409).json({
+                message: "This driver account is already active on another device. Please log out from your previous device first, or contact an administrator to reset your device session.",
+                code: "DRIVER_SESSION_CONFLICT"
+              });
+            }
+            if (incomingDeviceId) {
+              await storage.updateChauffeur(chauffeur.id, {
+                activeDeviceId: incomingDeviceId,
+                lastDriverLoginAt: /* @__PURE__ */ new Date()
+              });
+            }
           }
         }
+      } catch (driverLockErr) {
+        console.warn("[auth/login] driver lock non-fatal check:", driverLockErr?.message || driverLockErr);
+        pool2.query("ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS active_device_id text; ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS last_driver_login_at timestamp;").catch(() => {
+        });
       }
       const token = signAccessToken({ sub: user.id, role: user.role, email: user.username, name: user.name });
       setAuthCookie(res, token);
@@ -12603,12 +12612,17 @@ function setupErrorHandler(app2) {
       ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS long_distance_date text;
       ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS long_distance_price_per_seat real;
       ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS long_distance_seats_available integer DEFAULT 0;
+      ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS active_device_id text;
+      ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS last_driver_login_at timestamp;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS active_driver_device_id text;
     `);
-    console.log("[MIGRATION] Long-distance columns ensured \u2705");
+    console.log("[MIGRATION] Long-distance and driver device columns ensured \u2705");
   } catch (err) {
-    console.error("[MIGRATION] Warning: could not apply long-distance migration:", err.message);
+    console.error("[MIGRATION] Warning: could not apply migration:", err.message);
   }
   try {
+    await pool2.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS active_device_id text`);
+    await pool2.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS last_driver_login_at timestamp`);
     await pool2.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS active_vehicle_id varchar`);
     await pool2.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS vehicle_id varchar`);
     await pool2.query(`ALTER TABLE documents ADD COLUMN IF NOT EXISTS vehicle_id varchar`);

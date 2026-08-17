@@ -579,7 +579,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   try {
     await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo text");
+    await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS active_driver_device_id text");
     await pool.query("ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS vehicle_year integer");
+    await pool.query("ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS active_device_id text");
+    await pool.query("ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS last_driver_login_at timestamp");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS dispatch_started_at timestamp");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS current_offered_chauffeur_id varchar REFERENCES chauffeurs(id) ON DELETE SET NULL");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS current_offer_expires_at timestamp");
@@ -1747,26 +1750,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // ─── Single-Device Lock for Drivers ────────────────────────────────────
-      const incomingDeviceId = String(req.body.deviceId || req.headers["x-device-id"] || "").trim();
-      const isDriverLogin = req.body.appVariant === "driver" || req.headers["x-app-variant"] === "driver" || user.role === "chauffeur";
-      if (isDriverLogin) {
-        const chauffeur = await storage.getChauffeurByUserId(user.id);
-        if (chauffeur) {
-          const currentActiveDevice = chauffeur.activeDeviceId;
-          if (currentActiveDevice && incomingDeviceId && currentActiveDevice !== incomingDeviceId) {
-            console.warn(`[auth/login] driver "${user.username}" session conflict: active on ${currentActiveDevice}, attempt from ${incomingDeviceId}`);
-            return res.status(409).json({
-              message: "This driver account is already active on another device. Please log out from your previous device first, or contact an administrator to reset your device session.",
-              code: "DRIVER_SESSION_CONFLICT",
-            });
-          }
-          if (incomingDeviceId) {
-            await storage.updateChauffeur(chauffeur.id, {
-              activeDeviceId: incomingDeviceId,
-              lastDriverLoginAt: new Date(),
-            });
+      try {
+        const incomingDeviceId = String(req.body.deviceId || req.headers["x-device-id"] || "").trim();
+        const isDriverLogin = req.body.appVariant === "driver" || req.headers["x-app-variant"] === "driver" || user.role === "chauffeur";
+        if (isDriverLogin) {
+          const chauffeur = await storage.getChauffeurByUserId(user.id);
+          if (chauffeur) {
+            const currentActiveDevice = chauffeur.activeDeviceId;
+            if (currentActiveDevice && incomingDeviceId && currentActiveDevice !== incomingDeviceId) {
+              console.warn(`[auth/login] driver "${user.username}" session conflict: active on ${currentActiveDevice}, attempt from ${incomingDeviceId}`);
+              return res.status(409).json({
+                message: "This driver account is already active on another device. Please log out from your previous device first, or contact an administrator to reset your device session.",
+                code: "DRIVER_SESSION_CONFLICT",
+              });
+            }
+            if (incomingDeviceId) {
+              await storage.updateChauffeur(chauffeur.id, {
+                activeDeviceId: incomingDeviceId,
+                lastDriverLoginAt: new Date(),
+              });
+            }
           }
         }
+      } catch (driverLockErr: any) {
+        console.warn("[auth/login] driver lock non-fatal check:", driverLockErr?.message || driverLockErr);
+        // If column missing on live db, try to ensure column asynchronously without blocking login
+        pool.query("ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS active_device_id text; ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS last_driver_login_at timestamp;").catch(() => {});
       }
 
       const token = signAccessToken({ sub: user.id, role: user.role as UserRole, email: user.username, name: user.name });
