@@ -14,6 +14,7 @@ import {
   ScrollView,
   Image,
   KeyboardAvoidingView,
+  AppState,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
@@ -1712,6 +1713,7 @@ export default function ClientHomeScreen() {
     if (ride.status === "cancelled") {
       const wasCancelledHere = clientCancellationRideIdRef.current === ride.id;
       if (wasCancelledHere) clientCancellationRideIdRef.current = null;
+      AsyncStorage.removeItem("a2b_client_active_ride").catch(() => {});
       setCurrentRide(null);
       setRideStatus("idle");
       setRoutePolyline(null);
@@ -1735,6 +1737,9 @@ export default function ClientHomeScreen() {
     const rideVehicle = getRideVehicle(ride.vehicleType);
     if (rideVehicle) setSelectedVehicle(rideVehicle);
     setCurrentRide(ride);
+    if (!["trip_completed", "cancelled"].includes(ride.status)) {
+      AsyncStorage.setItem("a2b_client_active_ride", JSON.stringify(ride)).catch(() => {});
+    }
     if (ride.status === "chauffeur_assigned") {
       setRideStatus("assigned");
       setLiveEtaMin(null);
@@ -1770,11 +1775,78 @@ export default function ClientHomeScreen() {
       }
     } else if (ride.status === "trip_completed") {
       setRideStatus("completed");
+      AsyncStorage.removeItem("a2b_client_active_ride").catch(() => {});
       setTimeout(() => setShowRating(true), 1000);
       if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       queryClient.invalidateQueries({ queryKey: ["/api/rides/client"] });
     }
   }, []);
+
+  const restoreClientActiveRide = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      // 1. Try local storage first for instant restore
+      const localRideJson = await AsyncStorage.getItem("a2b_client_active_ride");
+      if (localRideJson) {
+        try {
+          const localRide = JSON.parse(localRideJson);
+          if (localRide?.id && !["trip_completed", "cancelled"].includes(localRide.status)) {
+            setCurrentRide(localRide);
+            currentRideRef.current = localRide;
+            applyRideUpdate(localRide);
+          }
+        } catch {}
+      }
+
+      // 2. Query server for active ride
+      const activeRes = await apiRequest("GET", `/api/rides/client-active/${user.id}`);
+      if (activeRes.status === 200) {
+        const activeRide = await activeRes.json();
+        if (activeRide?.id && !["trip_completed", "cancelled"].includes(activeRide.status)) {
+          setCurrentRide(activeRide);
+          currentRideRef.current = activeRide;
+          await AsyncStorage.setItem("a2b_client_active_ride", JSON.stringify(activeRide));
+          applyRideUpdate(activeRide);
+          if (activeRide.pickupLat && activeRide.pickupLng) {
+            setPickupLocation({
+              lat: Number(activeRide.pickupLat),
+              lng: Number(activeRide.pickupLng),
+              address: activeRide.pickupAddress || "Pickup",
+            });
+          }
+          if (activeRide.dropoffLat && activeRide.dropoffLng) {
+            setDropoffLocation({
+              lat: Number(activeRide.dropoffLat),
+              lng: Number(activeRide.dropoffLng),
+              address: activeRide.dropoffAddress || "Destination",
+            });
+          }
+          if (activeRide.status === "requested" || activeRide.status === "searching") {
+            setRideStatus("requested");
+          }
+          return;
+        }
+      } else if (activeRes.status === 204) {
+        await AsyncStorage.removeItem("a2b_client_active_ride");
+      }
+    } catch (e: any) {
+      console.log("[client-restore] active ride check:", e?.message || e);
+    }
+  }, [user?.id, applyRideUpdate]);
+
+  useEffect(() => {
+    restoreClientActiveRide();
+  }, [user?.id, restoreClientActiveRide]);
+
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        restoreClientActiveRide();
+      }
+    });
+    return () => subscription.remove();
+  }, [restoreClientActiveRide]);
 
   useEffect(() => {
     // Use ref so the callback always sees the latest ride id without re-registering

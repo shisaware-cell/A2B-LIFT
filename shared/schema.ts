@@ -64,6 +64,8 @@ export const chauffeurs = pgTable("chauffeurs", {
   locationUpdatedAt: timestamp("location_updated_at"),
   pushToken: text("push_token"),
   activeVehicleId: varchar("active_vehicle_id").references(() => vehicles.id),
+  activeDeviceId: text("active_device_id"),
+  lastDriverLoginAt: timestamp("last_driver_login_at"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

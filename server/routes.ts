@@ -218,6 +218,51 @@ async function creditReferralReward(options: {
   });
 }
 
+export async function creditRiderTripCashback(options: {
+  riderUserId: string;
+  rideId: string;
+  grossFare: number;
+}) {
+  if (!options.riderUserId || !options.rideId || !options.grossFare) return;
+  const cashback = Math.round(Number(options.grossFare) * REFERRAL_REWARD_RATE * 100) / 100;
+  if (cashback <= 0) return;
+
+  const alreadyCredited = await storage.getRewardTransactionByRideAndType(
+    options.riderUserId,
+    options.rideId,
+    "rider_trip_cashback",
+  );
+  if (alreadyCredited) return;
+
+  const rider = await storage.getUser(options.riderUserId);
+  if (!rider) return;
+
+  const balanceBefore = Number(rider.rewardsBalance || 0);
+  const balanceAfter = Math.round((balanceBefore + cashback) * 100) / 100;
+  const reference = `cashback_${options.rideId}_${rider.id.slice(0, 6)}`;
+
+  await storage.updateUser(rider.id, { rewardsBalance: balanceAfter });
+  await storage.createRewardTransaction({
+    userId: rider.id,
+    sourceUserId: rider.id,
+    rideId: options.rideId,
+    type: "rider_trip_cashback",
+    amount: cashback,
+    balanceBefore,
+    balanceAfter,
+    description: "2.5% cashback on your completed trip",
+    status: "completed",
+    reference,
+  });
+
+  await storage.createNotification({
+    userId: rider.id,
+    title: "Trip Cashback (2.5%)",
+    body: `You earned R ${cashback.toFixed(2)} cashback (2.5%) from your completed trip! It has been added to your A2B wallet.`,
+    type: "reward",
+  });
+}
+
 function hasFreshChauffeurLocation(chauffeur: { lat?: number | null; lng?: number | null; locationUpdatedAt?: Date | string | null }) {
   if (chauffeur.lat == null || chauffeur.lng == null) return false;
   if (!chauffeur.locationUpdatedAt) return true;
@@ -1700,6 +1745,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.warn(`[auth/login] password mismatch for "${user.username}"`);
         return res.status(401).json({ message: "Invalid credentials" });
       }
+
+      // ─── Single-Device Lock for Drivers ────────────────────────────────────
+      const incomingDeviceId = String(req.body.deviceId || req.headers["x-device-id"] || "").trim();
+      const isDriverLogin = req.body.appVariant === "driver" || req.headers["x-app-variant"] === "driver" || user.role === "chauffeur";
+      if (isDriverLogin) {
+        const chauffeur = await storage.getChauffeurByUserId(user.id);
+        if (chauffeur) {
+          const currentActiveDevice = chauffeur.activeDeviceId;
+          if (currentActiveDevice && incomingDeviceId && currentActiveDevice !== incomingDeviceId) {
+            console.warn(`[auth/login] driver "${user.username}" session conflict: active on ${currentActiveDevice}, attempt from ${incomingDeviceId}`);
+            return res.status(409).json({
+              message: "This driver account is already active on another device. Please log out from your previous device first, or contact an administrator to reset your device session.",
+              code: "DRIVER_SESSION_CONFLICT",
+            });
+          }
+          if (incomingDeviceId) {
+            await storage.updateChauffeur(chauffeur.id, {
+              activeDeviceId: incomingDeviceId,
+              lastDriverLoginAt: new Date(),
+            });
+          }
+        }
+      }
+
       const token = signAccessToken({ sub: user.id, role: user.role as UserRole, email: user.username, name: user.name });
       setAuthCookie(res, token);
       // Never let a hydration hiccup (referral code write, rewards/lift-club lookups)
@@ -1717,6 +1786,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("[auth/login] error:", error?.message || error);
       return res.status(500).json({ message: error.message || "Login failed" });
+    }
+  });
+
+  app.post("/api/auth/logout", async (req: Request, res: Response) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        // Attempt to clear driver device lock if token provided
+        try {
+          const token = authHeader.slice(7);
+          const payload = require("./auth").verifyAccessToken(token);
+          if (payload?.sub) {
+            const chauffeur = await storage.getChauffeurByUserId(payload.sub);
+            if (chauffeur) {
+              await storage.updateChauffeur(chauffeur.id, {
+                activeDeviceId: null,
+                isOnline: false,
+              });
+            }
+          }
+        } catch {}
+      }
+      res.clearCookie("a2b_access_token");
+      return res.json({ success: true, message: "Logged out successfully" });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/admin/drivers/:chauffeurId/reset-device-session", requireAuth, requireRole(["admin"]), async (req: Request, res: Response) => {
+    try {
+      const chauffeur = await storage.getChauffeur(req.params.chauffeurId);
+      if (!chauffeur) return res.status(404).json({ message: "Driver not found" });
+      await storage.updateChauffeur(chauffeur.id, {
+        activeDeviceId: null,
+        isOnline: false,
+      });
+      return res.json({ success: true, message: "Driver device session has been reset. The driver can now log in on a new device." });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
     }
   });
 
@@ -8904,6 +9013,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
               notificationBody: "You earned R {amount} — 2.5% from a trip completed by a rider you invited.",
               referencePrefix: "rdr_ref",
             });
+            // ── Universal 2.5% Rider Trip Cashback for every rider ──
+            await creditRiderTripCashback({
+              riderUserId: ride.clientId,
+              rideId: ride.id,
+              grossFare: Number(ride.price || 0),
+            });
           }
         } catch (referralCommErr: any) {
           console.error("referral commission failed (non-fatal):", referralCommErr.message);
@@ -9355,6 +9470,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
         clientFirstName,
         clientName: client?.name || "Rider",
         clientPhone: client?.phone || null,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/rides/driver-active-by-user/:userId", async (req: Request, res: Response) => {
+    try {
+      const chauffeur = await storage.getChauffeurByUserId(req.params.userId);
+      if (!chauffeur) return res.status(204).end();
+      const allRides = await storage.getAllRides();
+      const activeRide = allRides.find((r) =>
+        r.chauffeurId === chauffeur.id &&
+        !["trip_completed", "cancelled"].includes(r.status as string)
+      );
+      if (!activeRide) return res.status(204).end();
+      const client = await storage.getUser(activeRide.clientId).catch(() => null);
+      const clientFirstName = getUserFirstName(client, "Rider");
+      return res.json({
+        ...activeRide,
+        clientFirstName,
+        clientName: client?.name || "Rider",
+        clientPhone: client?.phone || null,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/rides/client-active/:clientId", async (req: Request, res: Response) => {
+    try {
+      const allRides = await storage.getAllRides();
+      const activeRide = allRides.find((r) =>
+        r.clientId === req.params.clientId &&
+        !["trip_completed", "cancelled"].includes(r.status as string)
+      );
+      if (!activeRide) return res.status(204).end();
+      let chauffeurDetails = null;
+      if (activeRide.chauffeurId) {
+        const ch = await storage.getChauffeur(activeRide.chauffeurId);
+        const chUser = ch?.userId ? await storage.getUser(ch.userId) : null;
+        chauffeurDetails = {
+          id: ch?.id,
+          driverName: chUser?.name || "Driver",
+          driverPhone: ch?.phone || chUser?.phone || null,
+          profilePhoto: ch?.profilePhoto || chUser?.profilePhoto || null,
+          carMake: ch?.carMake || null,
+          vehicleModel: ch?.vehicleModel || null,
+          plateNumber: ch?.plateNumber || null,
+          carColor: ch?.carColor || null,
+          driverRating: chUser?.rating ?? 5.0,
+          lat: ch?.lat,
+          lng: ch?.lng,
+        };
+      }
+      return res.json({
+        ...activeRide,
+        chauffeurDetails,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/rides/active-by-user/:userId", async (req: Request, res: Response) => {
+    try {
+      const userId = req.params.userId;
+      const allRides = await storage.getAllRides();
+      let activeRide = allRides.find((r) =>
+        r.clientId === userId &&
+        !["trip_completed", "cancelled"].includes(r.status as string)
+      );
+      if (!activeRide) {
+        const chauffeur = await storage.getChauffeurByUserId(userId);
+        if (chauffeur) {
+          activeRide = allRides.find((r) =>
+            r.chauffeurId === chauffeur.id &&
+            !["trip_completed", "cancelled"].includes(r.status as string)
+          );
+        }
+      }
+      if (!activeRide) return res.status(204).end();
+      const client = await storage.getUser(activeRide.clientId).catch(() => null);
+      let chauffeurDetails = null;
+      if (activeRide.chauffeurId) {
+        const ch = await storage.getChauffeur(activeRide.chauffeurId);
+        const chUser = ch?.userId ? await storage.getUser(ch.userId) : null;
+        chauffeurDetails = {
+          id: ch?.id,
+          driverName: chUser?.name || "Driver",
+          driverPhone: ch?.phone || chUser?.phone || null,
+          profilePhoto: ch?.profilePhoto || chUser?.profilePhoto || null,
+          carMake: ch?.carMake || null,
+          vehicleModel: ch?.vehicleModel || null,
+          plateNumber: ch?.plateNumber || null,
+          carColor: ch?.carColor || null,
+          driverRating: chUser?.rating ?? 5.0,
+          lat: ch?.lat,
+          lng: ch?.lng,
+        };
+      }
+      return res.json({
+        ...activeRide,
+        clientFirstName: getUserFirstName(client, "Rider"),
+        clientName: client?.name || "Rider",
+        clientPhone: client?.phone || null,
+        chauffeurDetails,
       });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });

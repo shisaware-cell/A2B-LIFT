@@ -213,10 +213,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { user: payload as AuthUser, accessToken: null };
   }
 
+  async function getOrCreateDeviceId(): Promise<string> {
+    try {
+      let deviceId = await AsyncStorage.getItem("a2b_device_id");
+      if (!deviceId) {
+        if (Platform.OS === "android" && typeof (Application as any).getAndroidId === "function") {
+          try {
+            deviceId = (Application as any).getAndroidId();
+          } catch {}
+        }
+        if (!deviceId) {
+          deviceId = "dev_" + Math.random().toString(36).substring(2, 15) + "_" + Date.now();
+        }
+        await AsyncStorage.setItem("a2b_device_id", deviceId);
+      }
+      return deviceId;
+    } catch {
+      return "dev_fallback_" + Date.now();
+    }
+  }
+
   async function login(username: string, password: string) {
+    const deviceId = await getOrCreateDeviceId();
+    const appVariant = process.env.EXPO_PUBLIC_APP_VARIANT || (Platform.OS === "web" ? "web" : "driver");
     const res = await apiRequest("POST", "/api/auth/login", {
       username,
       password,
+      deviceId,
+      appVariant,
     });
     const payload = (await res.json()) as LoginResponse;
     if (!res.ok) {
@@ -254,9 +278,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
+    try {
+      await apiRequest("POST", "/api/auth/logout");
+    } catch {}
     await clearLocalSession();
-    // Best-effort server logout (clears cookie on web)
-    apiRequest("POST", "/api/auth/logout").catch(() => {});
   }
 
   async function setPendingReferralCode(code: string | null) {

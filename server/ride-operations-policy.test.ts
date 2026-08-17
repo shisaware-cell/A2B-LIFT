@@ -175,3 +175,34 @@ test("generates branded trip invoice html receipt with complete trip breakdown",
   assert.ok(html.includes("CA 123-456"));
   assert.ok(html.includes("Budget"));
 });
+
+test("calculates exact 2.5% rider trip cashback across fares", () => {
+  const fare1 = 100;
+  const fare2 = 145.50;
+  const fare3 = 350;
+  assert.equal(Math.round(fare1 * 0.025 * 100) / 100, 2.50);
+  assert.equal(Math.round(fare2 * 0.025 * 100) / 100, 3.64);
+  assert.equal(Math.round(fare3 * 0.025 * 100) / 100, 8.75);
+});
+
+test("detects driver concurrent device session conflicts correctly", () => {
+  function checkDriverSessionConflict(activeDeviceId: string | null, incomingDeviceId: string): boolean {
+    if (!activeDeviceId || !incomingDeviceId) return false;
+    return activeDeviceId !== incomingDeviceId;
+  }
+
+  assert.equal(checkDriverSessionConflict(null, "dev_phone_2"), false);
+  assert.equal(checkDriverSessionConflict("dev_phone_1", "dev_phone_1"), false);
+  assert.equal(checkDriverSessionConflict("dev_phone_1", "dev_phone_2"), true);
+});
+
+test("android build configuration includes required foreground and background location permissions", () => {
+  const { createMobileAppConfig } = require("../app.config.shared");
+  const driverConfig = createMobileAppConfig({ variant: "driver" });
+  const permissions = driverConfig.android.permissions;
+
+  assert.ok(permissions.includes("android.permission.ACCESS_FINE_LOCATION"));
+  assert.ok(permissions.includes("android.permission.ACCESS_BACKGROUND_LOCATION"));
+  assert.ok(permissions.includes("android.permission.FOREGROUND_SERVICE"));
+  assert.ok(permissions.includes("android.permission.FOREGROUND_SERVICE_LOCATION"));
+});

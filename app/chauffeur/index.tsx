@@ -951,11 +951,6 @@ export default function ChauffeurDashboard() {
         if (isOnlineRef.current && chauffeurRef.current?.id) {
           startLocationUpdates();
         }
-        return;
-      }
-      stopForegroundLocationUpdates();
-      if (isOnlineRef.current && chauffeurRef.current?.id) {
-        void startBackgroundLocationTask(chauffeurRef.current.id);
       }
     });
     return () => subscription.remove();
@@ -1355,6 +1350,18 @@ export default function ChauffeurDashboard() {
             const freshRide = await enrichRideClientDetails(activeRide, "Client");
             setCurrentRide(freshRide);
             await AsyncStorage.setItem("a2b_current_ride", JSON.stringify(freshRide));
+            return;
+          }
+        }
+      } else if (user?.id) {
+        const activeRes = await apiRequest("GET", `/api/rides/driver-active-by-user/${user.id}`);
+        if (activeRes.status === 200) {
+          const activeRide = await activeRes.json();
+          if (activeRide?.id && !["trip_completed", "cancelled"].includes(activeRide.status)) {
+            const freshRide = await enrichRideClientDetails(activeRide, "Client");
+            setCurrentRide(freshRide);
+            await AsyncStorage.setItem("a2b_current_ride", JSON.stringify(freshRide));
+            return;
           }
         }
       }

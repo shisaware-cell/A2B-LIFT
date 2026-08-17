@@ -5,6 +5,9 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -25,6 +28,43 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+// server/auth.ts
+var auth_exports = {};
+__export(auth_exports, {
+  signAccessToken: () => signAccessToken,
+  verifyAccessToken: () => verifyAccessToken
+});
+function getJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error("JWT_SECRET is not set");
+  }
+  return secret;
+}
+function signAccessToken(claims) {
+  return import_jsonwebtoken.default.sign(claims, getJwtSecret(), {
+    algorithm: "HS256",
+    expiresIn: "7d",
+    issuer: JWT_ISSUER
+  });
+}
+function verifyAccessToken(token) {
+  const decoded = import_jsonwebtoken.default.verify(token, getJwtSecret(), {
+    algorithms: ["HS256"],
+    issuer: JWT_ISSUER
+  });
+  return decoded;
+}
+var import_jsonwebtoken, JWT_ISSUER;
+var init_auth = __esm({
+  "server/auth.ts"() {
+    "use strict";
+    import_jsonwebtoken = __toESM(require("jsonwebtoken"));
+    JWT_ISSUER = "a2b-lift";
+  }
+});
 
 // server/index.ts
 var import_config = require("dotenv/config");
@@ -131,6 +171,8 @@ var chauffeurs = (0, import_pg_core.pgTable)("chauffeurs", {
   locationUpdatedAt: (0, import_pg_core.timestamp)("location_updated_at"),
   pushToken: (0, import_pg_core.text)("push_token"),
   activeVehicleId: (0, import_pg_core.varchar)("active_vehicle_id").references(() => vehicles.id),
+  activeDeviceId: (0, import_pg_core.text)("active_device_id"),
+  lastDriverLoginAt: (0, import_pg_core.timestamp)("last_driver_login_at"),
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
 });
 var rides = (0, import_pg_core.pgTable)("rides", {
@@ -1953,32 +1995,8 @@ function validateEmailAddress(value) {
   return { valid: true, normalized };
 }
 
-// server/auth.ts
-var import_jsonwebtoken = __toESM(require("jsonwebtoken"));
-var JWT_ISSUER = "a2b-lift";
-function getJwtSecret() {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error("JWT_SECRET is not set");
-  }
-  return secret;
-}
-function signAccessToken(claims) {
-  return import_jsonwebtoken.default.sign(claims, getJwtSecret(), {
-    algorithm: "HS256",
-    expiresIn: "7d",
-    issuer: JWT_ISSUER
-  });
-}
-function verifyAccessToken(token) {
-  const decoded = import_jsonwebtoken.default.verify(token, getJwtSecret(), {
-    algorithms: ["HS256"],
-    issuer: JWT_ISSUER
-  });
-  return decoded;
-}
-
 // server/auth-middleware.ts
+init_auth();
 function extractBearer(req) {
   const header = req.header("authorization") || req.header("Authorization");
   if (!header) return null;
@@ -2015,6 +2033,9 @@ function requireRole(roles) {
     return next();
   };
 }
+
+// server/routes.ts
+init_auth();
 
 // server/external-api-service.ts
 var ExternalApiService = class {
@@ -2778,6 +2799,41 @@ async function creditReferralReward(options) {
     userId: referrer.id,
     title: "Reward Earnings",
     body: `${options.notificationBody.replace("{amount}", reward.toFixed(2))} It is in your reward balance. Activate Lift Club membership to spend or withdraw rewards.`,
+    type: "reward"
+  });
+}
+async function creditRiderTripCashback(options) {
+  if (!options.riderUserId || !options.rideId || !options.grossFare) return;
+  const cashback = Math.round(Number(options.grossFare) * REFERRAL_REWARD_RATE * 100) / 100;
+  if (cashback <= 0) return;
+  const alreadyCredited = await storage.getRewardTransactionByRideAndType(
+    options.riderUserId,
+    options.rideId,
+    "rider_trip_cashback"
+  );
+  if (alreadyCredited) return;
+  const rider = await storage.getUser(options.riderUserId);
+  if (!rider) return;
+  const balanceBefore = Number(rider.rewardsBalance || 0);
+  const balanceAfter = Math.round((balanceBefore + cashback) * 100) / 100;
+  const reference = `cashback_${options.rideId}_${rider.id.slice(0, 6)}`;
+  await storage.updateUser(rider.id, { rewardsBalance: balanceAfter });
+  await storage.createRewardTransaction({
+    userId: rider.id,
+    sourceUserId: rider.id,
+    rideId: options.rideId,
+    type: "rider_trip_cashback",
+    amount: cashback,
+    balanceBefore,
+    balanceAfter,
+    description: "2.5% cashback on your completed trip",
+    status: "completed",
+    reference
+  });
+  await storage.createNotification({
+    userId: rider.id,
+    title: "Trip Cashback (2.5%)",
+    body: `You earned R ${cashback.toFixed(2)} cashback (2.5%) from your completed trip! It has been added to your A2B wallet.`,
     type: "reward"
   });
 }
@@ -4013,6 +4069,27 @@ async function registerRoutes(app2) {
         console.warn(`[auth/login] password mismatch for "${user.username}"`);
         return res.status(401).json({ message: "Invalid credentials" });
       }
+      const incomingDeviceId = String(req.body.deviceId || req.headers["x-device-id"] || "").trim();
+      const isDriverLogin = req.body.appVariant === "driver" || req.headers["x-app-variant"] === "driver" || user.role === "chauffeur";
+      if (isDriverLogin) {
+        const chauffeur = await storage.getChauffeurByUserId(user.id);
+        if (chauffeur) {
+          const currentActiveDevice = chauffeur.activeDeviceId;
+          if (currentActiveDevice && incomingDeviceId && currentActiveDevice !== incomingDeviceId) {
+            console.warn(`[auth/login] driver "${user.username}" session conflict: active on ${currentActiveDevice}, attempt from ${incomingDeviceId}`);
+            return res.status(409).json({
+              message: "This driver account is already active on another device. Please log out from your previous device first, or contact an administrator to reset your device session.",
+              code: "DRIVER_SESSION_CONFLICT"
+            });
+          }
+          if (incomingDeviceId) {
+            await storage.updateChauffeur(chauffeur.id, {
+              activeDeviceId: incomingDeviceId,
+              lastDriverLoginAt: /* @__PURE__ */ new Date()
+            });
+          }
+        }
+      }
       const token = signAccessToken({ sub: user.id, role: user.role, email: user.username, name: user.name });
       setAuthCookie(res, token);
       let safeUser;
@@ -4027,6 +4104,44 @@ async function registerRoutes(app2) {
     } catch (error) {
       console.error("[auth/login] error:", error?.message || error);
       return res.status(500).json({ message: error.message || "Login failed" });
+    }
+  });
+  app2.post("/api/auth/logout", async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        try {
+          const token = authHeader.slice(7);
+          const payload = (init_auth(), __toCommonJS(auth_exports)).verifyAccessToken(token);
+          if (payload?.sub) {
+            const chauffeur = await storage.getChauffeurByUserId(payload.sub);
+            if (chauffeur) {
+              await storage.updateChauffeur(chauffeur.id, {
+                activeDeviceId: null,
+                isOnline: false
+              });
+            }
+          }
+        } catch {
+        }
+      }
+      res.clearCookie("a2b_access_token");
+      return res.json({ success: true, message: "Logged out successfully" });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.post("/api/admin/drivers/:chauffeurId/reset-device-session", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const chauffeur = await storage.getChauffeur(req.params.chauffeurId);
+      if (!chauffeur) return res.status(404).json({ message: "Driver not found" });
+      await storage.updateChauffeur(chauffeur.id, {
+        activeDeviceId: null,
+        isOnline: false
+      });
+      return res.json({ success: true, message: "Driver device session has been reset. The driver can now log in on a new device." });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
     }
   });
   app2.post("/api/auth/forgot-password", async (req, res) => {
@@ -10108,6 +10223,11 @@ If you did not request this, you can ignore this email.`,
               notificationBody: "You earned R {amount} \u2014 2.5% from a trip completed by a rider you invited.",
               referencePrefix: "rdr_ref"
             });
+            await creditRiderTripCashback({
+              riderUserId: ride.clientId,
+              rideId: ride.id,
+              grossFare: Number(ride.price || 0)
+            });
           }
         } catch (referralCommErr) {
           console.error("referral commission failed (non-fatal):", referralCommErr.message);
@@ -10500,6 +10620,106 @@ If you did not request this, you can ignore this email.`,
         clientFirstName,
         clientName: client?.name || "Rider",
         clientPhone: client?.phone || null
+      });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.get("/api/rides/driver-active-by-user/:userId", async (req, res) => {
+    try {
+      const chauffeur = await storage.getChauffeurByUserId(req.params.userId);
+      if (!chauffeur) return res.status(204).end();
+      const allRides = await storage.getAllRides();
+      const activeRide = allRides.find(
+        (r) => r.chauffeurId === chauffeur.id && !["trip_completed", "cancelled"].includes(r.status)
+      );
+      if (!activeRide) return res.status(204).end();
+      const client = await storage.getUser(activeRide.clientId).catch(() => null);
+      const clientFirstName = getUserFirstName(client, "Rider");
+      return res.json({
+        ...activeRide,
+        clientFirstName,
+        clientName: client?.name || "Rider",
+        clientPhone: client?.phone || null
+      });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.get("/api/rides/client-active/:clientId", async (req, res) => {
+    try {
+      const allRides = await storage.getAllRides();
+      const activeRide = allRides.find(
+        (r) => r.clientId === req.params.clientId && !["trip_completed", "cancelled"].includes(r.status)
+      );
+      if (!activeRide) return res.status(204).end();
+      let chauffeurDetails = null;
+      if (activeRide.chauffeurId) {
+        const ch = await storage.getChauffeur(activeRide.chauffeurId);
+        const chUser = ch?.userId ? await storage.getUser(ch.userId) : null;
+        chauffeurDetails = {
+          id: ch?.id,
+          driverName: chUser?.name || "Driver",
+          driverPhone: ch?.phone || chUser?.phone || null,
+          profilePhoto: ch?.profilePhoto || chUser?.profilePhoto || null,
+          carMake: ch?.carMake || null,
+          vehicleModel: ch?.vehicleModel || null,
+          plateNumber: ch?.plateNumber || null,
+          carColor: ch?.carColor || null,
+          driverRating: chUser?.rating ?? 5,
+          lat: ch?.lat,
+          lng: ch?.lng
+        };
+      }
+      return res.json({
+        ...activeRide,
+        chauffeurDetails
+      });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.get("/api/rides/active-by-user/:userId", async (req, res) => {
+    try {
+      const userId = req.params.userId;
+      const allRides = await storage.getAllRides();
+      let activeRide = allRides.find(
+        (r) => r.clientId === userId && !["trip_completed", "cancelled"].includes(r.status)
+      );
+      if (!activeRide) {
+        const chauffeur = await storage.getChauffeurByUserId(userId);
+        if (chauffeur) {
+          activeRide = allRides.find(
+            (r) => r.chauffeurId === chauffeur.id && !["trip_completed", "cancelled"].includes(r.status)
+          );
+        }
+      }
+      if (!activeRide) return res.status(204).end();
+      const client = await storage.getUser(activeRide.clientId).catch(() => null);
+      let chauffeurDetails = null;
+      if (activeRide.chauffeurId) {
+        const ch = await storage.getChauffeur(activeRide.chauffeurId);
+        const chUser = ch?.userId ? await storage.getUser(ch.userId) : null;
+        chauffeurDetails = {
+          id: ch?.id,
+          driverName: chUser?.name || "Driver",
+          driverPhone: ch?.phone || chUser?.phone || null,
+          profilePhoto: ch?.profilePhoto || chUser?.profilePhoto || null,
+          carMake: ch?.carMake || null,
+          vehicleModel: ch?.vehicleModel || null,
+          plateNumber: ch?.plateNumber || null,
+          carColor: ch?.carColor || null,
+          driverRating: chUser?.rating ?? 5,
+          lat: ch?.lat,
+          lng: ch?.lng
+        };
+      }
+      return res.json({
+        ...activeRide,
+        clientFirstName: getUserFirstName(client, "Rider"),
+        clientName: client?.name || "Rider",
+        clientPhone: client?.phone || null,
+        chauffeurDetails
       });
     } catch (error) {
       return res.status(500).json({ message: error.message });
