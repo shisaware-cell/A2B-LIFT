@@ -1,5 +1,7 @@
+import { validateEmailAddress } from "../shared/email-validation";
+
 export function normalizeEmailIdentity(value: unknown) {
-  return String(value || "").trim().toLowerCase();
+  return validateEmailAddress(value).normalized;
 }
 
 export function normalizePhoneIdentity(value: unknown) {

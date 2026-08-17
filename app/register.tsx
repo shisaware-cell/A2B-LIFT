@@ -11,6 +11,7 @@ import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { KeyboardAwareScrollViewCompat } from "@mobile-ui/scroll";
+import { validateEmailAddress } from "@shared/email-validation";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -106,14 +107,11 @@ export default function RegisterScreen() {
     }
   }
 
-  function isValidEmail(val: string) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
-  }
-
   async function handleRegister() {
     if (!name.trim()) { setError("Full name is required"); return; }
     if (!email.trim()) { setError("Email is required"); return; }
-    if (!isValidEmail(email)) { setError("Please enter a valid email address"); return; }
+    const emailValidation = validateEmailAddress(email);
+    if (!emailValidation.valid) { setError(emailValidation.message || "Please enter a valid email address"); return; }
     if (!phone.trim()) { setError("Phone number is required"); return; }
     if (!password.trim()) { setError("Password is required"); return; }
     if (password.length < 4) { setError("Password must be at least 4 characters"); return; }
@@ -130,7 +128,7 @@ export default function RegisterScreen() {
         await AsyncStorage.removeItem(NEEDS_OPERATOR_CHOICE_KEY);
       }
       await register({
-        username: email.trim().toLowerCase(),
+        username: emailValidation.normalized,
         password,
         name: name.trim(),
         phone: phone.trim(),

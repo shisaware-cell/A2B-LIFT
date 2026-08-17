@@ -50,6 +50,11 @@ import {
   isDriverOverlayAvailable,
   startDriverOverlay,
 } from "@/lib/driver-overlay";
+import {
+  getNavigationVoiceEnabled,
+  setNavigationVoiceEnabled as persistNavigationVoiceEnabled,
+  subscribeNavigationVoiceEnabled,
+} from "@/lib/navigation-voice";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const ROUTE_REFRESH_MIN_DISTANCE_KM = 0.2;
@@ -236,6 +241,7 @@ export default function ChauffeurDashboard() {
   const [submittingClientRating, setSubmittingClientRating] = useState(false);
   const [stopProgressLoading, setStopProgressLoading] = useState(false);
   const [rideStatusUpdating, setRideStatusUpdating] = useState<string | null>(null);
+  const [navigationVoiceEnabled, setNavigationVoiceEnabledState] = useState<boolean | null>(null);
 
   const soundRef = useRef<TripAlertSound | null>(null);
   const tripAlertTokenRef = useRef(0);
@@ -268,6 +274,31 @@ export default function ChauffeurDashboard() {
   const isOnlineRef = useRef(false);
   const chauffeurRef = useRef<any>(null);
   const isExpoGoAndroid = Platform.OS === "android" && Constants.appOwnership === "expo";
+
+  useEffect(() => {
+    let mounted = true;
+    getNavigationVoiceEnabled().then((enabled) => {
+      if (mounted) setNavigationVoiceEnabledState(enabled);
+    }).catch(() => {});
+    const unsubscribe = subscribeNavigationVoiceEnabled((enabled) => {
+      if (mounted) setNavigationVoiceEnabledState(enabled);
+    });
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
+
+  async function toggleNavigationVoiceFromMap() {
+    const next = navigationVoiceEnabled === false;
+    setNavigationVoiceEnabledState(next);
+    try {
+      await persistNavigationVoiceEnabled(next);
+    } catch {
+      setNavigationVoiceEnabledState(!next);
+      Alert.alert("Setting not saved", "Please try changing navigation voice again.");
+    }
+  }
 
   function clearIncomingRide() {
     incomingRideHydrationTokenRef.current += 1;
@@ -1148,6 +1179,11 @@ export default function ChauffeurDashboard() {
   }, [currentRide?.id, incomingRide?.id]);
 
   useEffect(() => {
+    if (navigationVoiceEnabled !== true) {
+      lastSpokenNavKeyRef.current = null;
+      Speech.stop();
+      return;
+    }
     if (!currentRide || navSteps.length === 0) return;
     const step = navSteps[currentStepIdx];
     const instruction = step?.instruction?.trim();
@@ -1168,7 +1204,7 @@ export default function ChauffeurDashboard() {
         pitch: 1,
       });
     }
-  }, [currentRide?.id, currentRide?.status, currentStepIdx, navSteps]);
+  }, [currentRide?.id, currentRide?.status, currentStepIdx, navSteps, navigationVoiceEnabled]);
 
   useEffect(() => {
     if (!currentRide) {
@@ -2068,9 +2104,14 @@ export default function ChauffeurDashboard() {
                 <Text style={styles.navModalRouteHint}>{clientRouteLabel} · {clientPaymentLabel}</Text>
               )}
             </View>
-            <Pressable style={styles.navModalClose} onPress={() => setShowNavModal(false)}>
-              <Ionicons name="chevron-down" size={22} color={Colors.white} />
-            </Pressable>
+            <View style={styles.navModalActions}>
+              <Pressable style={styles.navModalClose} onPress={toggleNavigationVoiceFromMap} accessibilityLabel={navigationVoiceEnabled === false ? "Unmute navigation voice" : "Mute navigation voice"}>
+                <Ionicons name={navigationVoiceEnabled === false ? "volume-mute-outline" : "volume-high-outline"} size={21} color={Colors.white} />
+              </Pressable>
+              <Pressable style={styles.navModalClose} onPress={() => setShowNavModal(false)} accessibilityLabel="Close navigation">
+                <Ionicons name="chevron-down" size={22} color={Colors.white} />
+              </Pressable>
+            </View>
           </View>
           {routeAlternatives.length > 0 && (
             <View style={styles.routeOptionsContainer}>
@@ -2922,6 +2963,7 @@ const styles = StyleSheet.create({
   // Nav modal
   navModal: { flex: 1, backgroundColor: Colors.primary },
   navModalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", paddingHorizontal: 20, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  navModalActions: { flexDirection: "row", gap: 8 },
   navModalTitle: { fontSize: 18, fontFamily: "Inter_700Bold", color: Colors.white },
   navModalDestination: { maxWidth: SCREEN_WIDTH - 100, fontSize: 12, fontFamily: "Inter_500Medium", color: Colors.textSecondary, marginTop: 3 },
   navModalEta: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textMuted, marginTop: 2 },

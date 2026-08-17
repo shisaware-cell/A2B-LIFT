@@ -130,6 +130,24 @@ tbody tr:hover { background:#fafaf8; }
 .btn-delete { background:var(--red-bg); color:var(--red); border-color:#f0c0b8; }
 .btn-delete:hover { background:#fce0dc; }
 .action-cell { display:flex; gap:6px; flex-wrap:wrap; }
+.trip-toolbar { display:grid; grid-template-columns:minmax(220px,1fr) 180px 150px 150px auto; gap:10px; align-items:end; margin-bottom:14px; }
+.trip-toolbar .field { margin:0; }
+.trip-pagination { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-top:1px solid var(--border); background:var(--surface); }
+.trip-page-actions { display:flex; align-items:center; gap:8px; }
+.trip-detail-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
+.trip-detail-title { font-size:20px; font-weight:700; }
+.trip-detail-id { color:var(--muted); font:11px var(--mono); margin-top:5px; overflow-wrap:anywhere; }
+.trip-detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.trip-panel { background:var(--white); border:1px solid var(--border); border-radius:var(--radius); padding:18px; }
+.trip-panel-wide { grid-column:1 / -1; }
+.trip-panel-title { font-size:13px; font-weight:700; margin-bottom:14px; }
+.trip-kv { display:grid; grid-template-columns:minmax(110px,0.7fr) minmax(0,1.3fr); gap:12px; padding:8px 0; border-bottom:1px solid var(--border); }
+.trip-kv:last-child { border-bottom:none; }
+.trip-kv-label { color:var(--muted); font-size:11px; font-weight:600; }
+.trip-kv-value { font-size:13px; overflow-wrap:anywhere; }
+.trip-timeline { display:grid; gap:10px; }
+.trip-timeline-row { display:grid; grid-template-columns:150px minmax(0,1fr); gap:12px; font-size:13px; }
+.trip-timeline-row span:first-child { color:var(--muted); }
 
 /* EMPTY / LOADING */
 .empty { padding:56px 24px; text-align:center; color:var(--muted); }
@@ -227,6 +245,9 @@ tbody tr:hover { background:#fafaf8; }
   .action-cell { flex-wrap:nowrap; gap:4px; }
   .btn-sm { padding:4px 8px; font-size:11px; }
   .sec-head { flex-direction:column; align-items:flex-start; gap:10px; }
+  .trip-toolbar { grid-template-columns:1fr 1fr; }
+  .trip-detail-grid { grid-template-columns:1fr; }
+  .trip-panel-wide { grid-column:auto; }
 }
 
 @media (max-width: 480px) {
@@ -432,8 +453,23 @@ tbody tr:hover { background:#fafaf8; }
 
     <!-- RIDES -->
     <div class="view" id="view-rides">
-      <div class="sec-head"><div class="sec-title">All Rides</div></div>
+      <div class="sec-head"><div><div class="sec-title">Trip history</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Results load in pages to keep the dashboard responsive as history grows.</div></div></div>
+      <div class="trip-toolbar">
+        <label class="field"><span class="f-label">Search trips</span><input class="f-input" id="trip-search" placeholder="Trip ID, rider, driver or location" oninput="queueTripSearch()" /></label>
+        <label class="field"><span class="f-label">Status</span><select class="f-input" id="trip-status" onchange="applyTripFilters()"><option value="all">All statuses</option><option value="requested">Requested</option><option value="searching">Searching</option><option value="chauffeur_assigned">Driver assigned</option><option value="chauffeur_arriving">Driver arriving</option><option value="chauffeur_arrived">Driver arrived</option><option value="trip_started">In progress</option><option value="trip_completed">Completed</option><option value="cancelled">Cancelled</option><option value="reserved">Reserved</option></select></label>
+        <label class="field"><span class="f-label">From</span><input class="f-input" id="trip-from" type="date" onchange="applyTripFilters()" /></label>
+        <label class="field"><span class="f-label">To</span><input class="f-input" id="trip-to" type="date" onchange="applyTripFilters()" /></label>
+        <button class="btn-lg btn-outline" onclick="clearTripFilters()">Clear filters</button>
+      </div>
       <div class="table-card" id="rides-table"><div class="loading">Loading…</div></div>
+    </div>
+
+    <div class="view" id="view-tripDetail">
+      <div class="trip-detail-head">
+        <div><button class="btn-sm btn-detail" onclick="backToTrips()">Back to trips</button><div class="trip-detail-title" id="trip-detail-title" style="margin-top:14px">Trip details</div><div class="trip-detail-id" id="trip-detail-id"></div></div>
+        <div id="trip-detail-status"></div>
+      </div>
+      <div id="trip-detail-content"><div class="loading">Loading…</div></div>
     </div>
 
     <!-- PAYMENTS -->
@@ -684,8 +720,9 @@ async function doLogout() {
 
 // ── NAV ──
 let curView = 'overview';
+let tripPage = 1, tripPageSize = 25, tripTotalPages = 1, tripSearchTimer = null, selectedTripId = null;
 let allChauf = [], allWd = [], allSafe = [], allApps = [], allPartners = [], allVehicles = [], allDocuments = [], allSelfies = [], allUsers = [], allReferrals = [], allLiftClubMemberships = [], allLiftClubRoutes = [], allPayLater = [], chaufFilter = 'all', wdFilter = 'all', safeFilter = 'all', appsFilter = 'all', partnersFilter = 'all', vehiclesFilter = 'all', documentsFilter = 'all', referralFilter = 'all', liftClubFilter = 'all', liftClubRouteFilter = 'all';
-const VIEW_TITLES = { overview:'Dashboard', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', documents:'Document Review', rides:'Rides', payments:'Payments', liftClubApplications:'Lift Club', payLater:'Pay Later', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users', referrals:'Referral Summary' };
+const VIEW_TITLES = { overview:'Dashboard', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', documents:'Document Review', rides:'Trips', tripDetail:'Trip Details', payments:'Payments', liftClubApplications:'Lift Club', payLater:'Pay Later', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users', referrals:'Referral Summary' };
 
 function go(view, el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -783,7 +820,7 @@ async function loadOverview() {
       <div class="stat-card">
         <div class="stat-top"><div class="stat-label">Chauffeurs</div><div class="stat-icon si-blue">🚗</div></div>
         <div class="stat-value">${s.totalChauffeurs}</div>
-        <div class="stat-foot">${s.onlineChauffeurs} online now</div>
+        <div class="stat-foot">${s.onlineChauffeurs || 0} online · ${s.offlineChauffeurs || 0} offline</div>
       </div>
       <div class="stat-card">
         <div class="stat-top"><div class="stat-label">Pending Approvals</div><div class="stat-icon si-red">⏳</div></div>
@@ -1887,42 +1924,204 @@ async function viewDocs(chauffeurId, name) {
 }
 
 // ── RIDES ──
+function queueTripSearch() {
+  clearTimeout(tripSearchTimer);
+  tripSearchTimer = setTimeout(() => applyTripFilters(), 350);
+}
+
+function applyTripFilters() {
+  tripPage = 1;
+  loadRides();
+}
+
+function clearTripFilters() {
+  ['trip-search','trip-from','trip-to'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const status = document.getElementById('trip-status');
+  if (status) status.value = 'all';
+  applyTripFilters();
+}
+
+function changeTripPage(nextPage) {
+  const page = Math.max(1, Math.min(tripTotalPages, Number(nextPage) || 1));
+  if (page === tripPage) return;
+  tripPage = page;
+  loadRides();
+}
+
+function tripStatusClass(status) {
+  if (status === 'trip_completed') return 'b-completed';
+  if (status === 'cancelled') return 'b-cancelled';
+  return 'b-pending';
+}
+
+function formatTripDistance(ride) {
+  const source = ride.actualDistanceKm ?? ride.distanceKm;
+  const value = source == null ? Number.NaN : Number(source);
+  return Number.isFinite(value) && value >= 0 ? `${value.toFixed(1)} km` : '—';
+}
+
+function formatTripDuration(ride) {
+  const source = ride.actualDurationMin ?? ride.durationMin;
+  const value = source == null ? Number.NaN : Number(source);
+  return Number.isFinite(value) && value >= 0 ? `${Math.round(value)} min` : '—';
+}
+
 async function loadRides() {
   spin('rides-table');
   try {
-    const res = await apiFetch('/api/rides');
-    if (!res.ok) throw new Error(res.status);
-    const rides = await res.json();
-    if (!Array.isArray(rides) || !rides.length) {
+    const params = new URLSearchParams({ page:String(tripPage), pageSize:String(tripPageSize) });
+    const search = document.getElementById('trip-search')?.value?.trim();
+    const status = document.getElementById('trip-status')?.value || 'all';
+    const from = document.getElementById('trip-from')?.value;
+    const to = document.getElementById('trip-to')?.value;
+    if (search) params.set('search', search);
+    if (status !== 'all') params.set('status', status);
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+
+    const res = await apiFetch('/api/admin/trips?' + params.toString());
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || res.status);
+    const rides = Array.isArray(data.items) ? data.items : [];
+    tripPage = Number(data.page || 1);
+    tripTotalPages = Math.max(1, Number(data.totalPages || 1));
+    if (!rides.length) {
       document.getElementById('rides-table').innerHTML = emptyState('🗺', 'No rides yet', 'Rides appear here once users book them');
       return;
     }
     document.getElementById('rides-table').innerHTML = `<table>
-      <thead><tr><th>Pickup</th><th>Dropoff</th><th>Category</th><th>Dispatch</th><th>Status</th><th>Price</th><th>Adjustments</th><th>Payment</th><th>Date</th><th></th></tr></thead>
-      <tbody>${rides.map(r => `<tr>
-        <td style="max-width:180px;font-size:13px">${r.pickupAddress || 'N/A'}</td>
-        <td style="max-width:180px;font-size:13px">${r.dropoffAddress || 'N/A'}</td>
-        <td style="font-size:12px;text-transform:capitalize">${r.vehicleType || 'budget'}</td>
-        <td style="font-size:12px">
-          ${r.chauffeurId ? 'Assigned' : r.currentOfferedChauffeurId ? 'Offered' : r.status === 'searching' ? 'Searching' : '—'}
-          ${r.currentOfferExpiresAt ? `<div style="color:var(--muted)">expires ${fmt(r.currentOfferExpiresAt)}</div>` : ''}
-        </td>
-        <td><span class="badge ${r.status === 'trip_completed' ? 'b-completed' : r.status === 'cancelled' ? 'b-cancelled' : 'b-pending'}">${r.status || '—'}</span></td>
-        <td style="font-weight:700;color:var(--green)">R ${r.price || '—'}</td>
-        <td style="font-size:12px">
-          ${Number(r.surgeMultiplier || 1) > 1 ? `<div>Surge ${Number(r.surgeMultiplier).toFixed(1)}x</div>` : ''}
-          ${Number(r.cancellationFee || 0) > 0 ? `<div>Cancel R ${Number(r.cancellationFee).toFixed(0)}</div>` : ''}
-          ${Number(r.perMinuteAdjustment || 0) > 0 ? `<div>Time R ${Number(r.perMinuteAdjustment).toFixed(0)}</div>` : ''}
-          ${Number(r.surgeMultiplier || 1) <= 1 && !Number(r.cancellationFee || 0) && !Number(r.perMinuteAdjustment || 0) ? '—' : ''}
-        </td>
-        <td><span class="badge ${r.paymentStatus === 'paid' ? 'b-paid' : 'b-pending'}">${r.paymentStatus || 'unpaid'}</span></td>
-        <td style="font-size:12px">${fmt(r.createdAt)}</td>
-        <td><button class="btn-sm btn-delete" onclick="event.stopPropagation();adminDelete('ride','${r.id}','trip from ${(r.pickupAddress||'').slice(0,20).replace(/'/g,"\\'")}')">🗑</button></td>
+      <thead><tr><th>Trip</th><th>Rider / Driver</th><th>Route</th><th>Distance / Time</th><th>Status</th><th>Fare</th><th>Payment</th><th>Date</th><th>Actions</th></tr></thead>
+      <tbody>${rides.map(r => `<tr onclick="openTripDetails('${escapeHtml(r.id)}')" style="cursor:pointer">
+        <td><div style="font:11px var(--mono)">${escapeHtml(String(r.id || '').slice(0,8))}</div><div style="font-size:11px;color:var(--muted);text-transform:capitalize;margin-top:3px">${escapeHtml(String(r.vehicleType || 'budget').replace(/_/g,' '))}</div></td>
+        <td><strong>${escapeHtml(r.clientName || 'Unknown rider')}</strong><div style="font-size:11px;color:var(--muted)">${escapeHtml(r.driverName || 'Unassigned')}</div></td>
+        <td style="max-width:260px"><div style="font-size:12px">${escapeHtml(r.pickupAddress || 'Pickup unavailable')}</div><div style="font-size:11px;color:var(--muted);margin-top:3px">to ${escapeHtml(r.dropoffAddress || 'Drop-off unavailable')}</div></td>
+        <td style="font-size:12px">${formatTripDistance(r)}<div style="color:var(--muted);margin-top:3px">${formatTripDuration(r)}</div></td>
+        <td><span class="badge ${tripStatusClass(r.status)}">${escapeHtml(String(r.status || 'unknown').replace(/_/g,' '))}</span>${r.cancelledBy ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">by ${escapeHtml(r.cancelledBy)}</div>` : ''}</td>
+        <td style="font-weight:700;color:var(--green)">R ${Number(r.finalFare ?? r.price ?? 0).toFixed(2)}</td>
+        <td><span class="badge ${r.paymentStatus === 'paid' ? 'b-paid' : 'b-pending'}">${escapeHtml(r.paymentStatus || 'unpaid')}</span><div style="font-size:11px;color:var(--muted);margin-top:4px">${escapeHtml(r.paymentMethod || 'cash')}</div></td>
+        <td style="font-size:12px">${fmtFull(r.createdAt)}</td>
+        <td><div class="action-cell"><button class="btn-sm btn-detail" onclick="event.stopPropagation();openTripDetails('${escapeHtml(r.id)}')">View</button><button class="btn-sm btn-delete" aria-label="Delete trip" onclick="event.stopPropagation();adminDelete('ride','${escapeHtml(r.id)}','this trip')">Delete</button></div></td>
       </tr>`).join('')}
-      </tbody></table>`;
+      </tbody></table>
+      <div class="trip-pagination"><div style="font-size:12px;color:var(--muted)">${Number(data.total || 0).toLocaleString()} trips · Page ${tripPage} of ${tripTotalPages}</div><div class="trip-page-actions"><button class="btn-sm btn-detail" onclick="changeTripPage(${tripPage - 1})" ${tripPage <= 1 ? 'disabled' : ''}>Previous</button><button class="btn-sm btn-detail" onclick="changeTripPage(${tripPage + 1})" ${tripPage >= tripTotalPages ? 'disabled' : ''}>Next</button></div></div>`;
   } catch(e) {
     document.getElementById('rides-table').innerHTML = emptyState('❌', 'Failed to load rides', e.message);
   }
+}
+
+function showTripDetailView() {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelector('.nav-item[onclick*="rides"]')?.classList.add('active');
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-tripDetail').classList.add('active');
+  document.getElementById('page-title').textContent = 'Trip Details';
+  curView = 'tripDetail';
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+
+function backToTrips() {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-rides').classList.add('active');
+  document.getElementById('page-title').textContent = 'Trips';
+  curView = 'rides';
+}
+
+function tripField(label, value) {
+  return `<div class="trip-kv"><div class="trip-kv-label">${escapeHtml(label)}</div><div class="trip-kv-value">${value == null || value === '' ? '—' : value}</div></div>`;
+}
+
+function locationLink(lat, lng, label) {
+  const latNumber = Number(lat), lngNumber = Number(lng);
+  if (!Number.isFinite(latNumber) || !Number.isFinite(lngNumber)) return '—';
+  const href = `https://www.google.com/maps/search/?api=1&query=${latNumber},${lngNumber}`;
+  return `<a href="${href}" target="_blank" rel="noopener">${escapeHtml(label || `${latNumber.toFixed(6)}, ${lngNumber.toFixed(6)}`)}</a><div style="font:10px var(--mono);color:var(--muted);margin-top:3px">${latNumber.toFixed(6)}, ${lngNumber.toFixed(6)}</div>`;
+}
+
+async function openTripDetails(id) {
+  selectedTripId = id;
+  showTripDetailView();
+  document.getElementById('trip-detail-title').textContent = 'Trip details';
+  document.getElementById('trip-detail-id').textContent = id;
+  document.getElementById('trip-detail-status').innerHTML = '';
+  spin('trip-detail-content');
+  try {
+    const res = await apiFetch('/api/admin/trips/' + encodeURIComponent(id));
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || res.status);
+    renderTripDetails(data);
+  } catch(e) {
+    document.getElementById('trip-detail-content').innerHTML = emptyState('!', 'Failed to load trip', e.message);
+  }
+}
+
+function renderTripDetails(data) {
+  const t = data.trip || {};
+  const stops = Array.isArray(t.stops) ? t.stops : [];
+  const payments = Array.isArray(data.payments) ? data.payments : [];
+  const earnings = Array.isArray(data.earnings) ? data.earnings : [];
+  const ratings = Array.isArray(data.ratings) ? data.ratings : [];
+  const reports = Array.isArray(data.safetyReports) ? data.safetyReports : [];
+  const distanceSource = t.actual_distance_km ?? t.distance_km;
+  const durationSource = t.actual_duration_min ?? t.duration_min;
+  const distance = distanceSource == null ? Number.NaN : Number(distanceSource);
+  const duration = durationSource == null ? Number.NaN : Number(durationSource);
+  const fare = Number(t.final_fare ?? t.actual_fare ?? t.price ?? 0);
+  const commissionRate = Number(t.commission_rate || 0);
+  const timeline = [
+    ['Requested', t.created_at], ['Dispatch started', t.dispatch_started_at], ['Accepted', t.accepted_at],
+    ['Travel to pickup', t.pickup_travel_started_at], ['Arrived', t.arrived_at], ['Trip started', t.trip_started_at],
+    ['Completed', t.completed_at],
+  ].filter(item => item[1]);
+
+  document.getElementById('trip-detail-title').textContent = `${String(t.vehicle_type || 'Trip').replace(/_/g,' ')} trip`;
+  document.getElementById('trip-detail-status').innerHTML = `<span class="badge ${tripStatusClass(t.status)}">${escapeHtml(String(t.status || 'unknown').replace(/_/g,' '))}</span>`;
+  document.getElementById('trip-detail-content').innerHTML = `<div class="trip-detail-grid">
+    <section class="trip-panel trip-panel-wide"><div class="trip-panel-title">Route and stops</div>
+      ${tripField('Pickup', locationLink(t.pickup_lat, t.pickup_lng, t.pickup_address || 'Pickup'))}
+      ${stops.map((stop,index) => tripField(`Stop ${index + 1}${index < Number(t.completed_stop_count || 0) ? ' · completed' : ''}`, locationLink(stop.lat, stop.lng, stop.address || `Stop ${index + 1}`))).join('')}
+      ${tripField('Drop-off', locationLink(t.dropoff_lat, t.dropoff_lng, t.dropoff_address || 'Drop-off'))}
+      ${tripField('Recorded distance', Number.isFinite(distance) ? `${distance.toFixed(2)} km` : '—')}
+      ${tripField('Recorded duration', Number.isFinite(duration) ? `${Math.round(duration)} minutes` : '—')}
+      ${tripField('Selected route', escapeHtml(t.selected_route_id || '—'))}
+    </section>
+    <section class="trip-panel"><div class="trip-panel-title">Rider</div>
+      ${tripField('Name', escapeHtml(t.clientName || 'Unknown rider'))}
+      ${tripField('Email', escapeHtml(t.clientEmail || '—'))}
+      ${tripField('Phone', escapeHtml(t.clientPhone || '—'))}
+      ${tripField('Rating', t.clientRating == null ? '—' : Number(t.clientRating).toFixed(1))}
+      ${tripField('User ID', `<span style="font:11px var(--mono)">${escapeHtml(t.client_id || '—')}</span>`)}
+    </section>
+    <section class="trip-panel"><div class="trip-panel-title">Driver and vehicle</div>
+      ${tripField('Driver', escapeHtml(t.driverName || 'Unassigned'))}
+      ${tripField('Email', escapeHtml(t.driverEmail || '—'))}
+      ${tripField('Phone', escapeHtml(t.driverPhone || '—'))}
+      ${tripField('Current status', t.driverOnline == null ? '—' : `<span class="badge ${t.driverOnline ? 'b-online' : 'b-offline'}">${t.driverOnline ? 'Online' : 'Offline'}</span>`)}
+      ${tripField('Vehicle', escapeHtml([t.vehicleMake,t.vehicleModel,t.vehicleYear].filter(Boolean).join(' ') || '—'))}
+      ${tripField('Plate / colour', escapeHtml([t.plateNumber,t.vehicleColor].filter(Boolean).join(' · ') || '—'))}
+    </section>
+    <section class="trip-panel"><div class="trip-panel-title">Fare and settlement</div>
+      ${tripField('Rider total', `R ${fare.toFixed(2)}`)}
+      ${tripField('Quoted fare', `R ${Number(t.quoted_fare ?? t.price ?? 0).toFixed(2)}`)}
+      ${tripField('Base fare', `R ${Number(t.base_fare || 0).toFixed(2)}`)}
+      ${tripField('Commission rate', `${(commissionRate * 100).toFixed(0)}%`)}
+      ${tripField('Surge / demand', `${Number(t.surge_multiplier || 1).toFixed(2)}x / ${Number(t.demand_multiplier || 1).toFixed(2)}x`)}
+      ${tripField('Waiting / time adjustment', `R ${Number(t.waiting_fee || 0).toFixed(2)} / R ${Number(t.per_minute_adjustment || 0).toFixed(2)}`)}
+      ${tripField('Settlement', escapeHtml(t.settlement_status || '—'))}
+    </section>
+    <section class="trip-panel"><div class="trip-panel-title">Payment and cancellation</div>
+      ${tripField('Method', escapeHtml(t.payment_method || 'cash'))}
+      ${tripField('Payment status', escapeHtml(t.payment_status || 'unpaid'))}
+      ${tripField('Rewards used', `R ${Number(t.rewards_amount_used || 0).toFixed(2)}`)}
+      ${tripField('Cancelled by', escapeHtml(t.cancelled_by || '—'))}
+      ${tripField('Cancellation fee', `R ${Number(t.cancellation_fee || 0).toFixed(2)}`)}
+      ${tripField('Liveness', escapeHtml(t.liveness_status || 'not required'))}
+    </section>
+    <section class="trip-panel trip-panel-wide"><div class="trip-panel-title">Timeline</div><div class="trip-timeline">${timeline.map(item => `<div class="trip-timeline-row"><span>${escapeHtml(item[0])}</span><strong>${fmtFull(item[1])}</strong></div>`).join('') || '<div style="color:var(--muted)">No timestamps recorded.</div>'}</div></section>
+    <section class="trip-panel"><div class="trip-panel-title">Payment records (${payments.length})</div>${payments.map(p => tripField(`${p.method || 'payment'} · ${p.status || 'unknown'}`, `R ${Number(p.amount || 0).toFixed(2)}<div style="font-size:11px;color:var(--muted);margin-top:3px">${fmtFull(p.paidAt || p.createdAt)}${p.providerRef ? ` · ${escapeHtml(p.providerRef)}` : ''}</div>`)).join('') || '<div style="color:var(--muted);font-size:13px">No payment records.</div>'}</section>
+    <section class="trip-panel"><div class="trip-panel-title">Driver earnings (${earnings.length})</div>${earnings.map(e => tripField(e.type || 'earning', `Driver R ${Number(e.amount || 0).toFixed(2)} · Platform R ${Number(e.commission || 0).toFixed(2)}`)).join('') || '<div style="color:var(--muted);font-size:13px">No earnings record.</div>'}</section>
+    <section class="trip-panel"><div class="trip-panel-title">Ratings (${ratings.length})</div>${ratings.map(r => tripField(`${Number(r.rating || 0)}/5 · ${escapeHtml(r.reviewerName || 'Rider')}`, escapeHtml(r.comment || 'No comment'))).join('') || '<div style="color:var(--muted);font-size:13px">No rating recorded.</div>'}</section>
+    <section class="trip-panel"><div class="trip-panel-title">Audit and safety</div>${tripField('Chat messages', Number(data.messageCount || 0))}${tripField('Safety reports', reports.length)}${reports.map(r => tripField(`${r.priority || 'medium'} · ${r.status || 'open'}`, escapeHtml(r.description || ''))).join('')}</section>
+  </div>`;
 }
 
 // ── PAYMENTS ──
@@ -2763,7 +2962,11 @@ function userDetail(id) {
       <div class="info-row"><div class="info-label">User ID</div><div class="info-val" style="font-family:var(--mono);font-size:12px">${escapeHtml(u.id || '—')}</div></div>
     </div>
     <div class="notice" style="margin-top:18px">🎟️ <span>Convert or approve this current user as a Lift Club member. Their normal client login stays unchanged.</span></div>
-    <div class="notice" style="margin-top:18px">🔐 <span>Set a new password for this user. Current passwords are never displayed.</span></div>
+    <div class="notice" style="margin-top:18px"><span>Update the login email or set a new password. Email changes are checked for format and duplicates.</span></div>
+    <div class="field" style="margin-top:14px">
+      <div class="f-label">Login email</div>
+      <input id="admin-user-email" class="f-input" type="email" autocomplete="off" value="${escapeHtml(u.username || '')}" onkeydown="if(event.key==='Enter')saveAdminEmail('${id}')" />
+    </div>
     <div class="field" style="margin-top:14px">
       <div class="f-label">New password</div>
       <input id="admin-user-password" class="f-input" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" onkeydown="if(event.key==='Enter')saveAdminPassword('${id}')" />
@@ -2772,9 +2975,36 @@ function userDetail(id) {
     <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
     ${u.role !== 'admin' ? `<button class="btn-lg btn-delete" onclick="closeModal();adminDelete('user','${u.id}','${(u.name||u.username||'this user').replace(/'/g,"\\'")}')">Delete user</button>` : ''}
     ${u.role !== 'admin' ? `<button class="btn-lg btn-outline" onclick="openLiftClubUserConvertModal('${id}')">${membership?.status === 'approved' ? 'Edit Lift Club' : 'Approve Lift Club'}</button>` : ''}
+    <button class="btn-lg btn-outline" onclick="saveAdminEmail('${id}')">Update email</button>
     <button class="btn-lg btn-green" onclick="saveAdminPassword('${id}')">Update password</button>`;
   openModal();
-  setTimeout(() => document.getElementById('admin-user-password')?.focus(), 50);
+  setTimeout(() => document.getElementById('admin-user-email')?.focus(), 50);
+}
+
+async function saveAdminEmail(id) {
+  const input = document.getElementById('admin-user-email');
+  const email = String(input?.value || '').trim().toLowerCase();
+  if (!email) {
+    input?.focus();
+    toast('Email is required.', 'err');
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/admin/users/' + id + '/email', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Unable to update email.');
+    const user = allUsers.find(item => item.id === id);
+    if (user) user.username = data.email || email;
+    closeModal();
+    loadUsers();
+    toast(data.message || 'Email updated.', 'ok');
+  } catch (e) {
+    toast(e.message || 'Unable to update email.', 'err');
+  }
 }
 
 async function saveAdminPassword(id) {
@@ -2964,6 +3194,13 @@ async function doSearch(q) {
   if (curView === 'selfies') {
     const f = allSelfies.filter(item => `${item.riderName} ${item.riderEmail} ${item.pickupAddress} ${item.dropoffAddress} ${item.rideId}`.toLowerCase().includes(query.toLowerCase()));
     renderSelfiesTable(f);
+    return;
+  }
+
+  if (curView === 'rides') {
+    const input = document.getElementById('trip-search');
+    if (input) input.value = query;
+    queueTripSearch();
     return;
   }
 

@@ -27,6 +27,7 @@ import {
 } from "./rideOperations";
 import { getReleaseFingerprint } from "./release-info";
 import { validateAdminPassword } from "./admin-password-policy";
+import { validateEmailAddress } from "../shared/email-validation";
 import { authOptional, requireAuth, requireRole, type AuthedRequest } from "./auth-middleware";
 import { signAccessToken, type UserRole } from "./auth";
 import { externalApiService } from "./external-api-service";
@@ -558,6 +559,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS pickup_travel_started_at timestamp");
     await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS arrived_at timestamp");
     await pool.query("CREATE INDEX IF NOT EXISTS idx_rides_current_offer ON rides(current_offered_chauffeur_id, current_offer_expires_at)");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_rides_created_at ON rides(created_at DESC)");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_rides_status_created_at ON rides(status, created_at DESC)");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_rides_client_created_at ON rides(client_id, created_at DESC)");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_rides_chauffeur_created_at ON rides(chauffeur_id, created_at DESC)");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_payments_ride_created_at ON payments(ride_id, created_at DESC)");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_earnings_ride_created_at ON earnings(ride_id, created_at DESC)");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_ride_ratings_ride_created_at ON ride_ratings(ride_id, created_at DESC)");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_safety_reports_ride_created_at ON safety_reports(ride_id, created_at DESC)");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_messages_ride_created_at ON messages(ride_id, created_at DESC)");
     await pool.query(`
       CREATE TABLE IF NOT EXISTS lift_club_memberships (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1605,10 +1615,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Normalise email — username field now stores email address
-      const email = normalizeEmailIdentity(username);
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        return res.status(400).json({ message: "Please enter a valid email address" });
+      const emailValidation = validateEmailAddress(username);
+      const email = emailValidation.normalized;
+      if (!emailValidation.valid) {
+        return res.status(400).json({ message: emailValidation.message || "Please enter a valid email address" });
       }
 
       // Resolve referral code → referrer
@@ -9866,44 +9876,232 @@ export async function registerRoutes(app: Express): Promise<Server> {
   );
 
   app.get(
+    "/api/admin/trips",
+    requireAuth,
+    requireRole(["admin"]),
+    async (req: AuthedRequest, res: Response) => {
+      try {
+        const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
+        const pageSize = Math.min(100, Math.max(10, Math.floor(Number(req.query.pageSize) || 25)));
+        const offset = (page - 1) * pageSize;
+        const status = String(req.query.status || "all").trim().toLowerCase();
+        const search = String(req.query.search || "").trim();
+        const from = String(req.query.from || "").trim();
+        const to = String(req.query.to || "").trim();
+        if ((from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) || (to && !/^\d{4}-\d{2}-\d{2}$/.test(to))) {
+          return res.status(400).json({ message: "Trip date filters must use YYYY-MM-DD." });
+        }
+        const conditions: string[] = ["1 = 1"];
+        const values: unknown[] = [];
+
+        const addValue = (value: unknown) => {
+          values.push(value);
+          return `$${values.length}`;
+        };
+
+        if (status && status !== "all") {
+          conditions.push(`r.status = ${addValue(status)}`);
+        }
+        if (search) {
+          const placeholder = addValue(`%${search}%`);
+          conditions.push(`(
+            r.id::text ILIKE ${placeholder}
+            OR COALESCE(r.pickup_address, '') ILIKE ${placeholder}
+            OR COALESCE(r.dropoff_address, '') ILIKE ${placeholder}
+            OR COALESCE(client_user.name, '') ILIKE ${placeholder}
+            OR COALESCE(client_user.username, '') ILIKE ${placeholder}
+            OR COALESCE(driver_user.name, '') ILIKE ${placeholder}
+            OR COALESCE(driver_user.username, '') ILIKE ${placeholder}
+          )`);
+        }
+        if (from) conditions.push(`r.created_at >= ${addValue(from)}::date`);
+        if (to) conditions.push(`r.created_at < (${addValue(to)}::date + interval '1 day')`);
+
+        const where = conditions.join(" AND ");
+        const joins = `
+          LEFT JOIN users client_user ON client_user.id = r.client_id
+          LEFT JOIN chauffeurs c ON c.id = r.chauffeur_id
+          LEFT JOIN users driver_user ON driver_user.id = c.user_id
+          LEFT JOIN vehicles v ON v.id = r.vehicle_id
+        `;
+        const countValues = [...values];
+        const countJoins = search ? joins : "";
+        const dataValues = [...values, pageSize, offset];
+        const limitParam = `$${values.length + 1}`;
+        const offsetParam = `$${values.length + 2}`;
+
+        const [countResult, rowsResult] = await Promise.all([
+          pool.query(`SELECT COUNT(*)::int AS total FROM rides r ${countJoins} WHERE ${where}`, countValues),
+          pool.query(
+            `SELECT
+               r.id,
+               r.status,
+               r.vehicle_type AS "vehicleType",
+               r.pickup_address AS "pickupAddress",
+               r.dropoff_address AS "dropoffAddress",
+               r.distance_km AS "distanceKm",
+               r.actual_distance_km AS "actualDistanceKm",
+               r.duration_min AS "durationMin",
+               r.actual_duration_min AS "actualDurationMin",
+               r.price,
+               r.final_fare AS "finalFare",
+               r.payment_method AS "paymentMethod",
+               r.payment_status AS "paymentStatus",
+               r.cancelled_by AS "cancelledBy",
+               r.cancellation_fee AS "cancellationFee",
+               r.created_at AS "createdAt",
+               r.completed_at AS "completedAt",
+               client_user.name AS "clientName",
+               client_user.username AS "clientEmail",
+               driver_user.name AS "driverName",
+               driver_user.username AS "driverEmail",
+               COALESCE(v.plate_number, c.plate_number) AS "plateNumber"
+             FROM rides r
+             ${joins}
+             WHERE ${where}
+             ORDER BY r.created_at DESC, r.id DESC
+             LIMIT ${limitParam} OFFSET ${offsetParam}`,
+            dataValues,
+          ),
+        ]);
+
+        const total = Number(countResult.rows[0]?.total || 0);
+        return res.json({
+          items: rowsResult.rows,
+          page,
+          pageSize,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / pageSize)),
+        });
+      } catch (error: any) {
+        console.error("[admin/trips]", error?.message || error);
+        return res.status(500).json({ message: "Failed to load trips." });
+      }
+    },
+  );
+
+  app.get(
+    "/api/admin/trips/:id",
+    requireAuth,
+    requireRole(["admin"]),
+    async (req: AuthedRequest, res: Response) => {
+      try {
+        const tripResult = await pool.query(
+          `SELECT
+             r.*,
+             client_user.name AS "clientName",
+             client_user.username AS "clientEmail",
+             client_user.phone AS "clientPhone",
+             client_user.rating AS "clientRating",
+             c.user_id AS "driverUserId",
+             driver_user.name AS "driverName",
+             driver_user.username AS "driverEmail",
+             COALESCE(c.phone, driver_user.phone) AS "driverPhone",
+             driver_user.rating AS "driverRating",
+             c.is_online AS "driverOnline",
+             c.profile_photo AS "driverPhoto",
+             COALESCE(v.car_make, c.car_make) AS "vehicleMake",
+             COALESCE(v.vehicle_model, c.vehicle_model) AS "vehicleModel",
+             COALESCE(v.vehicle_year, c.vehicle_year) AS "vehicleYear",
+             COALESCE(v.plate_number, c.plate_number) AS "plateNumber",
+             COALESCE(v.car_color, c.car_color) AS "vehicleColor"
+           FROM rides r
+           LEFT JOIN users client_user ON client_user.id = r.client_id
+           LEFT JOIN chauffeurs c ON c.id = r.chauffeur_id
+           LEFT JOIN users driver_user ON driver_user.id = c.user_id
+           LEFT JOIN vehicles v ON v.id = r.vehicle_id
+           WHERE r.id = $1
+           LIMIT 1`,
+          [req.params.id],
+        );
+        const trip = tripResult.rows[0];
+        if (!trip) return res.status(404).json({ message: "Trip not found" });
+
+        const [paymentsResult, earningsResult, ratingsResult, reportsResult, messagesResult] = await Promise.all([
+          pool.query(
+            `SELECT id, amount, method, status, currency, provider, provider_ref AS "providerRef",
+                    paystack_reference AS "paystackReference", paid_at AS "paidAt", created_at AS "createdAt"
+               FROM payments WHERE ride_id = $1 ORDER BY created_at DESC`,
+            [req.params.id],
+          ),
+          pool.query(
+            `SELECT id, amount, commission, type, created_at AS "createdAt"
+               FROM earnings WHERE ride_id = $1 ORDER BY created_at DESC`,
+            [req.params.id],
+          ),
+          pool.query(
+            `SELECT rr.id, rr.rating, rr.comment, rr.created_at AS "createdAt", u.name AS "reviewerName"
+               FROM ride_ratings rr LEFT JOIN users u ON u.id = rr.client_id
+              WHERE rr.ride_id = $1 ORDER BY rr.created_at DESC`,
+            [req.params.id],
+          ),
+          pool.query(
+            `SELECT id, type, description, status, priority, ai_response AS "aiResponse", created_at AS "createdAt"
+               FROM safety_reports WHERE ride_id = $1 ORDER BY created_at DESC`,
+            [req.params.id],
+          ),
+          pool.query("SELECT COUNT(*)::int AS count FROM messages WHERE ride_id = $1", [req.params.id]),
+        ]);
+
+        return res.json({
+          trip,
+          payments: paymentsResult.rows,
+          earnings: earningsResult.rows,
+          ratings: ratingsResult.rows,
+          safetyReports: reportsResult.rows,
+          messageCount: Number(messagesResult.rows[0]?.count || 0),
+        });
+      } catch (error: any) {
+        console.error("[admin/trips/:id]", error?.message || error);
+        return res.status(500).json({ message: "Failed to load trip details." });
+      }
+    },
+  );
+
+  app.get(
     "/api/admin/stats",
     requireAuth,
     requireRole(["admin"]),
     async (_req: AuthedRequest, res: Response) => {
       try {
-        const allRides = await storage.getAllRides();
-        const allChauffeurs = await storage.getAllChauffeurs();
-        const allWithdrawals = await storage.getAllWithdrawals();
-        const allReports = await storage.getAllSafetyReports();
-        const allEarnings = await storage.getAllEarnings();
+        const [rideMetricsResult, earningsMetricsResult, withdrawalMetricsResult, reportMetricsResult, allChauffeurs] = await Promise.all([
+          pool.query(`
+            SELECT
+              COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE status = 'trip_completed')::int AS completed,
+              COUNT(*) FILTER (WHERE status NOT IN ('trip_completed', 'cancelled'))::int AS active,
+              COALESCE(SUM(CASE WHEN status = 'trip_completed' THEN COALESCE(final_fare, actual_fare, price, 0) ELSE 0 END), 0)::float AS revenue
+            FROM rides
+          `),
+          pool.query("SELECT COALESCE(SUM(commission), 0)::float AS commission, COALESCE(SUM(amount), 0)::float AS driver_earnings FROM earnings"),
+          pool.query("SELECT COUNT(*) FILTER (WHERE status = 'pending')::int AS pending FROM withdrawals"),
+          pool.query("SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status = 'open')::int AS open FROM safety_reports"),
+          storage.getAllChauffeurs(),
+        ]);
         const driverApplications = await storage.getDriverApplications().catch(() => []);
         const applicationStatusByUserId = new Map(driverApplications.map((app: any) => [app.userId, app.status]));
-
-        const completedRides = allRides.filter((r) => r.status === "trip_completed");
-        const totalRevenue = completedRides.reduce((sum, r) => sum + (r.price || 0), 0);
-        const totalPlatformCommission = allEarnings.reduce((sum, e) => sum + (e.commission || 0), 0);
-        const totalDriverEarnings = allEarnings.reduce((sum, e) => sum + (e.amount || 0), 0);
-        const activeRides = allRides.filter(
-          (r) => !["trip_completed", "cancelled"].includes(r.status as string),
-        );
+        const rideMetrics = rideMetricsResult.rows[0] || {};
+        const earningsMetrics = earningsMetricsResult.rows[0] || {};
+        const withdrawalMetrics = withdrawalMetricsResult.rows[0] || {};
+        const reportMetrics = reportMetricsResult.rows[0] || {};
         const pendingApprovals = allChauffeurs.filter((c) => !c.isApproved && applicationStatusByUserId.get(c.userId) !== "waitlisted");
-        const pendingWithdrawals = allWithdrawals.filter((w) => w.status === "pending");
-        const openReports = allReports.filter((r) => r.status === "open");
+        const onlineChauffeurs = allChauffeurs.filter((c) => c.isOnline).length;
 
         return res.json({
-          totalRides: allRides.length,
-          completedRides: completedRides.length,
-          activeRides: activeRides.length,
-          totalRevenue: Math.round(totalRevenue),
-          totalPlatformCommission: Math.round(totalPlatformCommission),
-          totalDriverEarnings: Math.round(totalDriverEarnings),
+          totalRides: Number(rideMetrics.total || 0),
+          completedRides: Number(rideMetrics.completed || 0),
+          activeRides: Number(rideMetrics.active || 0),
+          totalRevenue: Math.round(Number(rideMetrics.revenue || 0)),
+          totalPlatformCommission: Math.round(Number(earningsMetrics.commission || 0)),
+          totalDriverEarnings: Math.round(Number(earningsMetrics.driver_earnings || 0)),
           commissionRate: 30,
           totalChauffeurs: allChauffeurs.length,
-          onlineChauffeurs: allChauffeurs.filter((c) => c.isOnline).length,
+          onlineChauffeurs,
+          offlineChauffeurs: Math.max(0, allChauffeurs.length - onlineChauffeurs),
           pendingApprovals: pendingApprovals.length,
-          pendingWithdrawals: pendingWithdrawals.length,
-          openReports: openReports.length,
-          totalReports: allReports.length,
+          pendingWithdrawals: Number(withdrawalMetrics.pending || 0),
+          openReports: Number(reportMetrics.open || 0),
+          totalReports: Number(reportMetrics.total || 0),
         });
       } catch (error: any) {
         return res.status(500).json({ message: error.message });
@@ -10728,6 +10926,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({ success: true, message: "Password updated." });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.put("/api/admin/users/:id/email", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
+    try {
+      const validation = validateEmailAddress(req.body?.email);
+      if (!validation.valid) {
+        return res.status(400).json({ message: validation.message || "Please enter a valid email address." });
+      }
+
+      const user = await storage.getUser(req.params.id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      if (normalizeEmailIdentity(user.username) === validation.normalized) {
+        return res.json({ success: true, email: validation.normalized, message: "Email is unchanged." });
+      }
+
+      await assertUserIdentityAvailable({ email: validation.normalized, excludeUserId: user.id });
+      await storage.updateUser(user.id, { username: validation.normalized } as any);
+      await storage.createNotification({
+        userId: user.id,
+        title: "Email address updated",
+        body: `Your A2B LIFT account email was updated to ${validation.normalized} by an administrator.`,
+        type: "account",
+      }).catch(() => {});
+
+      return res.json({ success: true, email: validation.normalized, message: "Email updated." });
+    } catch (error: any) {
+      if (error instanceof UserIdentityConflictError || error?.code === "23505") {
+        return res.status(409).json({ message: "An account with this email already exists" });
+      }
+      return res.status(500).json({ message: error.message || "Unable to update email." });
     }
   });
 

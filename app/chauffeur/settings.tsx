@@ -18,6 +18,10 @@ import {
   startDriverOverlay,
   stopDriverOverlay,
 } from "@/lib/driver-overlay";
+import {
+  getNavigationVoiceEnabled,
+  setNavigationVoiceEnabled as persistNavigationVoiceEnabled,
+} from "@/lib/navigation-voice";
 
 interface DriverReview {
   id: string;
@@ -52,6 +56,7 @@ export default function ChauffeurSettingsScreen() {
   const [overlayEnabled, setOverlayEnabled] = useState(false);
   const [overlayPermissionGranted, setOverlayPermissionGranted] = useState(false);
   const [overlayUpdating, setOverlayUpdating] = useState(false);
+  const [navigationVoiceEnabled, setNavigationVoiceEnabled] = useState(true);
 
   // Fetch driver application status
   const { data: application, refetch: refetchApplication } = useQuery({
@@ -67,7 +72,18 @@ export default function ChauffeurSettingsScreen() {
 
   useEffect(() => {
     loadChauffeur();
+    getNavigationVoiceEnabled().then(setNavigationVoiceEnabled).catch(() => {});
   }, []);
+
+  async function toggleNavigationVoice(enabled: boolean) {
+    setNavigationVoiceEnabled(enabled);
+    try {
+      await persistNavigationVoiceEnabled(enabled);
+    } catch {
+      setNavigationVoiceEnabled(!enabled);
+      Alert.alert("Setting not saved", "Please try changing navigation voice again.");
+    }
+  }
 
   useEffect(() => {
     if (!isDriverOverlayAvailable()) return;
@@ -357,6 +373,22 @@ export default function ChauffeurSettingsScreen() {
       )}
 
       <View style={styles.menuGroup}>
+        <View style={styles.menuItem}>
+          <View style={styles.menuIconCircle}>
+            <Ionicons name={navigationVoiceEnabled ? "volume-high-outline" : "volume-mute-outline"} size={20} color={Colors.white} />
+          </View>
+          <View style={styles.menuTextBlock}>
+            <Text style={styles.menuText}>Navigation voice</Text>
+            <Text style={styles.menuSubText}>Spoken turn-by-turn directions</Text>
+          </View>
+          <Switch
+            value={navigationVoiceEnabled}
+            onValueChange={toggleNavigationVoice}
+            trackColor={{ false: Colors.border, true: Colors.success }}
+            thumbColor={Colors.white}
+          />
+        </View>
+
         {Platform.OS === "android" ? (
           <View style={styles.menuItem}>
             <View style={styles.menuIconCircle}>
