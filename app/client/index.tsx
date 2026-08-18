@@ -2894,9 +2894,11 @@ export default function ClientHomeScreen() {
                     : `${chauffeurDetails.driverName || "Driver"} is on the way`}
                 </Text>
                 <Text style={styles.liveNotifVehicle} numberOfLines={1}>
-                  {[chauffeurDetails.carMake, chauffeurDetails.vehicleModel].filter(Boolean).join(" ") || "Your Vehicle"}
-                  {"  ·  "}
-                  <Text style={styles.liveNotifPlate}>{chauffeurDetails.plateNumber}</Text>
+                  {[chauffeurDetails?.carMake, chauffeurDetails?.vehicleModel].filter(Boolean).join(" ")
+                    || (currentRide?.vehicleType ? (getRideVehicle(currentRide.vehicleType)?.name || currentRide.vehicleType) : null)
+                    || selectedVehicle.name}
+                  {chauffeurDetails?.carColor ? ` (${chauffeurDetails.carColor})` : ""}
+                  {chauffeurDetails?.plateNumber ? `  ·  ${chauffeurDetails.plateNumber}` : ""}
                 </Text>
               </View>
               <View style={styles.liveEtaBox}>
@@ -3340,8 +3342,8 @@ export default function ClientHomeScreen() {
               <View style={styles.sheetHandle} />
             </Pressable>
 
-            {/* Header Time / ETA (Image 4) */}
-            <View style={styles.guideHeaderRow}>
+            {/* Header Time / ETA with Minimize button */}
+            <Pressable style={styles.guideHeaderRow} onPress={() => setIsTripSheetMinimized(true)}>
               <Text style={styles.guideHeaderTitle}>
                 {rideStatus === "assigned"
                   ? (liveEtaMin && liveEtaMin > 1 ? `Arriving in ${liveEtaMin} min` : "Driver Arriving now")
@@ -3358,7 +3360,14 @@ export default function ClientHomeScreen() {
                         return `Dropoff at ${hours}:${strMinutes} ${ampm}`;
                       })()}
               </Text>
-            </View>
+              <Pressable
+                style={styles.guideHeaderMinimizeBtn}
+                onPress={() => setIsTripSheetMinimized(true)}
+                hitSlop={12}
+              >
+                <Ionicons name="chevron-down" size={22} color={Colors.white} />
+              </Pressable>
+            </Pressable>
 
             {/* Nested Details Card (Image 4) */}
             <View style={styles.guideCard}>
@@ -5644,9 +5653,21 @@ const styles = StyleSheet.create({
     color: Colors.white,
   },
   guideHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 10,
   },
+  guideHeaderMinimizeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   guideHeaderTitle: {
+    flex: 1,
     fontSize: 22,
     fontFamily: "Inter_700Bold",
     color: Colors.white,

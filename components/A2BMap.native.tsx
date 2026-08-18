@@ -339,7 +339,7 @@ export function A2BMap({
         loadingBackgroundColor={mapBackground}
         loadingIndicatorColor={isDay ? "#111111" : "#FFFFFF"}
         userInterfaceStyle={isDay ? "light" : "dark"}
-        showsUserLocation={true}
+        showsUserLocation={false}
         showsMyLocationButton={false}
         showsCompass={false}
         showsTraffic={false}
@@ -353,7 +353,6 @@ export function A2BMap({
           <Marker
             coordinate={{ latitude: pickupLocation.lat, longitude: pickupLocation.lng }}
             anchor={{ x: 0.5, y: 0.5 }}
-
           >
             <View style={styles.pickupMarker}>
               <View style={styles.pickupBeam} />
@@ -368,12 +367,8 @@ export function A2BMap({
           <Marker
             coordinate={{ latitude: dropoffLocation.lat, longitude: dropoffLocation.lng }}
             anchor={{ x: 0.5, y: 0.5 }}
-
           >
             <View style={styles.destinationPinContainer}>
-              <View style={styles.destinationCallout}>
-                <Text style={styles.destinationCalloutText}>Destination</Text>
-              </View>
               <View style={styles.destinationBlackSquare}>
                 <View style={styles.destinationWhiteDot} />
               </View>

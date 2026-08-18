@@ -3069,7 +3069,7 @@ const styles = StyleSheet.create({
   cancelStyle: { backgroundColor: "rgba(255,77,77,0.08)", borderColor: "rgba(255,77,77,0.2)" },
 
   // Incoming
-  incomingCard: { position: "absolute", left: 16, right: 16, backgroundColor: GLASS, borderRadius: 20, padding: 16, gap: 10, borderWidth: 1, borderColor: "rgba(255,183,77,0.3)", zIndex: 5 },
+  incomingCard: { position: "absolute", left: 16, right: 16, backgroundColor: GLASS, borderRadius: 20, padding: 16, gap: 10, borderWidth: 1.5, borderColor: Colors.warning, zIndex: 99, elevation: 20 },
   incomingHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   incomingClientButton: { flex: 1, flexDirection: "row", alignItems: "center", gap: 4 },
   incomingTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.warning, flex: 1 },

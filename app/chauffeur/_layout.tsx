@@ -170,9 +170,13 @@ export default function ChauffeurLayout() {
     if (!isDriverOverlayAvailable()) return;
 
     async function keepDriverServiceActive() {
-      const enabled = await AsyncStorage.getItem(DRIVER_OVERLAY_ENABLED_KEY) === "true";
-      if (enabled && await hasDriverOverlayPermission()) {
-        await startDriverOverlay();
+      try {
+        const enabled = (await AsyncStorage.getItem(DRIVER_OVERLAY_ENABLED_KEY)) === "true";
+        if (enabled && (await hasDriverOverlayPermission())) {
+          await startDriverOverlay();
+        }
+      } catch (err) {
+        console.log("[driver-overlay] service active:", err);
       }
     }
 
