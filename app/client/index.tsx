@@ -17,7 +17,7 @@ import {
   AppState,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import { BottomTabBarHeightContext } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import Constants from "expo-constants";
@@ -915,7 +915,8 @@ function carColorToHex(color: string): string {
 
 export default function ClientHomeScreen() {
   const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight();
+  const contextTabBarHeight = React.useContext(BottomTabBarHeightContext);
+  const tabBarHeight = typeof contextTabBarHeight === "number" ? contextTabBarHeight : 60;
   const { user, refreshUser, clearSession } = useAuth();
   const isLiftClubMember = user?.liftClubMembership?.status === "approved" || user?.liftClubMembership?.isApproved;
   const { on, off } = useSocket();

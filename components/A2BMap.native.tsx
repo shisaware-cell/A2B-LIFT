@@ -249,10 +249,28 @@ export function A2BMap({
   const routeColor = isDay ? "#111111" : "#FFFFFF";
   const edgeShade = isDay ? "255,255,255" : "0,0,0";
 
+  // Use user's location for initialRegion if available, else Johannesburg
+  const center = pickupLocation || DEFAULT_REGION;
+  const initialRegionRef = useRef({
+    latitude: center.lat,
+    longitude: center.lng,
+    latitudeDelta: IDLE_DELTA,
+    longitudeDelta: IDLE_DELTA,
+  });
+
   const routeCoords = useMemo(() => {
     if (!routePolyline) return [];
     return decodePolyline(routePolyline);
   }, [routePolyline]);
+
+  const zoomToCoords = useCallback((
+    coords: { latitude: number; longitude: number }[],
+    duration = 700
+  ) => {
+    if (!mapRef.current || coords.length === 0) return;
+    const region = computeRegion(coords);
+    mapRef.current.animateToRegion(region, duration);
+  }, []);
 
   const fitMap = useCallback(() => {
     if (!mapRef.current) return;
@@ -264,7 +282,12 @@ export function A2BMap({
         longitudeDelta: 0.005,
       }, 500);
     } else if (routeCoords.length > 0) {
-      mapRef.current.animateToRegion(computeRegion(routeCoords), 500);
+      zoomToCoords(routeCoords, 500);
+    } else if (pickupLocation && dropoffLocation) {
+      zoomToCoords([
+        { latitude: pickupLocation.lat, longitude: pickupLocation.lng },
+        { latitude: dropoffLocation.lat, longitude: dropoffLocation.lng },
+      ], 500);
     } else if (pickupLocation) {
       mapRef.current.animateToRegion({
         latitude: pickupLocation.lat,
@@ -273,7 +296,30 @@ export function A2BMap({
         longitudeDelta: IDLE_DELTA,
       }, 500);
     }
-  }, [followDriver, driverLocation, routeCoords, pickupLocation, IDLE_DELTA]);
+  }, [followDriver, driverLocation, routeCoords, pickupLocation, dropoffLocation, zoomToCoords, IDLE_DELTA]);
+
+  function handleMapReady() {
+    fitMap();
+  }
+
+  // Zoom to route when polyline arrives
+  useEffect(() => {
+    if (routeCoords.length === 0) return;
+    const t = setTimeout(() => zoomToCoords(routeCoords, 700), 200);
+    return () => clearTimeout(t);
+  }, [routeCoords, zoomToCoords]);
+
+  // Zoom to show pickup + dropoff when dropoff is set (before route loads)
+  useEffect(() => {
+    if (!pickupLocation || !dropoffLocation) return;
+    if (routeCoords.length > 0) return;
+    const coords = [
+      { latitude: pickupLocation.lat, longitude: pickupLocation.lng },
+      { latitude: dropoffLocation.lat, longitude: dropoffLocation.lng },
+    ];
+    const t = setTimeout(() => zoomToCoords(coords, 700), 200);
+    return () => clearTimeout(t);
+  }, [pickupLocation?.lat, pickupLocation?.lng, dropoffLocation?.lat, dropoffLocation?.lng, routeCoords.length, zoomToCoords]);
 
   return (
     <View style={[styles.container, { backgroundColor: mapBackground }]}>
@@ -288,6 +334,12 @@ export function A2BMap({
         style={styles.map}
         provider={PROVIDER_GOOGLE}
         customMapStyle={customMapStyle}
+        initialRegion={initialRegionRef.current}
+        onMapReady={handleMapReady}
+        loadingEnabled={true}
+        loadingBackgroundColor={mapBackground}
+        loadingIndicatorColor={isDay ? "#111111" : "#FFFFFF"}
+        userInterfaceStyle={isDay ? "light" : "dark"}
         showsUserLocation={true}
         showsMyLocationButton={false}
         showsCompass={false}
