@@ -119,19 +119,12 @@ const DriverMarker = React.memo(
 
 const driverMarkerStyle = {
   wrap: {
-    width: 58,
-    height: 42,
     alignItems: "center" as const,
     justifyContent: "center" as const,
-    shadowColor: "#000",
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 6,
   },
   image: {
-    width: 56,
-    height: 36,
+    width: 30,
+    height: 62,
   },
 };
 
@@ -618,19 +611,12 @@ const styles = StyleSheet.create({
     fontSize: 9,
   },
   nearbyDriverMarker: {
-    width: 58,
-    height: 42,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 5,
   },
   nearbyDriverImage: {
-    width: 54,
-    height: 36,
+    width: 30,
+    height: 62,
   },
   nearbyEtaPill: {
     backgroundColor: "#FFFFFF",

@@ -2255,7 +2255,7 @@ export default function ChauffeurDashboard() {
           )}
           <View style={{ flex: 1 }}>
             <A2BMap
-              pickupLocation={currentRide ? { lat: parseFloat(currentRide.pickupLat), lng: parseFloat(currentRide.pickupLng) } : myLocation}
+              pickupLocation={currentRide ? { lat: parseFloat(currentRide.pickupLat), lng: parseFloat(currentRide.pickupLng) } : null}
               dropoffLocation={currentRide ? { lat: parseFloat(currentRide.dropoffLat), lng: parseFloat(currentRide.dropoffLng) } : undefined}
               stopLocations={normalizeRideStops(currentRide?.stops)}
               activeStopIndex={hasPendingStop ? completedStopCount : undefined}
@@ -2341,7 +2341,7 @@ export default function ChauffeurDashboard() {
       {/* ─── Full-screen map ─── */}
       <View style={StyleSheet.absoluteFill}>
         <A2BMap
-          pickupLocation={myLocation || (currentRide ? { lat: parseFloat(currentRide.pickupLat), lng: parseFloat(currentRide.pickupLng) } : null)}
+          pickupLocation={currentRide ? { lat: parseFloat(currentRide.pickupLat), lng: parseFloat(currentRide.pickupLng) } : null}
           dropoffLocation={currentRide ? { lat: parseFloat(currentRide.dropoffLat), lng: parseFloat(currentRide.dropoffLng) } : undefined}
           stopLocations={normalizeRideStops(currentRide?.stops)}
           activeStopIndex={hasPendingStop ? completedStopCount : undefined}

@@ -1156,17 +1156,22 @@ export default function ClientHomeScreen() {
             (c: any) =>
               c.isOnline &&
               c.isApproved &&
-              c.lat &&
-              c.lng &&
-              isRecentLocation(c.locationUpdatedAt),
+              c.lat != null &&
+              c.lng != null &&
+              !isNaN(Number(c.lat)) &&
+              !isNaN(Number(c.lng)),
           )
-          .map((c: any) => ({ id: String(c.id), lat: Number(c.lat), lng: Number(c.lng) }));
+          .map((c: any) => ({
+            id: String(c.id),
+            lat: Number(c.lat),
+            lng: Number(c.lng),
+            heading: typeof c.heading === "number" ? c.heading : (typeof c.bearing === "number" ? c.bearing : 0),
+          }));
         setOnlineDrivers((prev) => mergeNearbyDrivers(prev, online));
-
       } catch {}
     }
     fetchOnlineDrivers();
-    const interval = setInterval(fetchOnlineDrivers, 20000);
+    const interval = setInterval(fetchOnlineDrivers, 15000);
     return () => clearInterval(interval);
   }, []);
 
