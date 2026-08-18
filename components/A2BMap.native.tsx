@@ -78,13 +78,10 @@ function calculateBearingDegrees(
   return (brng + 360) % 360;
 }
 
-// Uber/Bolt-style smooth animated car marker with heading rotation and easing
 const DriverMarker = React.memo(
   ({ latitude, longitude, heading }: { latitude: number; longitude: number; heading?: number }) => {
-    const [animatedCoord, setAnimatedCoord] = useState({ latitude, longitude });
-    const [rotation, setRotation] = useState(heading ?? 0);
     const prevCoordRef = useRef({ latitude, longitude });
-    const animFrameRef = useRef<number | null>(null);
+    const [rotation, setRotation] = useState(heading ?? 0);
 
     useEffect(() => {
       const prev = prevCoordRef.current;
@@ -98,45 +95,12 @@ const DriverMarker = React.memo(
         const computedBearing = calculateBearingDegrees(prev.latitude, prev.longitude, latitude, longitude);
         setRotation(computedBearing);
       }
-
-      if (dist > 0.00002 && dist < 0.05) {
-        const startTime = Date.now();
-        const duration = 1000;
-        const startLat = prev.latitude;
-        const startLng = prev.longitude;
-
-        const step = () => {
-          const now = Date.now();
-          const elapsed = now - startTime;
-          const progress = Math.min(elapsed / duration, 1);
-          const ease = 1 - Math.pow(1 - progress, 3);
-          const currentLat = startLat + (latitude - startLat) * ease;
-          const currentLng = startLng + (longitude - startLng) * ease;
-
-          setAnimatedCoord({ latitude: currentLat, longitude: currentLng });
-
-          if (progress < 1) {
-            animFrameRef.current = requestAnimationFrame(step);
-          } else {
-            prevCoordRef.current = { latitude, longitude };
-          }
-        };
-
-        if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-        animFrameRef.current = requestAnimationFrame(step);
-      } else {
-        setAnimatedCoord({ latitude, longitude });
-        prevCoordRef.current = { latitude, longitude };
-      }
-
-      return () => {
-        if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-      };
+      prevCoordRef.current = { latitude, longitude };
     }, [latitude, longitude, heading]);
 
     return (
       <Marker
-        coordinate={animatedCoord}
+        coordinate={{ latitude, longitude }}
         anchor={{ x: 0.5, y: 0.5 }}
         tracksViewChanges={false}
         flat={true}
@@ -152,11 +116,8 @@ const DriverMarker = React.memo(
       </Marker>
     );
   },
-  (prev, next) =>
-    prev.latitude === next.latitude &&
-    prev.longitude === next.longitude &&
-    prev.heading === next.heading,
 );
+
 const driverMarkerStyle = {
   wrap: {
     width: 58,
@@ -178,9 +139,11 @@ const driverMarkerStyle = {
 function decodePolyline(encoded: string): { latitude: number; longitude: number }[] {
   const points: { latitude: number; longitude: number }[] = [];
   let index = 0;
+  const len = encoded.length;
   let lat = 0;
   let lng = 0;
-  while (index < encoded.length) {
+
+  while (index < len) {
     let b: number;
     let shift = 0;
     let result = 0;
@@ -189,7 +152,9 @@ function decodePolyline(encoded: string): { latitude: number; longitude: number 
       result |= (b & 0x1f) << shift;
       shift += 5;
     } while (b >= 0x20);
-    lat += result & 1 ? ~(result >> 1) : result >> 1;
+    const dlat = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+    lat += dlat;
+
     shift = 0;
     result = 0;
     do {
@@ -197,58 +162,52 @@ function decodePolyline(encoded: string): { latitude: number; longitude: number 
       result |= (b & 0x1f) << shift;
       shift += 5;
     } while (b >= 0x20);
-    lng += result & 1 ? ~(result >> 1) : result >> 1;
+    const dlng = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+    lng += dlng;
+
     points.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
   }
   return points;
 }
 
-// Compute a MapView region from an array of coordinates with padding.
-function computeRegion(
-  coords: { latitude: number; longitude: number }[],
-  extraPadFactor = 0.35
-) {
-  const lats = coords.map(c => c.latitude);
-  const lngs = coords.map(c => c.longitude);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLng = Math.min(...lngs);
-  const maxLng = Math.max(...lngs);
-  const latDelta = Math.max((maxLat - minLat) * (1 + extraPadFactor), 0.01);
-  const lngDelta = Math.max((maxLng - minLng) * (1 + extraPadFactor), 0.01);
+function computeRegion(coords: { latitude: number; longitude: number }[]) {
+  let minLat = coords[0].latitude;
+  let maxLat = coords[0].latitude;
+  let minLng = coords[0].longitude;
+  let maxLng = coords[0].longitude;
+
+  for (let i = 1; i < coords.length; i++) {
+    const c = coords[i];
+    if (c.latitude < minLat) minLat = c.latitude;
+    if (c.latitude > maxLat) maxLat = c.latitude;
+    if (c.longitude < minLng) minLng = c.longitude;
+    if (c.longitude > maxLng) maxLng = c.longitude;
+  }
+
+  const midLat = (minLat + maxLat) / 2;
+  const midLng = (minLng + maxLng) / 2;
+  const latDelta = Math.max((maxLat - minLat) * 1.5, 0.008);
+  const lngDelta = Math.max((maxLng - minLng) * 1.5, 0.008);
+
   return {
-    latitude: (minLat + maxLat) / 2,
-    longitude: (minLng + maxLng) / 2,
+    latitude: midLat,
+    longitude: midLng,
     latitudeDelta: latDelta,
     longitudeDelta: lngDelta,
   };
 }
 
-function distanceInMeters(
-  first: { lat: number; lng: number },
-  second: { lat: number; lng: number },
-) {
-  const earthRadiusM = 6371000;
-  const dLat = ((second.lat - first.lat) * Math.PI) / 180;
-  const dLng = ((second.lng - first.lng) * Math.PI) / 180;
-  const lat1 = (first.lat * Math.PI) / 180;
-  const lat2 = (second.lat * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return earthRadiusM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-interface NearbyDriver {
-  id: string | number;
+export type NearbyDriver = {
+  id: string;
   lat: number;
   lng: number;
-}
+  heading?: number;
+};
 
-interface A2BMapProps {
-  pickupLocation: { lat: number; lng: number } | null;
+export type A2BMapProps = {
+  pickupLocation?: { lat: number; lng: number } | null;
   dropoffLocation?: { lat: number; lng: number } | null;
-  stopLocations?: { id?: string; lat: number; lng: number }[];
+  stopLocations?: Array<{ id?: string; lat: number; lng: number }>;
   activeStopIndex?: number;
   driverLocation?: { lat: number; lng: number; heading?: number; speed?: number } | null;
   nearbyDrivers?: NearbyDriver[];
@@ -256,13 +215,12 @@ interface A2BMapProps {
   showDriver?: boolean;
   followDriver?: boolean;
   loading?: boolean;
-  etaText?: string;
-  statusText?: string;
-  /** Initial/idle zoom level. "city" shows the surrounding city; "street" is close-up. */
-  initialZoom?: "street" | "city";
-}
+  etaText?: string | null;
+  statusText?: string | null;
+  initialZoom?: "city" | "street";
+};
 
-function A2BMap({
+export function A2BMap({
   pickupLocation,
   dropoffLocation,
   stopLocations = [],
@@ -277,15 +235,9 @@ function A2BMap({
   statusText,
   initialZoom = "street",
 }: A2BMapProps) {
-  // Idle/initial map span: city-wide view when requested, otherwise close-up.
   const IDLE_DELTA = initialZoom === "city" ? 0.11 : 0.004;
   const mapRef = useRef<MapView>(null);
-  const mapReadyRef = useRef(false);
-  const lastCenteredPickupRef = useRef<{ lat: number; lng: number } | null>(null);
-  const lastFollowedDriverRef = useRef<{ lat: number; lng: number } | null>(null);
 
-  // Auto day/night map. Re-checks every minute so it flips at the 6am / 6pm
-  // boundary without needing the screen to remount.
   const [isDay, setIsDay] = useState(isDaytimeNow);
   useEffect(() => {
     const id = setInterval(() => setIsDay(isDaytimeNow()), 60_000);
@@ -295,133 +247,33 @@ function A2BMap({
   const customMapStyle = isDay ? LIGHT_MAP_STYLE : DARK_MAP_STYLE;
   const mapBackground = isDay ? "#E9ECEF" : "#0B0B0B";
   const routeColor = isDay ? "#111111" : "#FFFFFF";
-  const dropoffIconColor = isDay ? "#111111" : Colors.white;
   const edgeShade = isDay ? "255,255,255" : "0,0,0";
-
-  // Use user's location for initialRegion if available, else Johannesburg
-  const center = pickupLocation || DEFAULT_REGION;
-  const initialRegionRef = useRef({
-    latitude: center.lat,
-    longitude: center.lng,
-    latitudeDelta: IDLE_DELTA,
-    longitudeDelta: IDLE_DELTA,
-  });
 
   const routeCoords = useMemo(() => {
     if (!routePolyline) return [];
     return decodePolyline(routePolyline);
   }, [routePolyline]);
 
-  // Fly the camera to a computed region — more reliable than fitToCoordinates on iOS
-  const zoomToCoords = useCallback((
-    coords: { latitude: number; longitude: number }[],
-    duration = 700
-  ) => {
-    if (!mapRef.current || coords.length === 0) return;
-    const region = computeRegion(coords);
-    mapRef.current.animateToRegion(region, duration);
-  }, []);
-
   const fitMap = useCallback(() => {
     if (!mapRef.current) return;
-
     if (followDriver && driverLocation) {
       mapRef.current.animateToRegion({
         latitude: driverLocation.lat,
         longitude: driverLocation.lng,
         latitudeDelta: 0.005,
         longitudeDelta: 0.005,
-      }, 800);
+      }, 500);
     } else if (routeCoords.length > 0) {
-      zoomToCoords(routeCoords);
-    } else if (pickupLocation && dropoffLocation) {
-      zoomToCoords([
-        { latitude: pickupLocation.lat, longitude: pickupLocation.lng },
-        { latitude: dropoffLocation.lat, longitude: dropoffLocation.lng },
-      ]);
-    } else {
-      const center = pickupLocation || DEFAULT_REGION;
+      mapRef.current.animateToRegion(computeRegion(routeCoords), 500);
+    } else if (pickupLocation) {
       mapRef.current.animateToRegion({
-        latitude: center.lat,
-        longitude: center.lng,
+        latitude: pickupLocation.lat,
+        longitude: pickupLocation.lng,
         latitudeDelta: IDLE_DELTA,
         longitudeDelta: IDLE_DELTA,
-      }, 600);
+      }, 500);
     }
-  }, [pickupLocation, dropoffLocation, driverLocation, routeCoords, followDriver, zoomToCoords, IDLE_DELTA]);
-
-  function handleMapReady() {
-    mapReadyRef.current = true;
-    fitMap();
-    setTimeout(fitMap, 400);
-  }
-
-  // Zoom to user location when GPS first arrives (no route/dropoff set yet)
-  useEffect(() => {
-    if (!pickupLocation || !mapRef.current) return;
-    if (routeCoords.length > 0 || dropoffLocation || followDriver) return;
-    if (
-      lastCenteredPickupRef.current &&
-      distanceInMeters(lastCenteredPickupRef.current, pickupLocation) < 30
-    ) {
-      return;
-    }
-
-    lastCenteredPickupRef.current = {
-      lat: pickupLocation.lat,
-      lng: pickupLocation.lng,
-    };
-
-    mapRef.current.animateToRegion({
-      latitude: pickupLocation.lat,
-      longitude: pickupLocation.lng,
-      latitudeDelta: IDLE_DELTA,
-      longitudeDelta: IDLE_DELTA,
-    }, 400);
-  }, [pickupLocation?.lat, pickupLocation?.lng, dropoffLocation?.lat, dropoffLocation?.lng, routeCoords.length, followDriver, IDLE_DELTA]);
-
-  useEffect(() => {
-    if (!followDriver || !driverLocation || !mapRef.current) return;
-    if (
-      lastFollowedDriverRef.current &&
-      distanceInMeters(lastFollowedDriverRef.current, driverLocation) < 20
-    ) {
-      return;
-    }
-
-    lastFollowedDriverRef.current = {
-      lat: driverLocation.lat,
-      lng: driverLocation.lng,
-    };
-
-    mapRef.current.animateToRegion({
-      latitude: driverLocation.lat,
-      longitude: driverLocation.lng,
-      latitudeDelta: 0.005,
-      longitudeDelta: 0.005,
-    }, 500);
-  }, [followDriver, driverLocation?.lat, driverLocation?.lng]);
-
-  // Zoom to show pickup + dropoff when dropoff is set (before route loads)
-  useEffect(() => {
-    if (!pickupLocation || !dropoffLocation) return;
-    if (routeCoords.length > 0) return;
-    const coords = [
-      { latitude: pickupLocation.lat, longitude: pickupLocation.lng },
-      { latitude: dropoffLocation.lat, longitude: dropoffLocation.lng },
-    ];
-    const t1 = setTimeout(() => zoomToCoords(coords, 700), 200);
-    const t2 = setTimeout(() => zoomToCoords(coords, 700), 800);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [pickupLocation?.lat, pickupLocation?.lng, dropoffLocation?.lat, dropoffLocation?.lng, zoomToCoords]);
-
-  // Zoom to route when polyline arrives — fires with retries, no mapReady gate needed
-  useEffect(() => {
-    if (routeCoords.length === 0) return;
-    const t1 = setTimeout(() => zoomToCoords(routeCoords, 700), 200);
-    const t2 = setTimeout(() => zoomToCoords(routeCoords, 700), 900);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [routeCoords, zoomToCoords]);
+  }, [followDriver, driverLocation, routeCoords, pickupLocation, IDLE_DELTA]);
 
   return (
     <View style={[styles.container, { backgroundColor: mapBackground }]}>
@@ -436,26 +288,21 @@ function A2BMap({
         style={styles.map}
         provider={PROVIDER_GOOGLE}
         customMapStyle={customMapStyle}
-        initialRegion={initialRegionRef.current}
-        onMapReady={handleMapReady}
-        mapType="standard"
-        loadingEnabled={true}
-        loadingBackgroundColor={mapBackground}
-        loadingIndicatorColor={isDay ? "#111111" : "#FFFFFF"}
-        userInterfaceStyle={isDay ? "light" : "dark"}
         showsUserLocation={true}
         showsMyLocationButton={false}
         showsCompass={false}
         showsTraffic={false}
         showsBuildings={false}
-        showsIndoors={false}
+        showsPointsOfInterest={false}
+        pitchEnabled={false}
+        rotateEnabled={false}
         toolbarEnabled={false}
-        mapPadding={{ top: 0, right: 0, bottom: 0, left: 0 }}
       >
         {pickupLocation && (
           <Marker
             coordinate={{ latitude: pickupLocation.lat, longitude: pickupLocation.lng }}
             anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={false}
           >
             <View style={styles.pickupMarker}>
               <View style={styles.pickupDot} />
@@ -466,10 +313,16 @@ function A2BMap({
         {dropoffLocation && (
           <Marker
             coordinate={{ latitude: dropoffLocation.lat, longitude: dropoffLocation.lng }}
-            anchor={{ x: 0.5, y: 1 }}
+            anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={false}
           >
-            <View style={styles.dropoffMarker}>
-              <Ionicons name="location" size={28} color={dropoffIconColor} />
+            <View style={styles.destinationPinContainer}>
+              <View style={styles.destinationCallout}>
+                <Text style={styles.destinationCalloutText}>Destination</Text>
+              </View>
+              <View style={styles.destinationBlackSquare}>
+                <View style={styles.destinationWhiteDot} />
+              </View>
             </View>
           </Marker>
         )}
@@ -488,15 +341,22 @@ function A2BMap({
         ))}
 
         {/* Nearby idle drivers shown when not in an active ride */}
-        {!showDriver && nearbyDrivers.map((driver) => (
+        {!showDriver && nearbyDrivers.map((driver, index) => (
           <Marker
             key={`nearby-${driver.id}`}
             coordinate={{ latitude: driver.lat, longitude: driver.lng }}
             anchor={{ x: 0.5, y: 0.5 }}
             tracksViewChanges={false}
             flat={true}
+            rotation={driver.heading || 0}
           >
             <View style={styles.nearbyDriverMarker}>
+              {index === 0 && etaText && (
+                <View style={styles.nearbyEtaPill}>
+                  <Text style={styles.nearbyEtaPillText}>{etaText}</Text>
+                  <View style={styles.nearbyEtaPillArrow} />
+                </View>
+              )}
               <Image
                 source={NEARBY_CAR_MARKER}
                 style={styles.nearbyDriverImage}
@@ -518,14 +378,20 @@ function A2BMap({
           <Polyline
             coordinates={routeCoords}
             strokeColor={routeColor}
-            strokeWidth={5}
-            zIndex={10}
-            geodesic={true}
+            strokeWidth={4.5}
             lineCap="round"
             lineJoin="round"
           />
         )}
       </MapView>
+
+      <Pressable
+        style={styles.recenterBtn}
+        onPress={fitMap}
+        accessibilityLabel="Recenter Map"
+      >
+        <Ionicons name="locate" size={22} color={isDay ? "#111111" : Colors.white} />
+      </Pressable>
 
       {statusText && (
         <View style={styles.statusOverlay}>
@@ -559,68 +425,107 @@ function sameCoordinateList(
   });
 }
 
-function areMapPropsEqual(previous: A2BMapProps, next: A2BMapProps) {
+function areMapPropsEqual(prev: A2BMapProps, next: A2BMapProps) {
   return (
-    sameCoordinate(previous.pickupLocation, next.pickupLocation) &&
-    sameCoordinate(previous.dropoffLocation, next.dropoffLocation) &&
-    sameCoordinate(previous.driverLocation, next.driverLocation) &&
-    sameCoordinateList(previous.stopLocations, next.stopLocations) &&
-    previous.activeStopIndex === next.activeStopIndex &&
-    sameCoordinateList(previous.nearbyDrivers, next.nearbyDrivers) &&
-    previous.routePolyline === next.routePolyline &&
-    previous.showDriver === next.showDriver &&
-    previous.followDriver === next.followDriver &&
-    previous.loading === next.loading &&
-    previous.etaText === next.etaText &&
-    previous.statusText === next.statusText &&
-    previous.initialZoom === next.initialZoom
+    sameCoordinate(prev.pickupLocation, next.pickupLocation) &&
+    sameCoordinate(prev.dropoffLocation, next.dropoffLocation) &&
+    sameCoordinate(prev.driverLocation, next.driverLocation) &&
+    prev.driverLocation?.heading === next.driverLocation?.heading &&
+    sameCoordinateList(prev.stopLocations, next.stopLocations) &&
+    prev.activeStopIndex === next.activeStopIndex &&
+    sameCoordinateList(prev.nearbyDrivers, next.nearbyDrivers) &&
+    prev.routePolyline === next.routePolyline &&
+    prev.showDriver === next.showDriver &&
+    prev.followDriver === next.followDriver &&
+    prev.loading === next.loading &&
+    prev.etaText === next.etaText &&
+    prev.statusText === next.statusText &&
+    prev.initialZoom === next.initialZoom
   );
 }
 
-export default React.memo(A2BMap, areMapPropsEqual);
+export const MemoizedA2BMap = React.memo(A2BMap, areMapPropsEqual);
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     overflow: "hidden",
-    backgroundColor: "#0B0B0B",
   },
   map: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
   },
   locatingOverlay: {
     position: "absolute",
-    top: 12,
+    top: 20,
     alignSelf: "center",
+    backgroundColor: "rgba(0,0,0,0.75)",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
     zIndex: 10,
   },
   locatingText: {
-    fontSize: 12,
-    fontFamily: "Inter_500Medium",
     color: Colors.white,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
   },
   pickupMarker: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    borderWidth: 2,
-    borderColor: Colors.white,
+    backgroundColor: "rgba(0, 200, 83, 0.25)",
     alignItems: "center",
     justifyContent: "center",
   },
   pickupDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.white,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#00C853",
+    borderWidth: 2,
+    borderColor: Colors.white,
+  },
+  destinationPinContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  destinationCallout: {
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginBottom: 4,
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  destinationCalloutText: {
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+    color: "#111827",
+  },
+  destinationBlackSquare: {
+    width: 16,
+    height: 16,
+    backgroundColor: "#111111",
+    borderRadius: 3,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+  },
+  destinationWhiteDot: {
+    width: 4,
+    height: 4,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 1,
   },
   dropoffMarker: {
     alignItems: "center",
@@ -650,8 +555,8 @@ const styles = StyleSheet.create({
     fontSize: 9,
   },
   nearbyDriverMarker: {
-    width: 54,
-    height: 38,
+    width: 58,
+    height: 42,
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#000",
@@ -661,8 +566,56 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   nearbyDriverImage: {
-    width: 52,
-    height: 34,
+    width: 54,
+    height: 36,
+  },
+  nearbyEtaPill: {
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginBottom: 2,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 3,
+    alignItems: "center",
+  },
+  nearbyEtaPillText: {
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+    color: "#111827",
+  },
+  nearbyEtaPillArrow: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 4,
+    borderRightWidth: 4,
+    borderTopWidth: 4,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderTopColor: "#FFFFFF",
+    alignSelf: "center",
+  },
+  recenterBtn: {
+    position: "absolute",
+    right: 18,
+    bottom: 220,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(30,30,30,0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+    zIndex: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
   },
   statusOverlay: {
     position: "absolute",
@@ -703,3 +656,5 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.5)",
   },
 });
+
+export default MemoizedA2BMap;

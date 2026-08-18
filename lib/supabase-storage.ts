@@ -92,7 +92,8 @@ export async function uploadDocument(
       throw new Error(`Server proxy upload failed: ${err}`);
     }
     const data = await res.json();
-    return data.url as string;
+    const finalUrl = String(data?.url || "");
+    return finalUrl.startsWith("/") ? `${apiUrl}${finalUrl}` : finalUrl;
   } finally {
     clearTimeout(timer);
   }

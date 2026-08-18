@@ -49,11 +49,11 @@ const CATEGORY_VAN_ART = require("../../assets/images/category-van.png");
 const CATEGORY_A2B_LITE_ART = require("../../assets/images/category-a2b-lite.png");
 
 const VEHICLE_TYPES = [
-  { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury_van, badge: "recommended" },
+  { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury_van, badge: "premium" },
   { id: "a2b_lite", name: "A2B Lite", desc: "Hyundai i10 and similar compact cars", artwork: CATEGORY_A2B_LITE_ART, ...VEHICLE_CATEGORY_PRICING.a2b_lite, badge: "cheapest" },
-  { id: "budget", name: "Budget", desc: "Toyota Corolla, Toyota Quest", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.budget },
-  { id: "luxury", name: "Luxury", desc: "BMW 3 Series, Mercedes C Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury },
-  { id: "business", name: "VIP", desc: "BMW 5 Series, Mercedes E Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.business },
+  { id: "budget", name: "Budget", desc: "Toyota Corolla, Toyota Quest", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.budget, badge: "recommended" },
+  { id: "luxury", name: "Luxury", desc: "BMW 3 Series, Mercedes C-Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury },
+  { id: "business", name: "VIP", desc: "BMW 5/7 Series, Mercedes E/S-Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.business },
   { id: "van", name: "Van", desc: "Hyundai H1, Mercedes Vito, Staria", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.van },
 ];
 
@@ -977,6 +977,8 @@ export default function ClientHomeScreen() {
 
   // Notification badge
   const [unreadCount, setUnreadCount] = useState(0);
+  const [isTripSheetMinimized, setIsTripSheetMinimized] = useState(false);
+  const [showTripOptionsMenu, setShowTripOptionsMenu] = useState(false);
 
   // Live driver ETA notification state
   const [liveEtaMin, setLiveEtaMin] = useState<number | null>(null);
@@ -2758,32 +2760,54 @@ export default function ClientHomeScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + (Platform.OS === "web" ? 67 : 0) }]}>
-      <View style={styles.header}>
-        <View style={styles.headerBrand}>
-          <Text style={styles.brandName} numberOfLines={1}>A2B LIFT</Text>
-          <Text style={styles.brandSlogan} numberOfLines={1}>Premium Ride Experience</Text>
+      {/* Top Header / Active Ride Floating Controls (Image 4) */}
+      {(rideStatus === "assigned" || rideStatus === "arriving" || rideStatus === "in_trip") ? (
+        <View style={styles.guideTopBar}>
+          <Pressable
+            style={styles.guideCollapseBtn}
+            onPress={() => setIsTripSheetMinimized(!isTripSheetMinimized)}
+            hitSlop={8}
+            accessibilityLabel="Toggle Trip Details"
+          >
+            <Ionicons name={isTripSheetMinimized ? "chevron-up" : "chevron-down"} size={22} color={Colors.white} />
+          </Pressable>
+          <Pressable
+            style={styles.guideSafetyPill}
+            onPress={() => router.push("/client/safety")}
+            hitSlop={8}
+          >
+            <Ionicons name="shield-checkmark" size={16} color="#3B82F6" />
+            <Text style={styles.guideSafetyText}>Safety</Text>
+          </Pressable>
         </View>
-        <View style={styles.headerRight}>
-          {__DEV__ && (
-            <Pressable style={styles.debugBtn} onPress={() => setShowDebugLogModal(true)} hitSlop={8}>
-              <Ionicons name="bug-outline" size={18} color={Colors.white} />
-            </Pressable>
-          )}
-          {/* Notification bell */}
-          <Pressable style={styles.bellBtn} onPress={() => router.push("/client/notifications")} hitSlop={8}>
-            <Ionicons name="notifications-outline" size={22} color={Colors.white} />
-            {unreadCount > 0 && (
-              <View style={styles.notifBadge}>
-                <Text style={styles.notifBadgeText}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
-              </View>
+      ) : (
+        <View style={styles.header}>
+          <View style={styles.headerBrand}>
+            <Text style={styles.brandName} numberOfLines={1}>A2B LIFT</Text>
+            <Text style={styles.brandSlogan} numberOfLines={1}>Premium Ride Experience</Text>
+          </View>
+          <View style={styles.headerRight}>
+            {__DEV__ && (
+              <Pressable style={styles.debugBtn} onPress={() => setShowDebugLogModal(true)} hitSlop={8}>
+                <Ionicons name="bug-outline" size={18} color={Colors.white} />
+              </Pressable>
             )}
-          </Pressable>
-          {/* Profile icon */}
-          <Pressable style={styles.avatarCircle} onPress={() => router.push("/client/profile")} hitSlop={8}>
-            <Ionicons name="person" size={18} color={Colors.white} />
-          </Pressable>
+            {/* Notification bell */}
+            <Pressable style={styles.bellBtn} onPress={() => router.push("/client/notifications")} hitSlop={8}>
+              <Ionicons name="notifications-outline" size={22} color={Colors.white} />
+              {unreadCount > 0 && (
+                <View style={styles.notifBadge}>
+                  <Text style={styles.notifBadgeText}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
+                </View>
+              )}
+            </Pressable>
+            {/* Profile icon */}
+            <Pressable style={styles.avatarCircle} onPress={() => router.push("/client/profile")} hitSlop={8}>
+              <Ionicons name="person" size={18} color={Colors.white} />
+            </Pressable>
+          </View>
         </View>
-      </View>
+      )}
 
       <View style={styles.mapArea}>
         <A2BMap
@@ -3260,15 +3284,127 @@ export default function ClientHomeScreen() {
       {(rideStatus === "assigned" || rideStatus === "arriving" || rideStatus === "in_trip") && (
         <Animated.View entering={FadeInDown.duration(400)} style={[styles.bottomSheet, { marginBottom: bottomPanelOffset, paddingBottom: bottomPanelPadding }]}>
           <View style={styles.sheetHandle} />
-          <View style={styles.statusBadge}>
-            <View style={[styles.statusDot, { backgroundColor: Colors.success }]} />
-            <Text style={styles.statusText}>
+
+          {/* Header Time / ETA (Image 4) */}
+          <View style={styles.guideHeaderRow}>
+            <Text style={styles.guideHeaderTitle}>
               {rideStatus === "assigned"
-                ? `${chauffeurDetails?.driverName || "Driver"} is on the way`
+                ? (liveEtaMin && liveEtaMin > 1 ? `Arriving in ${liveEtaMin} min` : "Driver Arriving now")
                 : rideStatus === "arriving"
-                  ? `${chauffeurDetails?.driverName || "Driver"} has arrived`
-                  : "Trip In Progress"}
+                  ? "Driver has arrived"
+                  : (() => {
+                      const min = tripDurationMin && tripDurationMin > 0 ? tripDurationMin : 12;
+                      const dropoffDate = new Date(Date.now() + min * 60 * 1000);
+                      let hours = dropoffDate.getHours();
+                      const minutes = dropoffDate.getMinutes();
+                      const ampm = hours >= 12 ? "PM" : "AM";
+                      hours = hours % 12 || 12;
+                      const strMinutes = minutes < 10 ? "0" + minutes : String(minutes);
+                      return `Dropoff at ${hours}:${strMinutes} ${ampm}`;
+                    })()}
             </Text>
+          </View>
+
+          {/* Nested Details Card (Image 4) */}
+          <View style={styles.guideCard}>
+            <View style={styles.guideCardHeader}>
+              <Text style={styles.guideCardSub}>
+                {selectedVehicle.name} details
+              </Text>
+              <Pressable
+                style={styles.guideDotsBtn}
+                onPress={() => setShowTripOptionsMenu(true)}
+                hitSlop={8}
+              >
+                <Ionicons name="ellipsis-horizontal" size={18} color="#9CA3AF" />
+              </Pressable>
+            </View>
+
+            <Text style={styles.guideCardHeading} numberOfLines={2}>
+              Heading to {getActiveRideTarget(currentRide).address}
+            </Text>
+
+            <View style={styles.guideTagRow}>
+              <View style={styles.guideTag}>
+                <Ionicons name="person" size={11} color="#9CA3AF" />
+                <Text style={styles.guideTagText}>Personal ride</Text>
+              </View>
+              <View style={styles.guideTag}>
+                <Ionicons
+                  name={currentRide?.paymentMethod === "card" ? "card-outline" : currentRide?.paymentMethod === "wallet" ? "wallet-outline" : currentRide?.paymentMethod === "pay_later" ? "time-outline" : "cash-outline"}
+                  size={11}
+                  color="#9CA3AF"
+                />
+                <Text style={styles.guideTagText}>{getPaymentMethodLabel(currentRide?.paymentMethod)}</Text>
+              </View>
+            </View>
+
+            {/* Driver Profile Row */}
+            <View style={styles.chauffeurCard}>
+              <Pressable style={styles.chauffeurAvatarBtn} onPress={openDriverProfile}>
+                <View style={styles.chauffeurAvatar}>
+                  {chauffeurDetails?.profilePhoto ? (
+                    <Image
+                      source={{ uri: chauffeurDetails.profilePhoto }}
+                      style={{ width: 48, height: 48, borderRadius: 24 }}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <Ionicons name="person" size={24} color={Colors.white} />
+                  )}
+                </View>
+                <View style={styles.viewProfileBadge}>
+                  <Ionicons name="eye" size={9} color={Colors.white} />
+                </View>
+              </Pressable>
+              <Pressable style={styles.chauffeurInfo} onPress={openDriverProfile}>
+                <Text style={styles.chauffeurName}>{chauffeurDetails?.driverName || "Your Driver"}</Text>
+                {/* Show exact vehicle — make + model */}
+                <Text style={styles.chauffeurVehicle}>
+                  {[chauffeurDetails?.carMake, chauffeurDetails?.vehicleModel].filter(Boolean).join(" ") || selectedVehicle.name}
+                </Text>
+                {chauffeurDetails && (
+                  <View style={styles.driverMeta}>
+                    <View style={styles.ratingChip}>
+                      <Ionicons name="star" size={11} color={Colors.warning} />
+                      <Text style={styles.ratingChipText}>
+                        {chauffeurDetails.driverRating !== null && chauffeurDetails.driverRating !== undefined
+                          ? chauffeurDetails.driverRating.toFixed(1)
+                          : "5.0"}
+                      </Text>
+                    </View>
+                    {/* Plate number chip */}
+                    <View style={styles.plateChip}>
+                      <Text style={styles.plateText}>{chauffeurDetails.plateNumber || "A2B LIFT"}</Text>
+                    </View>
+                  </View>
+                )}
+              </Pressable>
+              <View style={styles.chauffeurActions}>
+                <Pressable
+                  style={styles.actionBtn}
+                  onPress={() => {
+                    if (currentRide?.id) {
+                      router.push({ pathname: "/client/chat", params: { rideId: currentRide.id, driverName: chauffeurDetails?.driverName || "Driver" } });
+                    }
+                  }}
+                >
+                  <Ionicons name="chatbubble" size={18} color={Colors.white} />
+                </Pressable>
+                <Pressable
+                  style={styles.actionBtn}
+                  onPress={() => {
+                    if (chauffeurDetails?.driverPhone) {
+                      Linking.openURL(`tel:${chauffeurDetails.driverPhone}`);
+                    } else {
+                      Alert.alert("Call", "Phone number not available. Use chat instead.");
+                    }
+                  }}
+                >
+                  <Ionicons name="call" size={18} color={Colors.white} />
+                </Pressable>
+              </View>
+            </View>
           </View>
 
           {(currentRide?.status === "chauffeur_arrived" || (rideStatus === "arriving" && currentRide?.arrivedAt)) && (
@@ -3282,156 +3418,44 @@ export default function ClientHomeScreen() {
             </View>
           )}
 
-          <View style={styles.chauffeurCard}>
-            <Pressable style={styles.chauffeurAvatarBtn} onPress={openDriverProfile}>
-              <View style={styles.chauffeurAvatar}>
-                {chauffeurDetails?.profilePhoto ? (
-                  <Image
-                    source={{ uri: chauffeurDetails.profilePhoto }}
-                    style={{ width: 48, height: 48, borderRadius: 24 }}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <Ionicons name="person" size={24} color={Colors.white} />
-                )}
-              </View>
-              <View style={styles.viewProfileBadge}>
-                <Ionicons name="eye" size={9} color={Colors.white} />
-              </View>
-            </Pressable>
-            <Pressable style={styles.chauffeurInfo} onPress={openDriverProfile}>
-              <Text style={styles.chauffeurName}>{chauffeurDetails?.driverName || "Your Driver"}</Text>
-              {/* Show exact vehicle — make + model */}
-              <Text style={styles.chauffeurVehicle}>
-                {[chauffeurDetails?.carMake, chauffeurDetails?.vehicleModel].filter(Boolean).join(" ") || selectedVehicle.name}
-              </Text>
-              {chauffeurDetails && (
-                <View style={styles.driverMeta}>
-                  <View style={styles.ratingChip}>
-                    <Ionicons name="star" size={11} color={Colors.warning} />
-                    <Text style={styles.ratingChipText}>
-                      {chauffeurDetails.driverRating !== null && chauffeurDetails.driverRating !== undefined
-                        ? chauffeurDetails.driverRating.toFixed(1)
-                        : "New"}
-                    </Text>
-                  </View>
-                  {/* Plate number chip */}
-                  <View style={styles.plateChip}>
-                    <Text style={styles.plateText}>{chauffeurDetails.plateNumber}</Text>
-                  </View>
-                  {/* Car color dot */}
-                  {chauffeurDetails.carColor ? (
-                    <View style={styles.colorBadge}>
-                      <View style={[styles.colorDotCircle, { backgroundColor: carColorToHex(chauffeurDetails.carColor) }]} />
-                      <Text style={styles.colorDot}>{chauffeurDetails.carColor}</Text>
-                    </View>
-                  ) : null}
-                </View>
-              )}
-              <Text style={styles.chauffeurTapHint}>Tap to view full profile and rating</Text>
-            </Pressable>
-            <View style={styles.chauffeurActions}>
-              <Pressable
-                style={styles.actionBtn}
-                onPress={() => {
-                  if (currentRide?.id) {
-                    router.push({ pathname: "/client/chat", params: { rideId: currentRide.id, driverName: chauffeurDetails?.driverName || "Driver" } });
-                  }
-                }}
-              >
-                <Ionicons name="chatbubble" size={18} color={Colors.white} />
-              </Pressable>
-              <Pressable
-                style={styles.actionBtn}
-                onPress={() => {
-                  if (chauffeurDetails?.driverPhone) {
-                    Linking.openURL(`tel:${chauffeurDetails.driverPhone}`);
-                  } else {
-                    Alert.alert("Call", "Phone number not available. Use chat instead.");
-                  }
-                }}
-              >
-                <Ionicons name="call" size={18} color={Colors.white} />
-              </Pressable>
-            </View>
-          </View>
-
           {currentRide?.price && (
             <View style={styles.tripPriceRow}>
               <Text style={styles.tripPriceLabel}>Ride Price</Text>
               <Text style={styles.tripPriceValue}>R {currentRide.price}</Text>
             </View>
           )}
-          <View style={styles.activeStopsCard}>
-            <View style={styles.activeStopsHeader}>
-              <View>
+
+          {normalizeRideStops(currentRide?.stops).length > 0 && (
+            <View style={styles.activeStopsCard}>
+              <View style={styles.activeStopsHeader}>
                 <Text style={styles.activeStopsTitle}>
-                  {normalizeRideStops(currentRide?.stops).length > 0
-                    ? `${normalizeRideStops(currentRide?.stops).length} trip stop${normalizeRideStops(currentRide?.stops).length === 1 ? "" : "s"}`
-                    : "Direct trip"}
+                  {normalizeRideStops(currentRide?.stops).length} trip stop{normalizeRideStops(currentRide?.stops).length === 1 ? "" : "s"}
                 </Text>
-                {rideStatus === "in_trip" ? (
-                  <Text style={styles.activeStopsNext} numberOfLines={1}>
-                    Next: {getActiveRideTarget(currentRide).address}
-                  </Text>
-                ) : null}
+                <Pressable style={styles.editStopsBtn} onPress={openActiveStopsEditor}>
+                  <Ionicons name="create-outline" size={14} color={Colors.white} />
+                  <Text style={styles.editStopsBtnText}>Edit stops</Text>
+                </Pressable>
               </View>
-              <Pressable style={styles.editStopsBtn} onPress={openActiveStopsEditor}>
-                <Ionicons name="create-outline" size={14} color={Colors.white} />
-                <Text style={styles.editStopsBtnText}>Edit stops</Text>
-              </Pressable>
             </View>
-            {normalizeRideStops(currentRide?.stops).map((stop, index) => {
-              const isComplete = index < Number(currentRide?.completedStopCount || 0);
-              return (
-                <View key={stop.id} style={styles.activeStopItem}>
-                  <View style={[styles.activeStopNumber, isComplete && styles.activeStopNumberComplete]}>
-                    {isComplete ? (
-                      <Ionicons name="checkmark" size={11} color={Colors.primary} />
-                    ) : (
-                      <Text style={styles.activeStopNumberText}>{index + 1}</Text>
-                    )}
-                  </View>
-                  <Text style={[styles.activeStopAddress, isComplete && styles.activeStopAddressComplete]} numberOfLines={1}>
-                    {stop.address}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-          <View style={styles.selectionMetaRow}>
-            <View style={styles.selectionMetaChip}>
-              <Ionicons name="navigate-circle-outline" size={14} color={Colors.white} />
-              <Text style={styles.selectionMetaText}>{getRoutePreferenceLabel(currentRide?.selectedRouteId)}</Text>
-            </View>
-            <View style={styles.selectionMetaChip}>
-              <Ionicons
-                name={currentRide?.paymentMethod === "card" ? "card-outline" : currentRide?.paymentMethod === "wallet" ? "wallet-outline" : currentRide?.paymentMethod === "pay_later" ? "time-outline" : "cash-outline"}
-                size={14}
-                color={Colors.white}
-              />
-              <Text style={styles.selectionMetaText}>{getPaymentMethodLabel(currentRide?.paymentMethod)}</Text>
-            </View>
-          </View>
-          {(rideStatus === "assigned" || rideStatus === "arriving" || rideStatus === "in_trip") && (
-            <Pressable
-              style={styles.cancelRideActiveBtn}
-              onPress={() => {
-                if (Platform.OS === "web") {
-                  if ((global as any).confirm?.("Are you sure you want to cancel this ride?") !== false) {
-                    cancelRide();
-                  }
-                } else {
-                  Alert.alert("Cancel Ride", getCancellationWarningText(), [
-                    { text: "Keep Ride", style: "cancel" },
-                    { text: "Cancel Ride", style: "destructive", onPress: cancelRide },
-                  ]);
-                }
-              }}
-            >
-              <Text style={styles.cancelRideActiveBtnText}>Cancel Ride</Text>
-            </Pressable>
           )}
+
+          <Pressable
+            style={styles.cancelRideActiveBtn}
+            onPress={() => {
+              if (Platform.OS === "web") {
+                if ((global as any).confirm?.("Are you sure you want to cancel this ride?") !== false) {
+                  cancelRide();
+                }
+              } else {
+                Alert.alert("Cancel Ride", getCancellationWarningText(), [
+                  { text: "Keep Ride", style: "cancel" },
+                  { text: "Cancel Ride", style: "destructive", onPress: cancelRide },
+                ]);
+              }
+            }}
+          >
+            <Text style={styles.cancelRideActiveBtnText}>Cancel Ride</Text>
+          </Pressable>
         </Animated.View>
       )}
 
@@ -3542,6 +3566,77 @@ export default function ClientHomeScreen() {
           </View>
         </KeyboardAvoidingView>
       )}
+
+      {/* Trip Options Menu Modal (Image 4 3-dots action) */}
+      <Modal visible={showTripOptionsMenu} transparent animationType="fade" onRequestClose={() => setShowTripOptionsMenu(false)}>
+        <Pressable style={styles.menuModalOverlay} onPress={() => setShowTripOptionsMenu(false)}>
+          <View style={[styles.menuModalCard, { paddingBottom: insets.bottom + 16 }]}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.menuModalTitle}>Trip Options</Text>
+
+            <Pressable
+              style={styles.menuModalItem}
+              onPress={() => {
+                setShowTripOptionsMenu(false);
+                openActiveStopsEditor();
+              }}
+            >
+              <Ionicons name="create-outline" size={20} color={Colors.white} />
+              <View style={styles.menuModalItemInfo}>
+                <Text style={styles.menuModalItemTitle}>Add or Edit Stops</Text>
+                <Text style={styles.menuModalItemSub}>Change your route destinations</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#6B7280" />
+            </Pressable>
+
+            <Pressable
+              style={styles.menuModalItem}
+              onPress={() => {
+                setShowTripOptionsMenu(false);
+                router.push("/client/safety");
+              }}
+            >
+              <Ionicons name="shield-checkmark-outline" size={20} color="#3B82F6" />
+              <View style={styles.menuModalItemInfo}>
+                <Text style={styles.menuModalItemTitle}>Safety Toolkit</Text>
+                <Text style={styles.menuModalItemSub}>Emergency assistance and trusted contacts</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#6B7280" />
+            </Pressable>
+
+            <Pressable
+              style={styles.menuModalItem}
+              onPress={() => {
+                setShowTripOptionsMenu(false);
+                if (currentRide?.id) {
+                  router.push({ pathname: "/client/chat", params: { rideId: currentRide.id, driverName: chauffeurDetails?.driverName || "Driver" } });
+                }
+              }}
+            >
+              <Ionicons name="chatbubble-outline" size={20} color={Colors.white} />
+              <View style={styles.menuModalItemInfo}>
+                <Text style={styles.menuModalItemTitle}>Contact Driver</Text>
+                <Text style={styles.menuModalItemSub}>Send a message or call your driver</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#6B7280" />
+            </Pressable>
+
+            <Pressable
+              style={[styles.menuModalItem, { borderBottomWidth: 0 }]}
+              onPress={() => {
+                setShowTripOptionsMenu(false);
+                cancelRide();
+              }}
+            >
+              <Ionicons name="close-circle-outline" size={20} color={Colors.error} />
+              <View style={styles.menuModalItemInfo}>
+                <Text style={[styles.menuModalItemTitle, { color: Colors.error }]}>Cancel Ride</Text>
+                <Text style={styles.menuModalItemSub}>End this trip request</Text>
+              </View>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
 
       {/* Driver Profile Modal */}
       <Modal visible={showDriverProfile} transparent animationType="slide" onRequestClose={() => setShowDriverProfile(false)}>
@@ -5421,6 +5516,157 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)",
+  },
+  guideTopBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    zIndex: 30,
+  },
+  guideCollapseBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(30,30,30,0.85)",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+  },
+  guideSafetyPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: "rgba(30,30,30,0.85)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    shadowColor: "#000",
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  guideSafetyText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.white,
+  },
+  guideHeaderRow: {
+    marginBottom: 10,
+  },
+  guideHeaderTitle: {
+    fontSize: 22,
+    fontFamily: "Inter_700Bold",
+    color: Colors.white,
+    letterSpacing: -0.3,
+  },
+  guideCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.07)",
+    gap: 8,
+    marginBottom: 12,
+  },
+  guideCardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  guideCardSub: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: Colors.textMuted,
+  },
+  guideDotsBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  guideCardHeading: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+    color: Colors.white,
+    lineHeight: 22,
+  },
+  guideTagRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+    marginTop: 2,
+    marginBottom: 6,
+  },
+  guideTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  guideTagText: {
+    fontSize: 11,
+    fontFamily: "Inter_500Medium",
+    color: Colors.textMuted,
+  },
+  menuModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    justifyContent: "flex-end",
+  },
+  menuModalCard: {
+    backgroundColor: Colors.card,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  menuModalTitle: {
+    fontSize: 17,
+    fontFamily: "Inter_700Bold",
+    color: Colors.white,
+    marginBottom: 16,
+    textAlign: "center",
+  },
+  menuModalItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+    gap: 14,
+  },
+  menuModalItemInfo: {
+    flex: 1,
+  },
+  menuModalItemTitle: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.white,
+  },
+  menuModalItemSub: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textMuted,
+    marginTop: 2,
   },
   cancelRideActiveBtn: {
     marginTop: 12,

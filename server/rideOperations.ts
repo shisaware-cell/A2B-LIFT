@@ -42,12 +42,9 @@ const MULTI_CATEGORY_MATCHES: Record<string, string[]> = {
   a2b_lite: ["budget"],
 };
 
-// VIP requests may fall back to V-Class, but only after VIP-compatible
-// vehicles have been exhausted. Keep this separate from the general hierarchy
-// so the reverse V-Class -> VIP match is never enabled.
-const FALLBACK_CATEGORY_MATCHES: Record<string, string[]> = {
-  luxury_van: ["business"],
-};
+// Do not cross-match premium sedans (e.g. Mercedes S-Class / VIP) with V-Class vans.
+// Each category must strictly dispatch to vehicles belonging to the requested category.
+const FALLBACK_CATEGORY_MATCHES: Record<string, string[]> = {};
 
 export function normalizeVehicleType(vehicleType?: string | null) {
   const normalized = String(vehicleType || "budget")

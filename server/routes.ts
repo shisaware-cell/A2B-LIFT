@@ -7548,15 +7548,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!uploadRes.ok) {
         const err = await uploadRes.text();
-        console.error("[upload-document] Supabase error:", err);
-        return res.status(500).json({ message: `Supabase upload failed: ${err}` });
+        console.warn("[upload-document] Supabase upload failed, falling back to local media store:", err);
+        const storedMediaId = await storeMediaObject({
+          ownerUserId: safeUserId,
+          purpose: safeDocType,
+          mimeType: contentType,
+          data: buffer,
+        });
+        return res.json({ url: `/api/media/${storedMediaId}` });
       }
 
       const url = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${fileName}`;
       return res.json({ url });
     } catch (error: any) {
-      console.error("[upload-document] error:", error.message);
-      return res.status(500).json({ message: error.message });
+      console.warn("[upload-document] Error during upload, attempting local media store fallback:", error.message);
+      try {
+        const { base64Data, userId, docType, mimeType } = req.body;
+        if (base64Data && userId && docType) {
+          const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, "_") || "user";
+          const safeDocType = String(docType).replace(/[^a-zA-Z0-9_-]/g, "_") || "document";
+          const contentType = typeof mimeType === "string" && mimeType.includes("/") ? mimeType : "image/jpeg";
+          const buffer = Buffer.from(base64Data, "base64");
+          const storedMediaId = await storeMediaObject({
+            ownerUserId: safeUserId,
+            purpose: safeDocType,
+            mimeType: contentType,
+            data: buffer,
+          });
+          return res.json({ url: `/api/media/${storedMediaId}` });
+        }
+      } catch (fallbackError: any) {
+        console.error("[upload-document] Fallback media store failed:", fallbackError.message);
+      }
+      return res.status(500).json({ message: error.message || "Failed to upload document" });
     }
   });
 

@@ -114,15 +114,39 @@ export async function apiRequest(
 
   const normalizedMethod = method.toUpperCase();
   const requestKey = `${normalizedMethod}:${url}:${authHeader.Authorization || ""}`;
-  const executeRequest = async () => {
-    const res = await fetchWithTimeout(url.toString(), {
-      method: normalizedMethod,
-      headers,
-      body: data ? JSON.stringify(data) : undefined,
-      // credentials: "include" is not supported by expo/fetch on native — JWT via Authorization header is used instead
-    });
-    await throwIfResNotOk(res);
-    return res;
+  const executeRequest = async (retries = 2): Promise<Response> => {
+    let attempt = 0;
+    while (true) {
+      try {
+        const res = await fetchWithTimeout(url.toString(), {
+          method: normalizedMethod,
+          headers,
+          body: data ? JSON.stringify(data) : undefined,
+          // credentials: "include" is not supported by expo/fetch on native — JWT via Authorization header is used instead
+        });
+        // If upstream error (502, 503, 504) and we have retries remaining, retry with backoff
+        if ((res.status === 502 || res.status === 503 || res.status === 504) && attempt < retries) {
+          attempt++;
+          await new Promise((r) => setTimeout(r, attempt * 600));
+          continue;
+        }
+        await throwIfResNotOk(res);
+        return res;
+      } catch (err: any) {
+        const isTransient =
+          err?.message?.includes("502") ||
+          err?.message?.includes("503") ||
+          err?.message?.includes("504") ||
+          err?.message?.includes("upstream") ||
+          err?.message?.includes("Network request failed");
+        if (isTransient && attempt < retries) {
+          attempt++;
+          await new Promise((r) => setTimeout(r, attempt * 600));
+          continue;
+        }
+        throw err;
+      }
+    }
   };
 
   if (normalizedMethod !== "GET") {

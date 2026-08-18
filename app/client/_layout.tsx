@@ -23,6 +23,10 @@ function NativeTabLayout() {
         <Icon sf={{ default: "wallet.pass", selected: "wallet.pass.fill" }} />
         <Label>Wallet</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="pay-later">
+        <Icon sf={{ default: "creditcard", selected: "creditcard.fill" }} />
+        <Label>Pay Later</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="profile">
         <Icon sf={{ default: "person", selected: "person.fill" }} />
         <Label>Profile</Label>
@@ -76,6 +80,13 @@ function ClassicTabLayout() {
         options={{
           title: "Wallet",
           tabBarIcon: ({ color, size }) => <Ionicons name="wallet" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="pay-later"
+        options={{
+          title: "Pay Later",
+          tabBarIcon: ({ color, size }) => <Ionicons name="card" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
