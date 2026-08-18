@@ -59,23 +59,21 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
-      {__DEV__ ? (
-        <Pressable
-          onPress={() => setIsModalVisible(true)}
-          accessibilityLabel="View error details"
-          accessibilityRole="button"
-          style={({ pressed }) => [
-            styles.topButton,
-            {
-              top: insets.top + 16,
-              backgroundColor: theme.backgroundSecondary,
-              opacity: pressed ? 0.8 : 1,
-            },
-          ]}
-        >
-          <Feather name="alert-circle" size={20} color={theme.text} />
-        </Pressable>
-      ) : null}
+      <Pressable
+        onPress={() => setIsModalVisible(true)}
+        accessibilityLabel="View error details"
+        accessibilityRole="button"
+        style={({ pressed }) => [
+          styles.topButton,
+          {
+            top: insets.top + 16,
+            backgroundColor: theme.backgroundSecondary,
+            opacity: pressed ? 0.8 : 1,
+          },
+        ]}
+      >
+        <Feather name="alert-circle" size={20} color={theme.text} />
+      </Pressable>
 
       <View style={styles.content}>
         <Text style={[styles.title, { color: theme.text }]}>
@@ -85,6 +83,18 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
         <Text style={[styles.message, { color: theme.textSecondary }]}>
           Please reload the app to continue.
         </Text>
+
+        {error?.message ? (
+          <Pressable
+            onPress={() => setIsModalVisible(true)}
+            style={[styles.inlineErrorBox, { backgroundColor: theme.backgroundSecondary }]}
+          >
+            <Text style={[styles.inlineErrorText, { color: isDark ? "#FF8080" : "#CC0000" }]} numberOfLines={3}>
+              {error.message}
+            </Text>
+            <Text style={[styles.inlineErrorHint, { color: theme.textSecondary }]}>Tap for details</Text>
+          </Pressable>
+        ) : null}
 
         <Pressable
           onPress={handleRestart}
@@ -103,13 +113,12 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
         </Pressable>
       </View>
 
-      {__DEV__ ? (
-        <Modal
-          visible={isModalVisible}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setIsModalVisible(false)}
-        >
+      <Modal
+        visible={isModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsModalVisible(false)}
+      >
           <View style={styles.modalOverlay}>
             <View
               style={[
@@ -282,5 +291,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     width: "100%",
+  },
+  inlineErrorBox: {
+    width: "100%",
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255, 100, 100, 0.3)",
+    gap: 4,
+  },
+  inlineErrorText: {
+    fontSize: 13,
+    fontFamily: "monospace",
+    lineHeight: 18,
+  },
+  inlineErrorHint: {
+    fontSize: 11,
+    fontStyle: "italic",
+    textAlign: "right",
   },
 });
