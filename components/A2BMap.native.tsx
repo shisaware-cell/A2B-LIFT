@@ -102,7 +102,6 @@ const DriverMarker = React.memo(
       <Marker
         coordinate={{ latitude, longitude }}
         anchor={{ x: 0.5, y: 0.5 }}
-        tracksViewChanges={false}
         flat={true}
         rotation={rotation}
       >
@@ -354,7 +353,7 @@ export function A2BMap({
           <Marker
             coordinate={{ latitude: pickupLocation.lat, longitude: pickupLocation.lng }}
             anchor={{ x: 0.5, y: 0.5 }}
-            tracksViewChanges={false}
+
           >
             <View style={styles.pickupMarker}>
               <View style={styles.pickupBeam} />
@@ -369,7 +368,7 @@ export function A2BMap({
           <Marker
             coordinate={{ latitude: dropoffLocation.lat, longitude: dropoffLocation.lng }}
             anchor={{ x: 0.5, y: 0.5 }}
-            tracksViewChanges={false}
+
           >
             <View style={styles.destinationPinContainer}>
               <View style={styles.destinationCallout}>

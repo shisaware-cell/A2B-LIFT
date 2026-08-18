@@ -2838,16 +2838,6 @@ export default function ClientHomeScreen() {
           </View>
         )}
 
-        {/* Nearest driver ETA pill — shown when idle and drivers are nearby */}
-        {(rideStatus === "idle" || rideStatus === "selecting") && nearestDriverEta && onlineDrivers.length > 0 && (
-          <View style={styles.nearbyEtaPill}>
-            <View style={styles.nearbyEtaDot} />
-            <Text style={styles.nearbyEtaText}>
-              {onlineDrivers.length} driver{onlineDrivers.length > 1 ? "s" : ""} nearby · {nearestDriverEta}
-            </Text>
-          </View>
-        )}
-
         {/* Route info overlay — shows arrival time and distance on map when route is drawn */}
         {routePolyline && (rideStatus === "selecting" || rideStatus === "confirming") && (estimatedDistance || tripDurationText) && (() => {
           const arrivalTime = tripDurationMin

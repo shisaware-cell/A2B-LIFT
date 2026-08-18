@@ -76,7 +76,7 @@ test("reconciles fleet models during vehicle selection and dispatch", () => {
   assert.match(routesSource, /resolveVehicleDispatchCategory\(vehicle\)/);
   assert.match(routesSource, /reconcileApprovedFleetCategories\(\)/);
   assert.match(routesSource, /vehicle_type = \$5, updated_at = now\(\)/);
-  assert.match(routesSource, /SET active_vehicle_id = \$2, vehicle_type = \$5/);
+  assert.match(routesSource, /SET active_vehicle_id = \$2,[\s\S]*?vehicle_type = \$5/);
 });
 
 test("checks online drivers concurrently and acknowledges rides before push delivery", () => {

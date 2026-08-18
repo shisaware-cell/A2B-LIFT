@@ -5052,6 +5052,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
               v.vehicle_type,
               v.car_make,
               v.vehicle_model,
+              v.plate_number,
+              v.car_color,
               active_assignment.id AS active_assignment_id,
               previous_assignment.id AS previous_assignment_id
          FROM operator_profiles op
@@ -5129,7 +5131,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             WHERE id = $3 AND type = 'driver' AND status <> 'approved' AND $6::boolean
          )
          UPDATE chauffeurs
-            SET active_vehicle_id = $2, vehicle_type = $5
+            SET active_vehicle_id = $2,
+                vehicle_type = $5,
+                car_make = COALESCE($8, car_make),
+                vehicle_model = COALESCE($9, vehicle_model),
+                plate_number = COALESCE($10, plate_number),
+                car_color = COALESCE($11, car_color)
           WHERE id = $7`,
         [
           row.previous_assignment_id,
@@ -5139,6 +5146,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           vehicleType,
           row.chauffeur_approved,
           row.chauffeur_id,
+          row.car_make,
+          row.vehicle_model,
+          row.plate_number,
+          row.car_color,
         ],
       );
 
@@ -5654,13 +5665,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       driverName: user?.name || "Driver",
       driverPhone: chauffeur.phone || user?.phone || null,
       profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null,
-      carMake: activeVehicle?.make || chauffeur.carMake || null,
-      vehicleModel: activeVehicle?.model || chauffeur.vehicleModel || null,
+      carMake: activeVehicle?.carMake || (activeVehicle as any)?.make || chauffeur.carMake || null,
+      vehicleModel: activeVehicle?.vehicleModel || (activeVehicle as any)?.model || chauffeur.vehicleModel || null,
       plateNumber: activeVehicle?.plateNumber || chauffeur.plateNumber || null,
-      carColor: activeVehicle?.color || chauffeur.carColor || null,
-      vehicleType: activeVehicle?.category || chauffeur.vehicleType || null,
-      vehicleCategory: activeVehicle?.category || chauffeur.vehicleCategory || null,
-      vehicleYear: activeVehicle?.year || chauffeur.vehicleYear || null,
+      carColor: activeVehicle?.carColor || (activeVehicle as any)?.color || chauffeur.carColor || null,
+      vehicleType: activeVehicle?.vehicleType || (activeVehicle as any)?.category || chauffeur.vehicleType || null,
+      vehicleCategory: activeVehicle?.vehicleType || (activeVehicle as any)?.category || chauffeur.vehicleCategory || null,
+      vehicleYear: activeVehicle?.vehicleYear || (activeVehicle as any)?.year || chauffeur.vehicleYear || null,
       driverRating: avgRating,
       totalRatings: ratings.length,
       lat: chauffeur.lat,
