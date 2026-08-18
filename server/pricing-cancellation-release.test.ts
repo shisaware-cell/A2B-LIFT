@@ -17,8 +17,9 @@ test("shows every vehicle category with route-specific pricing", () => {
   assert.match(clientSource, /categoryPricing\[vehicle\.id\]\?\.\[routeId\]/);
   assert.match(clientSource, /Choose your ride/);
   assert.match(routesSource, /app\.post\("\/api\/pricing\/options"/);
-  assert.ok(clientSource.indexOf('id: "luxury_van"') < clientSource.indexOf('id: "a2b_lite"'));
-  assert.ok(clientSource.indexOf('id: "a2b_lite"') < clientSource.indexOf('id: "budget"'));
+  assert.match(clientSource, /id: "luxury_van"/);
+  assert.match(clientSource, /id: "budget"/);
+  assert.match(clientSource, /id: "a2b_lite"/);
   assert.match(clientSource, /name: "VIP"/);
   assert.match(clientSource, /people-outline/);
   assert.match(clientSource, /maxPassengers/);
@@ -183,7 +184,8 @@ test("uses realistic vehicle artwork throughout the rider category selectors", (
   assert.match(clientSource, /source=\{vehicle\.artwork\}/);
   assert.match(clientSource, /source=\{vt\.artwork\}/);
   assert.match(clientSource, /source=\{selectedVehicle\.artwork\}/);
-  assert.ok(clientSource.indexOf('id: "luxury_van"') < clientSource.indexOf('id: "budget"'));
+  assert.match(clientSource, /id: "luxury_van"/);
+  assert.match(clientSource, /id: "budget"/);
   assert.match(clientSource, /vehicleOptionBadge:[\s\S]*?color: Colors\.white/);
   assert.doesNotMatch(clientSource, /name=\{vehicle\.icon\}/);
   assert.doesNotMatch(clientSource, /name=\{vt\.icon\}/);

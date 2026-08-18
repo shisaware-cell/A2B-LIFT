@@ -49,12 +49,12 @@ const CATEGORY_VAN_ART = require("../../assets/images/category-van.png");
 const CATEGORY_A2B_LITE_ART = require("../../assets/images/category-a2b-lite.png");
 
 const VEHICLE_TYPES = [
-  { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury_van, badge: "premium" },
-  { id: "a2b_lite", name: "A2B Lite", desc: "Hyundai i10 and similar compact cars", artwork: CATEGORY_A2B_LITE_ART, ...VEHICLE_CATEGORY_PRICING.a2b_lite, badge: "cheapest" },
   { id: "budget", name: "Budget", desc: "Toyota Corolla, Toyota Quest", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.budget, badge: "recommended" },
+  { id: "a2b_lite", name: "A2B Lite", desc: "Hyundai i10 and similar compact cars", artwork: CATEGORY_A2B_LITE_ART, ...VEHICLE_CATEGORY_PRICING.a2b_lite, badge: "cheapest" },
   { id: "luxury", name: "Luxury", desc: "BMW 3 Series, Mercedes C-Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury },
   { id: "business", name: "VIP", desc: "BMW 5/7 Series, Mercedes E/S-Class", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.business },
   { id: "van", name: "Van", desc: "Hyundai H1, Mercedes Vito, Staria", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.van },
+  { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury_van, badge: "premium" },
 ];
 
 function getRideVehicle(vehicleType: unknown) {
@@ -3282,183 +3282,250 @@ export default function ClientHomeScreen() {
         </Animated.View>
       )}
 
-      {(rideStatus === "assigned" || rideStatus === "arriving" || rideStatus === "in_trip") && (
-        <Animated.View entering={FadeInDown.duration(400)} style={[styles.bottomSheet, { marginBottom: bottomPanelOffset, paddingBottom: bottomPanelPadding }]}>
-          <View style={styles.sheetHandle} />
+      {(rideStatus === "assigned" || rideStatus === "arriving" || rideStatus === "in_trip") && (() => {
+        const activeVehicleName = [chauffeurDetails?.carMake, chauffeurDetails?.vehicleModel].filter(Boolean).join(" ")
+          || (currentRide?.vehicleType ? (getRideVehicle(currentRide.vehicleType)?.name || currentRide.vehicleType) : null)
+          || selectedVehicle.name;
 
-          {/* Header Time / ETA (Image 4) */}
-          <View style={styles.guideHeaderRow}>
-            <Text style={styles.guideHeaderTitle}>
-              {rideStatus === "assigned"
-                ? (liveEtaMin && liveEtaMin > 1 ? `Arriving in ${liveEtaMin} min` : "Driver Arriving now")
-                : rideStatus === "arriving"
-                  ? "Driver has arrived"
-                  : (() => {
-                      const min = tripDurationMin && tripDurationMin > 0 ? tripDurationMin : 12;
-                      const dropoffDate = new Date(Date.now() + min * 60 * 1000);
-                      let hours = dropoffDate.getHours();
-                      const minutes = dropoffDate.getMinutes();
-                      const ampm = hours >= 12 ? "PM" : "AM";
-                      hours = hours % 12 || 12;
-                      const strMinutes = minutes < 10 ? "0" + minutes : String(minutes);
-                      return `Dropoff at ${hours}:${strMinutes} ${ampm}`;
-                    })()}
-            </Text>
-          </View>
-
-          {/* Nested Details Card (Image 4) */}
-          <View style={styles.guideCard}>
-            <View style={styles.guideCardHeader}>
-              <Text style={styles.guideCardSub}>
-                {selectedVehicle.name} details
-              </Text>
-              <Pressable
-                style={styles.guideDotsBtn}
-                onPress={() => setShowTripOptionsMenu(true)}
-                hitSlop={8}
-              >
-                <Ionicons name="ellipsis-horizontal" size={18} color="#9CA3AF" />
-              </Pressable>
-            </View>
-
-            <Text style={styles.guideCardHeading} numberOfLines={2}>
-              Heading to {getActiveRideTarget(currentRide).address}
-            </Text>
-
-            <View style={styles.guideTagRow}>
-              <View style={styles.guideTag}>
-                <Ionicons name="person" size={11} color="#9CA3AF" />
-                <Text style={styles.guideTagText}>Personal ride</Text>
-              </View>
-              <View style={styles.guideTag}>
-                <Ionicons
-                  name={currentRide?.paymentMethod === "card" ? "card-outline" : currentRide?.paymentMethod === "wallet" ? "wallet-outline" : currentRide?.paymentMethod === "pay_later" ? "time-outline" : "cash-outline"}
-                  size={11}
-                  color="#9CA3AF"
-                />
-                <Text style={styles.guideTagText}>{getPaymentMethodLabel(currentRide?.paymentMethod)}</Text>
-              </View>
-            </View>
-
-            {/* Driver Profile Row */}
-            <View style={styles.chauffeurCard}>
-              <Pressable style={styles.chauffeurAvatarBtn} onPress={openDriverProfile}>
-                <View style={styles.chauffeurAvatar}>
-                  {chauffeurDetails?.profilePhoto ? (
-                    <Image
-                      source={{ uri: chauffeurDetails.profilePhoto }}
-                      style={{ width: 48, height: 48, borderRadius: 24 }}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <Ionicons name="person" size={24} color={Colors.white} />
-                  )}
-                </View>
-                <View style={styles.viewProfileBadge}>
-                  <Ionicons name="eye" size={9} color={Colors.white} />
-                </View>
-              </Pressable>
-              <Pressable style={styles.chauffeurInfo} onPress={openDriverProfile}>
-                <Text style={styles.chauffeurName}>{chauffeurDetails?.driverName || "Your Driver"}</Text>
-                {/* Show exact vehicle — make + model */}
-                <Text style={styles.chauffeurVehicle}>
-                  {[chauffeurDetails?.carMake, chauffeurDetails?.vehicleModel].filter(Boolean).join(" ") || selectedVehicle.name}
-                </Text>
-                {chauffeurDetails && (
-                  <View style={styles.driverMeta}>
-                    <View style={styles.ratingChip}>
-                      <Ionicons name="star" size={11} color={Colors.warning} />
-                      <Text style={styles.ratingChipText}>
-                        {chauffeurDetails.driverRating !== null && chauffeurDetails.driverRating !== undefined
-                          ? chauffeurDetails.driverRating.toFixed(1)
-                          : "5.0"}
-                      </Text>
-                    </View>
-                    {/* Plate number chip */}
-                    <View style={styles.plateChip}>
-                      <Text style={styles.plateText}>{chauffeurDetails.plateNumber || "A2B LIFT"}</Text>
-                    </View>
+        if (isTripSheetMinimized) {
+          return (
+            <Animated.View entering={FadeInDown.duration(250)} style={[styles.minimizedTripSheet, { marginBottom: bottomPanelOffset, paddingBottom: Math.max(insets.bottom, 14) }]}>
+              <Pressable style={styles.minimizedTripPressable} onPress={() => setIsTripSheetMinimized(false)}>
+                <View style={styles.minimizedHandle} />
+                <View style={styles.minimizedRow}>
+                  <View style={styles.minimizedAvatarWrap}>
+                    {chauffeurDetails?.profilePhoto ? (
+                      <Image source={{ uri: chauffeurDetails.profilePhoto }} style={styles.minimizedAvatar} resizeMode="cover" />
+                    ) : (
+                      <Ionicons name="person" size={18} color={Colors.white} />
+                    )}
                   </View>
-                )}
+                  <View style={styles.minimizedInfo}>
+                    <Text style={styles.minimizedTitle} numberOfLines={1}>
+                      {rideStatus === "assigned"
+                        ? (liveEtaMin && liveEtaMin > 1 ? `Arriving in ${liveEtaMin} min` : "Driver Arriving now")
+                        : rideStatus === "arriving"
+                          ? "Driver has arrived"
+                          : (() => {
+                              const min = tripDurationMin && tripDurationMin > 0 ? tripDurationMin : 12;
+                              const dropoffDate = new Date(Date.now() + min * 60 * 1000);
+                              let hours = dropoffDate.getHours();
+                              const minutes = dropoffDate.getMinutes();
+                              const ampm = hours >= 12 ? "PM" : "AM";
+                              hours = hours % 12 || 12;
+                              const strMinutes = minutes < 10 ? "0" + minutes : String(minutes);
+                              return `Dropoff at ${hours}:${strMinutes} ${ampm}`;
+                            })()}
+                    </Text>
+                    <Text style={styles.minimizedSub} numberOfLines={1}>
+                      {[chauffeurDetails?.driverName, activeVehicleName, chauffeurDetails?.plateNumber].filter(Boolean).join(" · ")}
+                    </Text>
+                  </View>
+                  <View style={styles.minimizedActionGroup}>
+                    <Pressable
+                      style={styles.minimizedChatBtn}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        if (currentRide?.id) {
+                          router.push({ pathname: "/client/chat", params: { rideId: currentRide.id, driverName: chauffeurDetails?.driverName || "Driver" } });
+                        }
+                      }}
+                    >
+                      <Ionicons name="chatbubble" size={16} color={Colors.white} />
+                    </Pressable>
+                    <Pressable
+                      style={styles.minimizedExpandBtn}
+                      onPress={() => setIsTripSheetMinimized(false)}
+                    >
+                      <Ionicons name="chevron-up" size={20} color={Colors.white} />
+                    </Pressable>
+                  </View>
+                </View>
               </Pressable>
-              <View style={styles.chauffeurActions}>
-                <Pressable
-                  style={styles.actionBtn}
-                  onPress={() => {
-                    if (currentRide?.id) {
-                      router.push({ pathname: "/client/chat", params: { rideId: currentRide.id, driverName: chauffeurDetails?.driverName || "Driver" } });
-                    }
-                  }}
-                >
-                  <Ionicons name="chatbubble" size={18} color={Colors.white} />
-                </Pressable>
-                <Pressable
-                  style={styles.actionBtn}
-                  onPress={() => {
-                    if (chauffeurDetails?.driverPhone) {
-                      Linking.openURL(`tel:${chauffeurDetails.driverPhone}`);
-                    } else {
-                      Alert.alert("Call", "Phone number not available. Use chat instead.");
-                    }
-                  }}
-                >
-                  <Ionicons name="call" size={18} color={Colors.white} />
-                </Pressable>
-              </View>
-            </View>
-          </View>
+            </Animated.View>
+          );
+        }
 
-          {(currentRide?.status === "chauffeur_arrived" || (rideStatus === "arriving" && currentRide?.arrivedAt)) && (
-            <View style={[styles.clientWaitingBadge, clientWaitingElapsedSec >= 300 && styles.clientWaitingBadgeCharged]}>
-              <Ionicons name="time" size={14} color={clientWaitingElapsedSec >= 300 ? "#F59E0B" : "#10B981"} />
-              <Text style={[styles.clientWaitingText, clientWaitingElapsedSec >= 300 && styles.clientWaitingTextCharged]}>
-                {clientWaitingElapsedSec < 300
-                  ? `Free waiting time: ${Math.floor((300 - clientWaitingElapsedSec) / 60)}:${String((300 - clientWaitingElapsedSec) % 60).padStart(2, "0")} remaining`
-                  : `Waiting fee: +R ${(Math.ceil((clientWaitingElapsedSec - 300) / 60) * 1).toFixed(2)} (${Math.floor(clientWaitingElapsedSec / 60)}m)`}
+        return (
+          <Animated.View entering={FadeInDown.duration(300)} style={[styles.bottomSheet, { marginBottom: bottomPanelOffset, paddingBottom: bottomPanelPadding }]}>
+            <Pressable style={styles.sheetHandleWrap} onPress={() => setIsTripSheetMinimized(true)}>
+              <View style={styles.sheetHandle} />
+            </Pressable>
+
+            {/* Header Time / ETA (Image 4) */}
+            <View style={styles.guideHeaderRow}>
+              <Text style={styles.guideHeaderTitle}>
+                {rideStatus === "assigned"
+                  ? (liveEtaMin && liveEtaMin > 1 ? `Arriving in ${liveEtaMin} min` : "Driver Arriving now")
+                  : rideStatus === "arriving"
+                    ? "Driver has arrived"
+                    : (() => {
+                        const min = tripDurationMin && tripDurationMin > 0 ? tripDurationMin : 12;
+                        const dropoffDate = new Date(Date.now() + min * 60 * 1000);
+                        let hours = dropoffDate.getHours();
+                        const minutes = dropoffDate.getMinutes();
+                        const ampm = hours >= 12 ? "PM" : "AM";
+                        hours = hours % 12 || 12;
+                        const strMinutes = minutes < 10 ? "0" + minutes : String(minutes);
+                        return `Dropoff at ${hours}:${strMinutes} ${ampm}`;
+                      })()}
               </Text>
             </View>
-          )}
 
-          {currentRide?.price && (
-            <View style={styles.tripPriceRow}>
-              <Text style={styles.tripPriceLabel}>Ride Price</Text>
-              <Text style={styles.tripPriceValue}>R {currentRide.price}</Text>
-            </View>
-          )}
-
-          {normalizeRideStops(currentRide?.stops).length > 0 && (
-            <View style={styles.activeStopsCard}>
-              <View style={styles.activeStopsHeader}>
-                <Text style={styles.activeStopsTitle}>
-                  {normalizeRideStops(currentRide?.stops).length} trip stop{normalizeRideStops(currentRide?.stops).length === 1 ? "" : "s"}
+            {/* Nested Details Card (Image 4) */}
+            <View style={styles.guideCard}>
+              <View style={styles.guideCardHeader}>
+                <Text style={styles.guideCardSub}>
+                  {activeVehicleName} details
                 </Text>
-                <Pressable style={styles.editStopsBtn} onPress={openActiveStopsEditor}>
-                  <Ionicons name="create-outline" size={14} color={Colors.white} />
-                  <Text style={styles.editStopsBtnText}>Edit stops</Text>
+                <Pressable
+                  style={styles.guideDotsBtn}
+                  onPress={() => setShowTripOptionsMenu(true)}
+                  hitSlop={8}
+                >
+                  <Ionicons name="ellipsis-horizontal" size={18} color="#9CA3AF" />
                 </Pressable>
               </View>
-            </View>
-          )}
 
-          <Pressable
-            style={styles.cancelRideActiveBtn}
-            onPress={() => {
-              if (Platform.OS === "web") {
-                if ((global as any).confirm?.("Are you sure you want to cancel this ride?") !== false) {
-                  cancelRide();
+              <Text style={styles.guideCardHeading} numberOfLines={2}>
+                Heading to {getActiveRideTarget(currentRide).address}
+              </Text>
+
+              <View style={styles.guideTagRow}>
+                <View style={styles.guideTag}>
+                  <Ionicons name="person" size={11} color="#9CA3AF" />
+                  <Text style={styles.guideTagText}>Personal ride</Text>
+                </View>
+                <View style={styles.guideTag}>
+                  <Ionicons
+                    name={currentRide?.paymentMethod === "card" ? "card-outline" : currentRide?.paymentMethod === "wallet" ? "wallet-outline" : currentRide?.paymentMethod === "pay_later" ? "time-outline" : "cash-outline"}
+                    size={11}
+                    color="#9CA3AF"
+                  />
+                  <Text style={styles.guideTagText}>{getPaymentMethodLabel(currentRide?.paymentMethod)}</Text>
+                </View>
+              </View>
+
+              {/* Driver Profile Row */}
+              <View style={styles.chauffeurCard}>
+                <Pressable style={styles.chauffeurAvatarBtn} onPress={openDriverProfile}>
+                  <View style={styles.chauffeurAvatar}>
+                    {chauffeurDetails?.profilePhoto ? (
+                      <Image
+                        source={{ uri: chauffeurDetails.profilePhoto }}
+                        style={{ width: 48, height: 48, borderRadius: 24 }}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Ionicons name="person" size={24} color={Colors.white} />
+                    )}
+                  </View>
+                  <View style={styles.viewProfileBadge}>
+                    <Ionicons name="eye" size={9} color={Colors.white} />
+                  </View>
+                </Pressable>
+                <Pressable style={styles.chauffeurInfo} onPress={openDriverProfile}>
+                  <Text style={styles.chauffeurName}>{chauffeurDetails?.driverName || "Your Driver"}</Text>
+                  {/* Show exact driver vehicle make + model */}
+                  <Text style={styles.chauffeurVehicle}>
+                    {activeVehicleName}
+                  </Text>
+                  {chauffeurDetails && (
+                    <View style={styles.driverMeta}>
+                      <View style={styles.ratingChip}>
+                        <Ionicons name="star" size={11} color={Colors.warning} />
+                        <Text style={styles.ratingChipText}>
+                          {chauffeurDetails.driverRating !== null && chauffeurDetails.driverRating !== undefined
+                            ? chauffeurDetails.driverRating.toFixed(1)
+                            : "5.0"}
+                        </Text>
+                      </View>
+                      {/* Plate number chip */}
+                      <View style={styles.plateChip}>
+                        <Text style={styles.plateText}>{chauffeurDetails.plateNumber || "A2B LIFT"}</Text>
+                      </View>
+                    </View>
+                  )}
+                </Pressable>
+                <View style={styles.chauffeurActions}>
+                  <Pressable
+                    style={styles.actionBtn}
+                    onPress={() => {
+                      if (currentRide?.id) {
+                        router.push({ pathname: "/client/chat", params: { rideId: currentRide.id, driverName: chauffeurDetails?.driverName || "Driver" } });
+                      }
+                    }}
+                  >
+                    <Ionicons name="chatbubble" size={18} color={Colors.white} />
+                  </Pressable>
+                  <Pressable
+                    style={styles.actionBtn}
+                    onPress={() => {
+                      if (chauffeurDetails?.driverPhone) {
+                        Linking.openURL(`tel:${chauffeurDetails.driverPhone}`);
+                      } else {
+                        Alert.alert("Call", "Phone number not available. Use chat instead.");
+                      }
+                    }}
+                  >
+                    <Ionicons name="call" size={18} color={Colors.white} />
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+
+            {(currentRide?.status === "chauffeur_arrived" || (rideStatus === "arriving" && currentRide?.arrivedAt)) && (
+              <View style={[styles.clientWaitingBadge, clientWaitingElapsedSec >= 300 && styles.clientWaitingBadgeCharged]}>
+                <Ionicons name="time" size={14} color={clientWaitingElapsedSec >= 300 ? "#F59E0B" : "#10B981"} />
+                <Text style={[styles.clientWaitingText, clientWaitingElapsedSec >= 300 && styles.clientWaitingTextCharged]}>
+                  {clientWaitingElapsedSec < 300
+                    ? `Free waiting time: ${Math.floor((300 - clientWaitingElapsedSec) / 60)}:${String((300 - clientWaitingElapsedSec) % 60).padStart(2, "0")} remaining`
+                    : `Waiting fee: +R ${(Math.ceil((clientWaitingElapsedSec - 300) / 60) * 1).toFixed(2)} (${Math.floor(clientWaitingElapsedSec / 60)}m)`}
+                </Text>
+              </View>
+            )}
+
+            {currentRide?.price && (
+              <View style={styles.tripPriceRow}>
+                <Text style={styles.tripPriceLabel}>Ride Price</Text>
+                <Text style={styles.tripPriceValue}>R {currentRide.price}</Text>
+              </View>
+            )}
+
+            {normalizeRideStops(currentRide?.stops).length > 0 && (
+              <View style={styles.activeStopsCard}>
+                <View style={styles.activeStopsHeader}>
+                  <Text style={styles.activeStopsTitle}>
+                    {normalizeRideStops(currentRide?.stops).length} trip stop{normalizeRideStops(currentRide?.stops).length === 1 ? "" : "s"}
+                  </Text>
+                  <Pressable style={styles.editStopsBtn} onPress={openActiveStopsEditor}>
+                    <Ionicons name="create-outline" size={14} color={Colors.white} />
+                    <Text style={styles.editStopsBtnText}>Edit stops</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
+            <Pressable
+              style={styles.cancelRideActiveBtn}
+              onPress={() => {
+                if (Platform.OS === "web") {
+                  if ((global as any).confirm?.("Are you sure you want to cancel this ride?") !== false) {
+                    cancelRide();
+                  }
+                } else {
+                  Alert.alert("Cancel Ride", getCancellationWarningText(), [
+                    { text: "Keep Ride", style: "cancel" },
+                    { text: "Cancel Ride", style: "destructive", onPress: cancelRide },
+                  ]);
                 }
-              } else {
-                Alert.alert("Cancel Ride", getCancellationWarningText(), [
-                  { text: "Keep Ride", style: "cancel" },
-                  { text: "Cancel Ride", style: "destructive", onPress: cancelRide },
-                ]);
-              }
-            }}
-          >
-            <Text style={styles.cancelRideActiveBtnText}>Cancel Ride</Text>
-          </Pressable>
-        </Animated.View>
-      )}
+              }}
+            >
+              <Text style={styles.cancelRideActiveBtnText}>Cancel Ride</Text>
+            </Pressable>
+          </Animated.View>
+        );
+      })()}
 
       {rideStatus === "completed" && !showRating && (
         <Animated.View entering={FadeInDown.duration(400)} style={[styles.bottomSheet, { marginBottom: bottomPanelOffset, paddingBottom: bottomPanelPadding }]}>
@@ -5681,6 +5748,90 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Inter_500Medium",
     color: Colors.error,
+  },
+  minimizedTripSheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: -3 },
+    elevation: 10,
+  },
+  minimizedTripPressable: {
+    gap: 8,
+  },
+  minimizedHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    alignSelf: "center",
+  },
+  minimizedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  minimizedAvatarWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  minimizedAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  minimizedInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  minimizedTitle: {
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
+    color: Colors.white,
+  },
+  minimizedSub: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textMuted,
+  },
+  minimizedActionGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  minimizedChatBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  minimizedExpandBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sheetHandleWrap: {
+    paddingVertical: 6,
+    alignItems: "center",
+    justifyContent: "center",
   },
   cancelFullBtn: {
     paddingVertical: 16,
