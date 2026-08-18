@@ -1803,13 +1803,11 @@ export default function ClientHomeScreen() {
       }
     } else if (ride.status === "trip_completed") {
       setRideStatus("completed");
-      setChauffeurDetails(null);
       setDriverLocation(null);
       setEtaText(null);
       setLiveEtaMin(null);
       setInitialEtaMin(null);
       AsyncStorage.removeItem("a2b_client_active_ride").catch(() => {});
-      setTimeout(() => setShowRating(true), 1000);
       if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       queryClient.invalidateQueries({ queryKey: ["/api/rides/client"] });
     }
@@ -3530,24 +3528,50 @@ export default function ClientHomeScreen() {
       {rideStatus === "completed" && !showRating && (
         <Animated.View entering={FadeInDown.duration(400)} style={[styles.bottomSheet, { marginBottom: bottomPanelOffset, paddingBottom: bottomPanelPadding }]}>
           <View style={styles.sheetHandle} />
-          <View style={styles.completedContainer}>
-            <View style={styles.checkCircle}>
-              <Ionicons name="checkmark" size={32} color={Colors.white} />
-            </View>
-            <Text style={styles.completedTitle}>Trip Completed</Text>
-            <Text style={styles.completedPrice}>R {currentRide?.price || estimatedPrice}</Text>
-            {Number(currentRide?.perMinuteAdjustment || 0) > 0 && (
-              <Text style={styles.completedLabel}>
-                Includes R {Math.round(Number(currentRide.perMinuteAdjustment))} traffic time adjustment.
+          {currentRide?.paymentMethod === "cash" ? (
+            <View style={styles.completedContainer}>
+              <View style={[styles.checkCircle, { backgroundColor: "#10B981" }]}>
+                <Ionicons name="cash" size={32} color={Colors.white} />
+              </View>
+              <Text style={styles.completedTitle}>Please Pay Cash</Text>
+              <Text style={[styles.completedPrice, { color: "#10B981" }]}>R {currentRide?.price || estimatedPrice}</Text>
+              <Text style={styles.cashPaymentInstruction}>
+                Please hand R {currentRide?.price || estimatedPrice} in cash to {chauffeurDetails?.driverName || "your driver"} before exiting.
               </Text>
-            )}
-            <Text style={styles.completedLabel}>Thank you for riding with A2B LIFT</Text>
-          </View>
+              {Number(currentRide?.perMinuteAdjustment || 0) > 0 && (
+                <Text style={styles.completedLabel}>
+                  Includes R {Math.round(Number(currentRide.perMinuteAdjustment))} traffic time adjustment.
+                </Text>
+              )}
+            </View>
+          ) : (
+            <View style={styles.completedContainer}>
+              <View style={styles.checkCircle}>
+                <Ionicons name="checkmark" size={32} color={Colors.white} />
+              </View>
+              <Text style={styles.completedTitle}>Trip Completed</Text>
+              <Text style={styles.completedPrice}>R {currentRide?.price || estimatedPrice}</Text>
+              <View style={styles.digitalPaidBadge}>
+                <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                <Text style={styles.digitalPaidBadgeText}>
+                  Paid via {getPaymentMethodLabel(currentRide?.paymentMethod)}
+                </Text>
+              </View>
+              {Number(currentRide?.perMinuteAdjustment || 0) > 0 && (
+                <Text style={styles.completedLabel}>
+                  Includes R {Math.round(Number(currentRide.perMinuteAdjustment))} traffic time adjustment.
+                </Text>
+              )}
+              <Text style={styles.completedLabel}>Thank you for riding with A2B LIFT</Text>
+            </View>
+          )}
           <Pressable
             style={({ pressed }) => [styles.confirmBtn, pressed && { opacity: 0.9 }]}
             onPress={() => setShowRating(true)}
           >
-            <Text style={styles.confirmBtnText}>Rate Your Driver</Text>
+            <Text style={styles.confirmBtnText}>
+              {currentRide?.paymentMethod === "cash" ? "I Have Paid Driver Cash" : "Rate Your Driver"}
+            </Text>
           </Pressable>
         </Animated.View>
       )}
@@ -5839,6 +5863,32 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 1,
     borderColor: Colors.border,
+  },
+  cashPaymentInstruction: {
+    fontSize: 15,
+    fontFamily: "Inter_500Medium",
+    color: Colors.white,
+    textAlign: "center",
+    marginTop: 6,
+    marginBottom: 4,
+    paddingHorizontal: 16,
+    lineHeight: 22,
+  },
+  digitalPaidBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(16,185,129,0.15)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  digitalPaidBadgeText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: "#10B981",
   },
   cancelFullBtnText: {
     fontSize: 15,

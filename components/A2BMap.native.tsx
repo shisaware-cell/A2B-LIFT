@@ -357,7 +357,10 @@ export function A2BMap({
             tracksViewChanges={false}
           >
             <View style={styles.pickupMarker}>
-              <View style={styles.pickupDot} />
+              <View style={styles.pickupBeam} />
+              <View style={styles.pickupOuterRing}>
+                <View style={styles.pickupDot} />
+              </View>
             </View>
           </Marker>
         )}
@@ -442,15 +445,8 @@ export function A2BMap({
         onPress={fitMap}
         accessibilityLabel="Recenter Map"
       >
-        <Ionicons name="locate" size={22} color={isDay ? "#111111" : Colors.white} />
+        <Ionicons name="locate" size={24} color="#000000" />
       </Pressable>
-
-      {statusText && (
-        <View style={styles.statusOverlay}>
-          <Text style={styles.statusOverlayText}>{statusText}</Text>
-          {etaText && <Text style={styles.etaOverlayText}>{etaText}</Text>}
-        </View>
-      )}
 
       <View style={[styles.gradientTop, { backgroundColor: `rgba(${edgeShade},0.3)` }]} />
       <View style={[styles.gradientBottom, { backgroundColor: `rgba(${edgeShade},0.5)` }]} />
@@ -525,20 +521,41 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_500Medium",
   },
   pickupMarker: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: "rgba(0, 200, 83, 0.25)",
     alignItems: "center",
     justifyContent: "center",
+    width: 44,
+    height: 44,
+  },
+  pickupBeam: {
+    position: "absolute",
+    bottom: 2,
+    left: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "rgba(59, 130, 246, 0.3)",
+    transform: [{ rotate: "45deg" }],
+  },
+  pickupOuterRing: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#000000",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2.5,
+    borderColor: "#FFFFFF",
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 5,
   },
   pickupDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#00C853",
-    borderWidth: 2,
-    borderColor: Colors.white,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#FFFFFF",
   },
   destinationPinContainer: {
     alignItems: "center",
@@ -623,28 +640,30 @@ const styles = StyleSheet.create({
   },
   nearbyEtaPill: {
     backgroundColor: "#FFFFFF",
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
     marginBottom: 2,
     shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 3,
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 5,
     alignItems: "center",
+    borderWidth: 0.5,
+    borderColor: "rgba(0,0,0,0.08)",
   },
   nearbyEtaPillText: {
-    fontSize: 11,
+    fontSize: 13,
     fontFamily: "Inter_700Bold",
-    color: "#111827",
+    color: "#000000",
   },
   nearbyEtaPillArrow: {
     width: 0,
     height: 0,
-    borderLeftWidth: 4,
-    borderRightWidth: 4,
-    borderTopWidth: 4,
+    borderLeftWidth: 5,
+    borderRightWidth: 5,
+    borderTopWidth: 5,
     borderLeftColor: "transparent",
     borderRightColor: "transparent",
     borderTopColor: "#FFFFFF",
@@ -654,20 +673,20 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 18,
     bottom: 220,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(30,30,30,0.92)",
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#000",
-    shadowOpacity: 0.35,
-    shadowRadius: 5,
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
     elevation: 6,
     zIndex: 20,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: "rgba(0,0,0,0.08)",
   },
   statusOverlay: {
     position: "absolute",

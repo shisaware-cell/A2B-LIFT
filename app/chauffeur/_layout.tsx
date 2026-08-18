@@ -61,12 +61,11 @@ function ClassicTabLayout() {
           elevation: 0,
           ...(isWeb ? { height: 84 } : {}),
         },
-        tabBarBackground: () =>
-          isIOS ? (
-            <BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFill} />
-          ) : isWeb ? (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.card }]} />
-          ) : null,
+        tabBarBackground: isIOS
+          ? () => <BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFill} />
+          : isWeb
+            ? () => <View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.card }]} />
+            : undefined,
       }}
     >
       <Tabs.Screen
