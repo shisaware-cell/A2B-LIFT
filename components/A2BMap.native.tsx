@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useMemo, useCallback, useState } from "react";
-import { View, Text, StyleSheet, ActivityIndicator, Image } from "react-native";
+import { View, Text, StyleSheet, ActivityIndicator, Image, Pressable } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";

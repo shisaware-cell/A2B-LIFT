@@ -183,7 +183,6 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
             </View>
           </View>
         </Modal>
-      ) : null}
     </View>
   );
 }
