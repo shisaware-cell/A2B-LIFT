@@ -706,7 +706,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
 
     socket.on("chauffeur:location", async (data) => {
-      const { chauffeurId, lat, lng } = data;
+      const { chauffeurId, lat, lng, heading, speed } = data || {};
       if (chauffeurId) {
         // Store chauffeurId on socket for targeted ride dispatch
         (socket.data as any).chauffeurId = chauffeurId;
@@ -715,7 +715,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           lng,
           locationUpdatedAt: new Date(),
         });
-        io.emit("location:update", { chauffeurId, lat, lng });
+        io.emit("location:update", {
+          chauffeurId,
+          lat,
+          lng,
+          heading: typeof heading === "number" && !isNaN(heading) ? heading : undefined,
+          speed: typeof speed === "number" && !isNaN(speed) ? speed : undefined,
+        });
       }
     });
 
@@ -5630,22 +5636,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  async function getResolvedChauffeurDetails(chauffeurId: string, vehicleIdOverride?: string | null) {
+    const chauffeur = await storage.getChauffeur(chauffeurId);
+    if (!chauffeur) return null;
+    const user = chauffeur.userId ? await storage.getUser(chauffeur.userId).catch(() => null) : null;
+    const targetVehicleId = vehicleIdOverride || chauffeur.activeVehicleId;
+    const activeVehicle = targetVehicleId
+      ? await storage.getVehicle(targetVehicleId).catch(() => undefined)
+      : undefined;
+    const ratings = await storage.getRatingsByChauffeur(chauffeurId).catch(() => []);
+    const avgRating =
+      ratings.length > 0
+        ? parseFloat((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1))
+        : (user?.rating ?? 5.0);
+    return {
+      id: chauffeur.id,
+      driverName: user?.name || "Driver",
+      driverPhone: chauffeur.phone || user?.phone || null,
+      profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null,
+      carMake: activeVehicle?.make || chauffeur.carMake || null,
+      vehicleModel: activeVehicle?.model || chauffeur.vehicleModel || null,
+      plateNumber: activeVehicle?.plateNumber || chauffeur.plateNumber || null,
+      carColor: activeVehicle?.color || chauffeur.carColor || null,
+      vehicleType: activeVehicle?.category || chauffeur.vehicleType || null,
+      vehicleCategory: activeVehicle?.category || chauffeur.vehicleCategory || null,
+      vehicleYear: activeVehicle?.year || chauffeur.vehicleYear || null,
+      driverRating: avgRating,
+      totalRatings: ratings.length,
+      lat: chauffeur.lat,
+      lng: chauffeur.lng,
+    };
+  }
+
   app.get("/api/chauffeurs/:id/details", async (req: Request, res: Response) => {
     try {
+      const resolved = await getResolvedChauffeurDetails(req.params.id);
+      if (!resolved) return res.status(404).json({ message: "Chauffeur not found" });
       const chauffeur = await storage.getChauffeur(req.params.id);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
-      const user = await storage.getUser(chauffeur.userId);
-      const ratings = await storage.getRatingsByChauffeur(req.params.id);
-      const avgRating =
-        ratings.length > 0
-          ? parseFloat((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1))
-          : null;
+      const user = chauffeur?.userId ? await storage.getUser(chauffeur.userId).catch(() => null) : null;
       return res.json({
         ...chauffeur,
-        driverName: user?.name || "Chauffeur",
-        driverPhone: chauffeur.phone || user?.phone || null,
-        driverRating: avgRating,
-        totalRatings: ratings.length,
+        ...resolved,
         profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null,
       });
     } catch (error: any) {
@@ -5657,7 +5688,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const chauffeur = await storage.getChauffeur(req.params.id);
       if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
-      const user = await storage.getUser(chauffeur.userId);
+      const user = chauffeur?.userId ? await storage.getUser(chauffeur.userId).catch(() => null) : null;
+      const resolved = await getResolvedChauffeurDetails(req.params.id);
       const ratings = await storage.getRatingsByChauffeur(req.params.id);
 
       const avgRating =
@@ -5690,17 +5722,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.json({
         id: chauffeur.id,
-        driverName: user?.name || "Chauffeur",
+        driverName: resolved?.driverName || "Chauffeur",
         driverRating: avgRating,
         totalRatings: ratings.length,
         completedTrips,
         distribution,
         profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null,
-        carMake: chauffeur.carMake,
-        vehicleModel: chauffeur.vehicleModel,
-        carColor: chauffeur.carColor,
-        plateNumber: chauffeur.plateNumber,
-        vehicleCategory: chauffeur.vehicleCategory,
+        carMake: resolved?.carMake || chauffeur.carMake,
+        vehicleModel: resolved?.vehicleModel || chauffeur.vehicleModel,
+        carColor: resolved?.carColor || chauffeur.carColor,
+        plateNumber: resolved?.plateNumber || chauffeur.plateNumber,
+        vehicleCategory: resolved?.vehicleCategory || chauffeur.vehicleCategory,
         ratings: ratingsWithNames,
       });
     } catch (error: any) {
@@ -8482,13 +8514,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       dispatchTimers.delete(updated.id);
       skippedChauffeursByRide.delete(updated.id);
 
-      // Enrich with client first name before emitting — nav modal uses it immediately
+      // Enrich with client first name and resolved chauffeur details before emitting
       let clientFirstName = "Rider";
       try {
         const client = await storage.getUser(updated.clientId);
         clientFirstName = getUserFirstName(client, "Rider");
       } catch {}
-      const enrichedAccepted = { ...updated, clientFirstName };
+      const chauffeurDetails = await getResolvedChauffeurDetails(chauffeur.id, activeVehicle.id);
+      const enrichedAccepted = { ...updated, clientFirstName, chauffeurDetails };
 
       io.emit("ride:accepted", enrichedAccepted);
       if (updated.clientId) {
@@ -8693,13 +8726,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (clientUser?.username && clientUser.username.includes("@")) {
               let driverInfo = null;
               if (ride.chauffeurId) {
-                const ch = await storage.getChauffeur(ride.chauffeurId);
-                const chUser = ch?.userId ? await storage.getUser(ch.userId) : null;
+                const resolved = await getResolvedChauffeurDetails(ride.chauffeurId, ride.vehicleId);
                 driverInfo = {
-                  name: chUser?.name || "Your Driver",
-                  carMake: ch?.carMake || null,
-                  vehicleModel: ch?.vehicleModel || null,
-                  plateNumber: ch?.plateNumber || null,
+                  name: resolved?.driverName || "Your Driver",
+                  carMake: resolved?.carMake || null,
+                  vehicleModel: resolved?.vehicleModel || null,
+                  plateNumber: resolved?.plateNumber || null,
                 };
               }
               await sendTripInvoiceEmail({
@@ -9516,24 +9548,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         !["trip_completed", "cancelled"].includes(r.status as string)
       );
       if (!activeRide) return res.status(204).end();
-      let chauffeurDetails = null;
-      if (activeRide.chauffeurId) {
-        const ch = await storage.getChauffeur(activeRide.chauffeurId);
-        const chUser = ch?.userId ? await storage.getUser(ch.userId) : null;
-        chauffeurDetails = {
-          id: ch?.id,
-          driverName: chUser?.name || "Driver",
-          driverPhone: ch?.phone || chUser?.phone || null,
-          profilePhoto: ch?.profilePhoto || chUser?.profilePhoto || null,
-          carMake: ch?.carMake || null,
-          vehicleModel: ch?.vehicleModel || null,
-          plateNumber: ch?.plateNumber || null,
-          carColor: ch?.carColor || null,
-          driverRating: chUser?.rating ?? 5.0,
-          lat: ch?.lat,
-          lng: ch?.lng,
-        };
-      }
+      const chauffeurDetails = activeRide.chauffeurId
+        ? await getResolvedChauffeurDetails(activeRide.chauffeurId, activeRide.vehicleId)
+        : null;
       return res.json({
         ...activeRide,
         chauffeurDetails,
@@ -9562,24 +9579,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (!activeRide) return res.status(204).end();
       const client = await storage.getUser(activeRide.clientId).catch(() => null);
-      let chauffeurDetails = null;
-      if (activeRide.chauffeurId) {
-        const ch = await storage.getChauffeur(activeRide.chauffeurId);
-        const chUser = ch?.userId ? await storage.getUser(ch.userId) : null;
-        chauffeurDetails = {
-          id: ch?.id,
-          driverName: chUser?.name || "Driver",
-          driverPhone: ch?.phone || chUser?.phone || null,
-          profilePhoto: ch?.profilePhoto || chUser?.profilePhoto || null,
-          carMake: ch?.carMake || null,
-          vehicleModel: ch?.vehicleModel || null,
-          plateNumber: ch?.plateNumber || null,
-          carColor: ch?.carColor || null,
-          driverRating: chUser?.rating ?? 5.0,
-          lat: ch?.lat,
-          lng: ch?.lng,
-        };
-      }
+      const chauffeurDetails = activeRide.chauffeurId
+        ? await getResolvedChauffeurDetails(activeRide.chauffeurId, activeRide.vehicleId)
+        : null;
       return res.json({
         ...activeRide,
         clientFirstName: getUserFirstName(client, "Rider"),

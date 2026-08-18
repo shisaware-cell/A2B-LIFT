@@ -69,7 +69,7 @@ interface A2BMapProps {
   dropoffLocation?: { lat: number; lng: number } | null;
   stopLocations?: { id?: string; lat: number; lng: number }[];
   activeStopIndex?: number;
-  driverLocation?: { lat: number; lng: number } | null;
+  driverLocation?: { lat: number; lng: number; heading?: number; speed?: number } | null;
   nearbyDrivers?: NearbyDriver[];
   routePolyline?: string | null;
   showDriver?: boolean;

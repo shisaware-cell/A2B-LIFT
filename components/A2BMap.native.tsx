@@ -61,27 +61,101 @@ function isDaytimeNow() {
   return hour >= 6 && hour < 18;
 }
 
-// Isolated memoized component so the driver marker never unmounts/remounts
-// when the parent map re-renders (e.g. from location polling). Only re-renders
-// when latitude or longitude actually changes, which is the correct behaviour.
+function calculateBearingDegrees(
+  prevLat: number,
+  prevLng: number,
+  nextLat: number,
+  nextLng: number,
+): number {
+  const pLat = (prevLat * Math.PI) / 180;
+  const pLng = (prevLng * Math.PI) / 180;
+  const nLat = (nextLat * Math.PI) / 180;
+  const nLng = (nextLng * Math.PI) / 180;
+  const dLng = nLng - pLng;
+  const y = Math.sin(dLng) * Math.cos(nLat);
+  const x = Math.cos(pLat) * Math.sin(nLat) - Math.sin(pLat) * Math.cos(nLat) * Math.cos(dLng);
+  const brng = (Math.atan2(y, x) * 180) / Math.PI;
+  return (brng + 360) % 360;
+}
+
+// Uber/Bolt-style smooth animated car marker with heading rotation and easing
 const DriverMarker = React.memo(
-  ({ latitude, longitude }: { latitude: number; longitude: number }) => (
-    <Marker
-      coordinate={{ latitude, longitude }}
-      anchor={{ x: 0.5, y: 0.5 }}
-      tracksViewChanges={false}
-      flat={true}
-    >
-      <View style={driverMarkerStyle.wrap}>
-        <Image
-          source={NEARBY_CAR_MARKER}
-          style={driverMarkerStyle.image}
-          resizeMode="contain"
-        />
-      </View>
-    </Marker>
-  ),
-  (prev, next) => prev.latitude === next.latitude && prev.longitude === next.longitude,
+  ({ latitude, longitude, heading }: { latitude: number; longitude: number; heading?: number }) => {
+    const [animatedCoord, setAnimatedCoord] = useState({ latitude, longitude });
+    const [rotation, setRotation] = useState(heading ?? 0);
+    const prevCoordRef = useRef({ latitude, longitude });
+    const animFrameRef = useRef<number | null>(null);
+
+    useEffect(() => {
+      const prev = prevCoordRef.current;
+      const dLat = latitude - prev.latitude;
+      const dLng = longitude - prev.longitude;
+      const dist = Math.sqrt(dLat * dLat + dLng * dLng);
+
+      if (typeof heading === "number" && !isNaN(heading) && heading >= 0) {
+        setRotation(heading);
+      } else if (dist > 0.00005) {
+        const computedBearing = calculateBearingDegrees(prev.latitude, prev.longitude, latitude, longitude);
+        setRotation(computedBearing);
+      }
+
+      if (dist > 0.00002 && dist < 0.05) {
+        const startTime = Date.now();
+        const duration = 1000;
+        const startLat = prev.latitude;
+        const startLng = prev.longitude;
+
+        const step = () => {
+          const now = Date.now();
+          const elapsed = now - startTime;
+          const progress = Math.min(elapsed / duration, 1);
+          const ease = 1 - Math.pow(1 - progress, 3);
+          const currentLat = startLat + (latitude - startLat) * ease;
+          const currentLng = startLng + (longitude - startLng) * ease;
+
+          setAnimatedCoord({ latitude: currentLat, longitude: currentLng });
+
+          if (progress < 1) {
+            animFrameRef.current = requestAnimationFrame(step);
+          } else {
+            prevCoordRef.current = { latitude, longitude };
+          }
+        };
+
+        if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = requestAnimationFrame(step);
+      } else {
+        setAnimatedCoord({ latitude, longitude });
+        prevCoordRef.current = { latitude, longitude };
+      }
+
+      return () => {
+        if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      };
+    }, [latitude, longitude, heading]);
+
+    return (
+      <Marker
+        coordinate={animatedCoord}
+        anchor={{ x: 0.5, y: 0.5 }}
+        tracksViewChanges={false}
+        flat={true}
+        rotation={rotation}
+      >
+        <View style={driverMarkerStyle.wrap}>
+          <Image
+            source={NEARBY_CAR_MARKER}
+            style={driverMarkerStyle.image}
+            resizeMode="contain"
+          />
+        </View>
+      </Marker>
+    );
+  },
+  (prev, next) =>
+    prev.latitude === next.latitude &&
+    prev.longitude === next.longitude &&
+    prev.heading === next.heading,
 );
 const driverMarkerStyle = {
   wrap: {
@@ -176,7 +250,7 @@ interface A2BMapProps {
   dropoffLocation?: { lat: number; lng: number } | null;
   stopLocations?: { id?: string; lat: number; lng: number }[];
   activeStopIndex?: number;
-  driverLocation?: { lat: number; lng: number } | null;
+  driverLocation?: { lat: number; lng: number; heading?: number; speed?: number } | null;
   nearbyDrivers?: NearbyDriver[];
   routePolyline?: string | null;
   showDriver?: boolean;
@@ -436,6 +510,7 @@ function A2BMap({
           <DriverMarker
             latitude={driverLocation.lat}
             longitude={driverLocation.lng}
+            heading={driverLocation.heading}
           />
         )}
 

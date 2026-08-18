@@ -1535,7 +1535,11 @@ export default function ChauffeurDashboard() {
 
   const JHB_FALLBACK = { lat: -26.2041, lng: 28.0473 };
 
-  function publishChauffeurLocation(next: { lat: number; lng: number }) {
+  function publishChauffeurLocation(
+    next: { lat: number; lng: number },
+    heading?: number | null,
+    speed?: number | null,
+  ) {
     lastForegroundLocationAtRef.current = Date.now();
     setMyLocation((current) => {
       if (current && haversineDistance(current.lat, current.lng, next.lat, next.lng) < 0.003) {
@@ -1544,7 +1548,13 @@ export default function ChauffeurDashboard() {
       return next;
     });
     if (chauffeur?.id) {
-      emit("chauffeur:location", { chauffeurId: chauffeur.id, lat: next.lat, lng: next.lng });
+      emit("chauffeur:location", {
+        chauffeurId: chauffeur.id,
+        lat: next.lat,
+        lng: next.lng,
+        heading: typeof heading === "number" && !isNaN(heading) && heading >= 0 ? heading : undefined,
+        speed: typeof speed === "number" && !isNaN(speed) && speed >= 0 ? speed : undefined,
+      });
       const now = Date.now();
       if (now - lastLocationRestPostRef.current >= DRIVER_LOCATION_REST_MIN_INTERVAL_MS) {
         lastLocationRestPostRef.current = now;
@@ -1573,13 +1583,13 @@ export default function ChauffeurDashboard() {
       if (alreadyRunning) return;
 
       await Location.startLocationUpdatesAsync(DRIVER_LOCATION_TASK_NAME, {
-        accuracy: HIGH_ACCURACY,
+        accuracy: Location.Accuracy.High,
+        timeInterval: 10_000,
         distanceInterval: 10,
-        timeInterval: 15000,
-        pausesUpdatesAutomatically: false,
+        showsBackgroundLocationIndicator: true,
         foregroundService: {
-          notificationTitle: "A2B LIFT driver mode",
-          notificationBody: "Searching for trips nearby",
+          notificationTitle: "A2B Chauffeur Active",
+          notificationBody: "Sharing location for ride dispatch",
           notificationColor: "#0a0a0a",
         },
       });
@@ -1612,14 +1622,14 @@ export default function ChauffeurDashboard() {
 
       try {
         const loc = await getBestAvailablePosition();
-        publishChauffeurLocation(toLatLng(loc));
+        publishChauffeurLocation(toLatLng(loc), loc.coords?.heading, loc.coords?.speed);
       } catch {
         setMyLocation(JHB_FALLBACK);
       }
 
       try {
         locationWatchRef.current = await watchBestPosition((loc) => {
-          publishChauffeurLocation(toLatLng(loc));
+          publishChauffeurLocation(toLatLng(loc), loc.coords?.heading, loc.coords?.speed);
         });
       } catch {}
 
@@ -1627,7 +1637,7 @@ export default function ChauffeurDashboard() {
         if (Date.now() - lastForegroundLocationAtRef.current < 20_000) return;
         try {
           const loc = await getBestAvailablePosition();
-          publishChauffeurLocation(toLatLng(loc));
+          publishChauffeurLocation(toLatLng(loc), loc.coords?.heading, loc.coords?.speed);
         } catch {}
       }, 15000);
       locationIntervalRef.current = interval;

@@ -206,3 +206,70 @@ test("android build configuration includes required foreground and background lo
   assert.ok(permissions.includes("android.permission.FOREGROUND_SERVICE"));
   assert.ok(permissions.includes("android.permission.FOREGROUND_SERVICE_LOCATION"));
 });
+
+test("calculates accurate bearing rotation angle between GPS coordinates", () => {
+  function calculateBearingDegrees(prevLat: number, prevLng: number, nextLat: number, nextLng: number): number {
+    const pLat = (prevLat * Math.PI) / 180;
+    const pLng = (prevLng * Math.PI) / 180;
+    const nLat = (nextLat * Math.PI) / 180;
+    const nLng = (nextLng * Math.PI) / 180;
+    const dLng = nLng - pLng;
+    const y = Math.sin(dLng) * Math.cos(nLat);
+    const x = Math.cos(pLat) * Math.sin(nLat) - Math.sin(pLat) * Math.cos(nLat) * Math.cos(dLng);
+    const brng = (Math.atan2(y, x) * 180) / Math.PI;
+    return (brng + 360) % 360;
+  }
+
+  // Moving due North: latitude increases, longitude constant -> 0 deg
+  const northBearing = calculateBearingDegrees(-26.2041, 28.0473, -26.1941, 28.0473);
+  assert.ok(Math.abs(northBearing - 0) < 1 || Math.abs(northBearing - 360) < 1);
+
+  // Moving due East: longitude increases, latitude constant -> ~90 deg
+  const eastBearing = calculateBearingDegrees(-26.2041, 28.0473, -26.2041, 28.0573);
+  assert.ok(Math.abs(eastBearing - 90) < 2);
+
+  // Moving due South: latitude decreases, longitude constant -> ~180 deg
+  const southBearing = calculateBearingDegrees(-26.2041, 28.0473, -26.2141, 28.0473);
+  assert.ok(Math.abs(southBearing - 180) < 2);
+});
+
+test("resolves vehicle make, model and plate number from active fleet vehicle over stale chauffeur columns", () => {
+  function resolveVehicleDetails(chauffeur: any, activeVehicle?: any) {
+    return {
+      carMake: activeVehicle?.make || chauffeur.carMake || null,
+      vehicleModel: activeVehicle?.model || chauffeur.vehicleModel || null,
+      plateNumber: activeVehicle?.plateNumber || chauffeur.plateNumber || null,
+      carColor: activeVehicle?.color || chauffeur.carColor || null,
+      vehicleCategory: activeVehicle?.category || chauffeur.vehicleCategory || null,
+    };
+  }
+
+  const staleChauffeur = {
+    carMake: "Toyota",
+    vehicleModel: "Corolla",
+    plateNumber: "OLD 123 GP",
+    carColor: "White",
+    vehicleCategory: "budget",
+  };
+
+  const assignedFleetVehicle = {
+    make: "Mercedes-Benz",
+    model: "C-Class",
+    plateNumber: "NEW 789 GP",
+    color: "Black",
+    category: "executive",
+  };
+
+  const resolved = resolveVehicleDetails(staleChauffeur, assignedFleetVehicle);
+  assert.equal(resolved.carMake, "Mercedes-Benz");
+  assert.equal(resolved.vehicleModel, "C-Class");
+  assert.equal(resolved.plateNumber, "NEW 789 GP");
+  assert.equal(resolved.carColor, "Black");
+  assert.equal(resolved.vehicleCategory, "executive");
+
+  // Fallback when no fleet vehicle assigned
+  const fallback = resolveVehicleDetails(staleChauffeur, null);
+  assert.equal(fallback.carMake, "Toyota");
+  assert.equal(fallback.plateNumber, "OLD 123 GP");
+});
+

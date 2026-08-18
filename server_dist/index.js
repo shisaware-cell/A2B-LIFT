@@ -3202,7 +3202,7 @@ async function registerRoutes(app2) {
       }
     });
     socket.on("chauffeur:location", async (data) => {
-      const { chauffeurId, lat, lng } = data;
+      const { chauffeurId, lat, lng, heading, speed } = data || {};
       if (chauffeurId) {
         socket.data.chauffeurId = chauffeurId;
         await storage.updateChauffeur(chauffeurId, {
@@ -3210,7 +3210,13 @@ async function registerRoutes(app2) {
           lng,
           locationUpdatedAt: /* @__PURE__ */ new Date()
         });
-        io.emit("location:update", { chauffeurId, lat, lng });
+        io.emit("location:update", {
+          chauffeurId,
+          lat,
+          lng,
+          heading: typeof heading === "number" && !isNaN(heading) ? heading : void 0,
+          speed: typeof speed === "number" && !isNaN(speed) ? speed : void 0
+        });
       }
     });
     socket.on("ride:request", async () => {
@@ -7314,19 +7320,41 @@ If you did not request this, you can ignore this email.`,
       return res.status(500).json({ message: error.message });
     }
   });
+  async function getResolvedChauffeurDetails(chauffeurId, vehicleIdOverride) {
+    const chauffeur = await storage.getChauffeur(chauffeurId);
+    if (!chauffeur) return null;
+    const user = chauffeur.userId ? await storage.getUser(chauffeur.userId).catch(() => null) : null;
+    const targetVehicleId = vehicleIdOverride || chauffeur.activeVehicleId;
+    const activeVehicle = targetVehicleId ? await storage.getVehicle(targetVehicleId).catch(() => void 0) : void 0;
+    const ratings = await storage.getRatingsByChauffeur(chauffeurId).catch(() => []);
+    const avgRating = ratings.length > 0 ? parseFloat((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1)) : user?.rating ?? 5;
+    return {
+      id: chauffeur.id,
+      driverName: user?.name || "Driver",
+      driverPhone: chauffeur.phone || user?.phone || null,
+      profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null,
+      carMake: activeVehicle?.make || chauffeur.carMake || null,
+      vehicleModel: activeVehicle?.model || chauffeur.vehicleModel || null,
+      plateNumber: activeVehicle?.plateNumber || chauffeur.plateNumber || null,
+      carColor: activeVehicle?.color || chauffeur.carColor || null,
+      vehicleType: activeVehicle?.category || chauffeur.vehicleType || null,
+      vehicleCategory: activeVehicle?.category || chauffeur.vehicleCategory || null,
+      vehicleYear: activeVehicle?.year || chauffeur.vehicleYear || null,
+      driverRating: avgRating,
+      totalRatings: ratings.length,
+      lat: chauffeur.lat,
+      lng: chauffeur.lng
+    };
+  }
   app2.get("/api/chauffeurs/:id/details", async (req, res) => {
     try {
+      const resolved = await getResolvedChauffeurDetails(req.params.id);
+      if (!resolved) return res.status(404).json({ message: "Chauffeur not found" });
       const chauffeur = await storage.getChauffeur(req.params.id);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
-      const user = await storage.getUser(chauffeur.userId);
-      const ratings = await storage.getRatingsByChauffeur(req.params.id);
-      const avgRating = ratings.length > 0 ? parseFloat((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1)) : null;
+      const user = chauffeur?.userId ? await storage.getUser(chauffeur.userId).catch(() => null) : null;
       return res.json({
         ...chauffeur,
-        driverName: user?.name || "Chauffeur",
-        driverPhone: chauffeur.phone || user?.phone || null,
-        driverRating: avgRating,
-        totalRatings: ratings.length,
+        ...resolved,
         profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null
       });
     } catch (error) {
@@ -7337,7 +7365,8 @@ If you did not request this, you can ignore this email.`,
     try {
       const chauffeur = await storage.getChauffeur(req.params.id);
       if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
-      const user = await storage.getUser(chauffeur.userId);
+      const user = chauffeur?.userId ? await storage.getUser(chauffeur.userId).catch(() => null) : null;
+      const resolved = await getResolvedChauffeurDetails(req.params.id);
       const ratings = await storage.getRatingsByChauffeur(req.params.id);
       const avgRating = ratings.length > 0 ? parseFloat((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(2)) : null;
       const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
@@ -7363,17 +7392,17 @@ If you did not request this, you can ignore this email.`,
       const completedTrips = rides2.filter((r) => r.status === "trip_completed").length;
       return res.json({
         id: chauffeur.id,
-        driverName: user?.name || "Chauffeur",
+        driverName: resolved?.driverName || "Chauffeur",
         driverRating: avgRating,
         totalRatings: ratings.length,
         completedTrips,
         distribution,
         profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null,
-        carMake: chauffeur.carMake,
-        vehicleModel: chauffeur.vehicleModel,
-        carColor: chauffeur.carColor,
-        plateNumber: chauffeur.plateNumber,
-        vehicleCategory: chauffeur.vehicleCategory,
+        carMake: resolved?.carMake || chauffeur.carMake,
+        vehicleModel: resolved?.vehicleModel || chauffeur.vehicleModel,
+        carColor: resolved?.carColor || chauffeur.carColor,
+        plateNumber: resolved?.plateNumber || chauffeur.plateNumber,
+        vehicleCategory: resolved?.vehicleCategory || chauffeur.vehicleCategory,
         ratings: ratingsWithNames
       });
     } catch (error) {
@@ -9784,7 +9813,8 @@ If you did not request this, you can ignore this email.`,
         clientFirstName = getUserFirstName(client, "Rider");
       } catch {
       }
-      const enrichedAccepted = { ...updated, clientFirstName };
+      const chauffeurDetails = await getResolvedChauffeurDetails(chauffeur.id, activeVehicle.id);
+      const enrichedAccepted = { ...updated, clientFirstName, chauffeurDetails };
       io.emit("ride:accepted", enrichedAccepted);
       if (updated.clientId) {
         await storage.createNotification({
@@ -9944,13 +9974,12 @@ If you did not request this, you can ignore this email.`,
             if (clientUser?.username && clientUser.username.includes("@")) {
               let driverInfo = null;
               if (ride.chauffeurId) {
-                const ch = await storage.getChauffeur(ride.chauffeurId);
-                const chUser = ch?.userId ? await storage.getUser(ch.userId) : null;
+                const resolved = await getResolvedChauffeurDetails(ride.chauffeurId, ride.vehicleId);
                 driverInfo = {
-                  name: chUser?.name || "Your Driver",
-                  carMake: ch?.carMake || null,
-                  vehicleModel: ch?.vehicleModel || null,
-                  plateNumber: ch?.plateNumber || null
+                  name: resolved?.driverName || "Your Driver",
+                  carMake: resolved?.carMake || null,
+                  vehicleModel: resolved?.vehicleModel || null,
+                  plateNumber: resolved?.plateNumber || null
                 };
               }
               await sendTripInvoiceEmail({
@@ -10662,24 +10691,7 @@ If you did not request this, you can ignore this email.`,
         (r) => r.clientId === req.params.clientId && !["trip_completed", "cancelled"].includes(r.status)
       );
       if (!activeRide) return res.status(204).end();
-      let chauffeurDetails = null;
-      if (activeRide.chauffeurId) {
-        const ch = await storage.getChauffeur(activeRide.chauffeurId);
-        const chUser = ch?.userId ? await storage.getUser(ch.userId) : null;
-        chauffeurDetails = {
-          id: ch?.id,
-          driverName: chUser?.name || "Driver",
-          driverPhone: ch?.phone || chUser?.phone || null,
-          profilePhoto: ch?.profilePhoto || chUser?.profilePhoto || null,
-          carMake: ch?.carMake || null,
-          vehicleModel: ch?.vehicleModel || null,
-          plateNumber: ch?.plateNumber || null,
-          carColor: ch?.carColor || null,
-          driverRating: chUser?.rating ?? 5,
-          lat: ch?.lat,
-          lng: ch?.lng
-        };
-      }
+      const chauffeurDetails = activeRide.chauffeurId ? await getResolvedChauffeurDetails(activeRide.chauffeurId, activeRide.vehicleId) : null;
       return res.json({
         ...activeRide,
         chauffeurDetails
@@ -10705,24 +10717,7 @@ If you did not request this, you can ignore this email.`,
       }
       if (!activeRide) return res.status(204).end();
       const client = await storage.getUser(activeRide.clientId).catch(() => null);
-      let chauffeurDetails = null;
-      if (activeRide.chauffeurId) {
-        const ch = await storage.getChauffeur(activeRide.chauffeurId);
-        const chUser = ch?.userId ? await storage.getUser(ch.userId) : null;
-        chauffeurDetails = {
-          id: ch?.id,
-          driverName: chUser?.name || "Driver",
-          driverPhone: ch?.phone || chUser?.phone || null,
-          profilePhoto: ch?.profilePhoto || chUser?.profilePhoto || null,
-          carMake: ch?.carMake || null,
-          vehicleModel: ch?.vehicleModel || null,
-          plateNumber: ch?.plateNumber || null,
-          carColor: ch?.carColor || null,
-          driverRating: chUser?.rating ?? 5,
-          lat: ch?.lat,
-          lng: ch?.lng
-        };
-      }
+      const chauffeurDetails = activeRide.chauffeurId ? await getResolvedChauffeurDetails(activeRide.chauffeurId, activeRide.vehicleId) : null;
       return res.json({
         ...activeRide,
         clientFirstName: getUserFirstName(client, "Rider"),

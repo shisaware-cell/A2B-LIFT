@@ -943,7 +943,8 @@ export default function ClientHomeScreen() {
   const [routePolyline, setRoutePolyline] = useState<string | null>(null);
   const [tripDurationText, setTripDurationText] = useState<string | null>(null);
   const [tripDurationMin, setTripDurationMin] = useState<number | null>(null);
-  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number; heading?: number; speed?: number } | null>(null);
+  const lastLiveRouteRefreshRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
   const [etaText, setEtaText] = useState<string | null>(null);
   const [showRating, setShowRating] = useState(false);
   const [rating, setRating] = useState<number>(0);
@@ -1622,9 +1623,23 @@ export default function ClientHomeScreen() {
         locationWatchRef.current = null;
         setLocation(coords);
         setPickupAddress(address);
+        if (dropoffCoords) {
+          void fetchRouteChoices(coords, dropoffCoords).then((choices) => {
+            if (choices && choices.length > 0) {
+              setRideStatus("confirming");
+            }
+          }).catch(() => {});
+        }
       } else if (locationPickerTarget === "dropoff") {
         setDropoffCoords(coords);
         setDropoffAddress(address);
+        if (location) {
+          void fetchRouteChoices(location, coords).then((choices) => {
+            if (choices && choices.length > 0) {
+              setRideStatus("confirming");
+            }
+          }).catch(() => {});
+        }
       } else {
         const stopIndex = locationPickerTarget;
         setStops((current) => current.map((stop, index) =>
@@ -1737,6 +1752,16 @@ export default function ClientHomeScreen() {
     const rideVehicle = getRideVehicle(ride.vehicleType);
     if (rideVehicle) setSelectedVehicle(rideVehicle);
     setCurrentRide(ride);
+    if (ride.chauffeurDetails) {
+      setChauffeurDetails(ride.chauffeurDetails);
+      if (ride.chauffeurDetails.lat && ride.chauffeurDetails.lng) {
+        setDriverLocation({
+          lat: Number(ride.chauffeurDetails.lat),
+          lng: Number(ride.chauffeurDetails.lng),
+          heading: ride.chauffeurDetails.heading,
+        });
+      }
+    }
     if (!["trip_completed", "cancelled"].includes(ride.status)) {
       AsyncStorage.setItem("a2b_client_active_ride", JSON.stringify(ride)).catch(() => {});
     }
@@ -1749,7 +1774,7 @@ export default function ClientHomeScreen() {
         // Fetch driver's current location to show route from driver → pickup
         apiRequest("GET", `/api/chauffeurs/${ride.chauffeurId}`).then(r => r.json()).then((c: any) => {
           if (c.lat && c.lng && ride.pickupLat && ride.pickupLng) {
-            const driverLoc = { lat: c.lat, lng: c.lng };
+            const driverLoc = { lat: c.lat, lng: c.lng, heading: c.heading };
             setDriverLocation(driverLoc);
             fetchRoute(driverLoc, { lat: ride.pickupLat, lng: ride.pickupLng });
             // Set initial ETA from haversine distance (will be refined by route API)
@@ -1775,6 +1800,11 @@ export default function ClientHomeScreen() {
       }
     } else if (ride.status === "trip_completed") {
       setRideStatus("completed");
+      setChauffeurDetails(null);
+      setDriverLocation(null);
+      setEtaText(null);
+      setLiveEtaMin(null);
+      setInitialEtaMin(null);
       AsyncStorage.removeItem("a2b_client_active_ride").catch(() => {});
       setTimeout(() => setShowRating(true), 1000);
       if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -1907,14 +1937,20 @@ export default function ClientHomeScreen() {
   useEffect(() => {
     const handleDriverLocation = (data: any) => {
       if (currentRide && data.chauffeurId === currentRide.chauffeurId) {
-        const driverLoc = { lat: data.lat, lng: data.lng };
+        const driverLoc = {
+          lat: data.lat,
+          lng: data.lng,
+          heading: typeof data.heading === "number" && !isNaN(data.heading) ? data.heading : undefined,
+          speed: typeof data.speed === "number" && !isNaN(data.speed) ? data.speed : undefined,
+        };
         setDriverLocation(driverLoc);
 
         // Recompute live ETA from driver to client (assigned/arriving) or to dropoff (in_trip)
-        const destLat = rideStatus === "in_trip"
+        const isTripInProgress = rideStatus === "in_trip";
+        const destLat = isTripInProgress
           ? parseFloat(currentRide.dropoffLat)
           : location?.lat ?? parseFloat(currentRide.pickupLat);
-        const destLng = rideStatus === "in_trip"
+        const destLng = isTripInProgress
           ? parseFloat(currentRide.dropoffLng)
           : location?.lng ?? parseFloat(currentRide.pickupLng);
 
@@ -1924,6 +1960,15 @@ export default function ClientHomeScreen() {
         // Update live ETA for notification banner
         setLiveEtaMin(etaMin);
         setInitialEtaMin(prev => prev ?? etaMin);
+
+        // Live route polyline refresh as driver moves
+        const now = Date.now();
+        const lastRefresh = lastLiveRouteRefreshRef.current;
+        const movedKm = lastRefresh ? haversineDistance(driverLoc.lat, driverLoc.lng, lastRefresh.lat, lastRefresh.lng) : 1;
+        if (!lastRefresh || (now - lastRefresh.time > 15000 && movedKm > 0.08)) {
+          lastLiveRouteRefreshRef.current = { lat: driverLoc.lat, lng: driverLoc.lng, time: now };
+          fetchRoute(driverLoc, { lat: destLat, lng: destLng });
+        }
       }
     };
     on("location:update", handleDriverLocation);
@@ -2059,12 +2104,18 @@ export default function ClientHomeScreen() {
       : fallbackRoute;
     const choiceDescriptors = buildRouteChoiceDescriptors(sourceRoutes);
     if (choiceDescriptors.length === 0) {
-      if (stops.length > 0) {
-        setRouteChoices([]);
-        setCategoryPricing({});
-        return [];
-      }
       const approximateChoice = buildApproximateRouteChoice(origin, dest, selectedVehicle, isLateNightWindow());
+      if (data?.polyline) {
+        approximateChoice.polyline = data.polyline;
+      }
+      if (data?.distanceKm) {
+        approximateChoice.distanceKm = Number(data.distanceKm);
+        approximateChoice.distanceText = data.distanceText || `${Math.round(data.distanceKm)} km`;
+      }
+      if (data?.durationMin) {
+        approximateChoice.durationMin = Number(data.durationMin);
+        approximateChoice.durationText = data.durationText || `${Math.round(data.durationMin)} min`;
+      }
       const pricing = await fetchCategoryPricing([{
         id: approximateChoice.id,
         distanceKm: approximateChoice.distanceKm,
@@ -2163,7 +2214,11 @@ export default function ClientHomeScreen() {
     }
 
     setRouteChoices(choices);
-    applyRouteChoice(choices[0]);
+    const existingChoice = choices.find((c) => c.id === selectedRouteId);
+    const chosen = existingChoice || choices[0];
+    if (chosen) {
+      applyRouteChoice(chosen);
+    }
     return choices;
   }
 
@@ -2352,6 +2407,11 @@ export default function ClientHomeScreen() {
   async function proceedWithRide(method: "cash" | "card" | "wallet" | "pay_later") {
     if (rideRequestLoading) return;
     setRideRequestLoading(true);
+    setChauffeurDetails(null);
+    setDriverLocation(null);
+    setLiveEtaMin(null);
+    setInitialEtaMin(null);
+    setEtaText(null);
     try {
       const ride = await createRideRecord(method);
       if (!ride) return;
@@ -2592,7 +2652,10 @@ export default function ClientHomeScreen() {
     setTripDurationText(null);
     setTripDurationMin(null);
     setDriverLocation(null);
+    setChauffeurDetails(null);
     setEtaText(null);
+    setLiveEtaMin(null);
+    setInitialEtaMin(null);
     Alert.alert(
       "Ride cancelled",
       appliedFee > 0
