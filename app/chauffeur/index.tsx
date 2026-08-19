@@ -49,6 +49,7 @@ import {
   hasDriverOverlayPermission,
   isDriverOverlayAvailable,
   startDriverOverlay,
+  setDriverOverlayEventCount,
 } from "@/lib/driver-overlay";
 import {
   getNavigationVoiceEnabled,
@@ -459,15 +460,13 @@ export default function ChauffeurDashboard() {
   }
 
   function getRideRouteLabel(routeId?: string | null) {
-    if (routeId === "faster_route") return "Faster Route";
-    if (routeId === "safest_route") return "Safer Route";
-    return "Balanced Route";
+    if (routeId === "safest_route") return "Safest (Highway)";
+    return "Fastest";
   }
 
   function getRideRouteIcon(routeId?: string | null): keyof typeof Ionicons.glyphMap {
-    if (routeId === "faster_route") return "flash-outline";
     if (routeId === "safest_route") return "shield-checkmark-outline";
-    return "navigate-circle-outline";
+    return "flash-outline";
   }
 
   function getRidePaymentLabel(method?: string | null) {
@@ -754,6 +753,21 @@ export default function ChauffeurDashboard() {
         if (ride?.currentOfferExpiresAt && new Date(ride.currentOfferExpiresAt).getTime() <= Date.now()) return;
         seenRideIdRef.current = ride.id || null;
         setAvailableTrips((prev) => prev.filter((trip) => trip.id !== ride.id));
+        if (isDriverOverlayAvailable()) {
+          void setDriverOverlayEventCount(1);
+        }
+        if (notificationsRef.current) {
+          void notificationsRef.current.scheduleNotificationAsync({
+            content: {
+              title: "🚗 Incoming Trip Request!",
+              body: `New ride offer: ${ride.pickupAddress || "Nearby pickup"} · Tap to accept`,
+              data: { type: "ride:new", rideId: ride.id },
+              sound: "trip_alert.wav",
+              priority: "max",
+            },
+            trigger: null,
+          }).catch(() => {});
+        }
         void presentIncomingRide(ride).then((presentedRide) => {
           if (presentedRide && ride.id !== suppressedRideAlertIdRef.current) playTripAlert();
         });
@@ -2266,13 +2280,6 @@ export default function ChauffeurDashboard() {
     currentRide?.status === "chauffeur_assigned" ? `On the way to pick up ${clientDisplayName}` :
     currentRide?.status === "chauffeur_arriving" ? `Arriving at ${clientDisplayName}'s pickup` :
     hasPendingStop ? `Driving to stop ${completedStopCount + 1} of ${currentRideStops.length}` :
-    currentRide?.status === "trip_started" ? `Driving to final destination` : "Active Ride";
-  const routeOptionsHeading =
-    hasPendingStop
-      ? `Stop ${completedStopCount + 1} routes`
-      : currentRide?.status === "trip_started"
-        ? "Final destination routes"
-        : "Pickup routes";
   const clientRouteLabel = getRideRouteLabel(currentRide?.selectedRouteId);
   const clientPaymentLabel = getRidePaymentLabel(currentRide?.paymentMethod);
 
