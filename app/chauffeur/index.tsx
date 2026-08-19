@@ -2280,6 +2280,7 @@ export default function ChauffeurDashboard() {
     currentRide?.status === "chauffeur_assigned" ? `On the way to pick up ${clientDisplayName}` :
     currentRide?.status === "chauffeur_arriving" ? `Arriving at ${clientDisplayName}'s pickup` :
     hasPendingStop ? `Driving to stop ${completedStopCount + 1} of ${currentRideStops.length}` :
+    currentRide?.status === "trip_started" ? `Driving to final destination` : "Active Ride";
   const clientRouteLabel = getRideRouteLabel(currentRide?.selectedRouteId);
   const clientPaymentLabel = getRidePaymentLabel(currentRide?.paymentMethod);
 
