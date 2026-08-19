@@ -179,7 +179,7 @@ test("reprices rider stop updates and notifies the assigned driver", () => {
 test("uses realistic vehicle artwork throughout the rider category selectors", () => {
   const clientSource = readProjectFile("app/client/index.tsx");
 
-  assert.match(clientSource, /nearby-car-marker\.png/);
+  assert.match(clientSource, /category-sedan\.png/);
   assert.match(clientSource, /category-van\.png/);
   assert.match(clientSource, /source=\{vehicle\.artwork\}/);
   assert.match(clientSource, /source=\{vt\.artwork\}/);
