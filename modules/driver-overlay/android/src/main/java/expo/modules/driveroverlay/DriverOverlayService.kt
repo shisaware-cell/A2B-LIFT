@@ -166,10 +166,26 @@ class DriverOverlayService : Service() {
   }
 
   private fun updateBadge(count: Int) {
+    val isIncomingTrip = count > 0
     badgeView?.apply {
-      text = if (count > 99) "99+" else count.toString()
+      text = if (isIncomingTrip) "NEW" else if (count > 99) "99+" else count.toString()
+      setBackground(GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(if (isIncomingTrip) Color.rgb(34, 197, 94) else Color.rgb(211, 47, 47))
+      })
       visibility = if (count > 0) View.VISIBLE else View.GONE
     }
+    overlayView?.background = GradientDrawable().apply {
+      shape = GradientDrawable.OVAL
+      setColor(Color.rgb(12, 12, 12))
+      if (isIncomingTrip) {
+        setStroke(dp(3), Color.rgb(34, 197, 94))
+      } else {
+        setStroke(dp(2), Color.WHITE)
+      }
+    }
+    val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    notificationManager.notify(NOTIFICATION_ID, buildNotification(isIncomingTrip))
   }
 
   private fun createNotificationChannel() {
@@ -185,10 +201,10 @@ class DriverOverlayService : Service() {
     getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
   }
 
-  private fun buildNotification() = NotificationCompat.Builder(this, CHANNEL_ID)
+  private fun buildNotification(isIncomingTrip: Boolean = false) = NotificationCompat.Builder(this, CHANNEL_ID)
     .setSmallIcon(applicationInfo.icon)
-    .setContentTitle("A2B Driver shortcut is active")
-    .setContentText("Tap the floating icon to return to driver mode")
+    .setContentTitle(if (isIncomingTrip) "🚗 Incoming Trip Request!" else "A2B Driver shortcut is active")
+    .setContentText(if (isIncomingTrip) "New ride offer received — Tap to view & accept" else "Tap the floating icon to return to driver mode")
     .setContentIntent(
       PendingIntent.getActivity(
         this,
@@ -198,7 +214,7 @@ class DriverOverlayService : Service() {
       ),
     )
     .setOngoing(true)
-    .setPriority(NotificationCompat.PRIORITY_LOW)
+    .setPriority(if (isIncomingTrip) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW)
     .build()
 
   private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

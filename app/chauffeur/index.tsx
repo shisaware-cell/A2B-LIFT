@@ -321,12 +321,30 @@ export default function ChauffeurDashboard() {
 
   async function openAcceptedRideNavigation() {
     if (!currentRide) return;
-    setShowNavModal(true);
-    const target = getActiveTripTarget(currentRide);
-    if (myLocation && target.lat && target.lng) {
-      void fetchDriverRoute(target.lat, target.lng, {
-        routeKey: `nav:${currentRide.id}:${target.type}:${target.lat.toFixed(5)}:${target.lng.toFixed(5)}`,
-      });
+
+    const activeTripTarget = getActiveTripTarget(currentRide);
+    const coordinate = currentRide.status === "trip_started"
+      ? { lat: activeTripTarget.lat, lng: activeTripTarget.lng }
+      : { lat: Number(currentRide.pickupLat), lng: Number(currentRide.pickupLng) };
+    const platform = Platform.OS === "android" ? "android" : Platform.OS === "ios" ? "ios" : "web";
+    const waypoints: { lat: number; lng: number }[] = [];
+    const appUrl = buildGoogleMapsNavigationUrl(coordinate, platform, waypoints);
+    const webUrl = buildGoogleMapsWebNavigationUrl(coordinate, waypoints);
+
+    if (!appUrl || !webUrl) {
+      Alert.alert("Navigation unavailable", "This trip does not have a valid destination yet.");
+      return;
+    }
+
+    try {
+      if (platform !== "web" && (await Linking.canOpenURL(appUrl))) {
+        await Linking.openURL(appUrl);
+        return;
+      }
+
+      await Linking.openURL(webUrl);
+    } catch {
+      Alert.alert("Could not open Maps", "Please check that Google Maps or Waze is installed and try again.");
     }
   }
 
@@ -2291,27 +2309,6 @@ export default function ChauffeurDashboard() {
               </Pressable>
             </View>
           </View>
-          {routeAlternatives.length > 0 && (
-            <View style={styles.routeOptionsContainer}>
-              <Text style={styles.routeOptionsTitle}>{routeOptionsHeading}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 4 }}>
-                {routeAlternatives.map((alt, i) => (
-                  <Pressable
-                    key={i}
-                    style={[styles.routeOptionCard, selectedRouteIndex === i && styles.routeOptionCardSelected]}
-                    onPress={() => selectRoute(alt, i)}
-                  >
-                    <Ionicons name={getRouteOptionIcon(i)} size={18} color={Colors.white} />
-                    <Text style={styles.routeOptionName}>{getRouteOptionTitle(i, alt.summary)}</Text>
-                    <Text style={[styles.routeOptionDetail, selectedRouteIndex === i && styles.routeOptionDetailSelected]}>{alt.durationText} · {alt.distanceText}</Text>
-                    {calcRoutePrice(alt.distanceKm) ? (
-                      <Text style={styles.routeOptionPrice}>{calcRoutePrice(alt.distanceKm)}</Text>
-                    ) : null}
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </View>
-          )}
           <View style={{ flex: 1 }}>
             <A2BMap
               pickupLocation={currentRide ? { lat: parseFloat(currentRide.pickupLat), lng: parseFloat(currentRide.pickupLng) } : null}
@@ -2641,32 +2638,6 @@ export default function ChauffeurDashboard() {
               </View>
             ) : null}
           </View>
-          {routeAlternatives.length > 0 && (
-            <View style={styles.cardRouteOptionsWrap}>
-              <Text style={styles.cardRouteOptionsTitle}>{routeOptionsHeading}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardRouteOptionsScroll}>
-                {routeAlternatives.map((alt, i) => (
-                  <Pressable
-                    key={`${alt.polyline}-${i}`}
-                    style={[styles.cardRouteOptionChip, selectedRouteIndex === i && styles.cardRouteOptionChipSelected]}
-                    onPress={() => selectRoute(alt, i)}
-                  >
-                    <Text style={[styles.cardRouteOptionTitle, selectedRouteIndex === i && styles.cardRouteOptionTitleSelected]}>
-                      {getRouteOptionTitle(i, alt.summary)}
-                    </Text>
-                    <Text style={[styles.cardRouteOptionMeta, selectedRouteIndex === i && styles.cardRouteOptionMetaSelected]}>
-                      {alt.durationText} · {alt.distanceText}
-                    </Text>
-                    {calcRoutePrice(alt.distanceKm) ? (
-                      <Text style={[styles.cardRouteOptionPrice, selectedRouteIndex === i && styles.cardRouteOptionTitleSelected]}>
-                        {calcRoutePrice(alt.distanceKm)}
-                      </Text>
-                    ) : null}
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </View>
-          )}
           {currentRide.status === "chauffeur_arrived" && (
             <View style={[styles.waitingTimerBadge, waitingElapsedSec >= 300 && styles.waitingTimerBadgeCharged, { marginBottom: 10 }]}>
               <Ionicons name="time" size={14} color={waitingElapsedSec >= 300 ? "#F59E0B" : "#10B981"} />
@@ -3391,25 +3362,6 @@ const styles = StyleSheet.create({
   ratingPrimaryBtn: { flex: 1, borderRadius: 14, paddingVertical: 14, alignItems: "center", backgroundColor: Colors.white },
   ratingPrimaryBtnText: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.primary },
 
-  // Route options
-  routeOptionsContainer: { paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.border },
-  routeOptionsTitle: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: Colors.textMuted, marginBottom: 8 },
-  routeOptionCard: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, alignItems: "center", gap: 4, minWidth: 120 },
-  routeOptionCardSelected: { backgroundColor: Colors.accent, borderColor: Colors.accent },
-  routeOptionName: { fontSize: 12, fontFamily: "Inter_600SemiBold", color: Colors.white, textAlign: "center" },
-  routeOptionDetail: { fontSize: 11, fontFamily: "Inter_400Regular", color: Colors.textMuted, textAlign: "center" },
-  routeOptionDetailSelected: { color: "rgba(255,255,255,0.82)" },
-  routeOptionPrice: { fontSize: 13, fontFamily: "Inter_700Bold", color: Colors.white, textAlign: "center", marginTop: 2 },
-  cardRouteOptionsWrap: { gap: 8 },
-  cardRouteOptionsTitle: { fontSize: 12, fontFamily: "Inter_600SemiBold", color: Colors.textMuted },
-  cardRouteOptionsScroll: { gap: 8 },
-  cardRouteOptionChip: { minWidth: 118, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: GLASS_BORDER, gap: 2 },
-  cardRouteOptionChipSelected: { backgroundColor: Colors.accent, borderColor: Colors.accent },
-  cardRouteOptionTitle: { fontSize: 12, fontFamily: "Inter_600SemiBold", color: Colors.white },
-  cardRouteOptionTitleSelected: { color: Colors.white },
-  cardRouteOptionMeta: { fontSize: 11, fontFamily: "Inter_400Regular", color: Colors.textMuted },
-  cardRouteOptionMetaSelected: { color: "rgba(255,255,255,0.82)" },
-  cardRouteOptionPrice: { fontSize: 13, fontFamily: "Inter_700Bold", color: Colors.white, marginTop: 2 },
   waitingTimerBadge: {
     flexDirection: "row",
     alignItems: "center",

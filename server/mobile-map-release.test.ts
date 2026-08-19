@@ -203,11 +203,25 @@ test("includes ordered ride stops in Google Maps navigation", () => {
   assert.ok(String(url).indexOf("-26.200000") < String(url).indexOf("-26.250000"));
 });
 
-test("driver app navigate button opens in-app turn-by-turn navigation modal", () => {
+test("driver app navigate button opens external navigation with deep link", () => {
   const chauffeurSource = readProjectFile("app/chauffeur/index.tsx");
   assert.match(chauffeurSource, /async function openAcceptedRideNavigation\(\)/);
-  assert.match(chauffeurSource, /setShowNavModal\(true\)/);
-  assert.doesNotMatch(chauffeurSource, /Linking\.openURL\(appUrl\)/);
+  assert.match(chauffeurSource, /buildGoogleMapsNavigationUrl/);
+  assert.match(chauffeurSource, /Linking\.openURL\(appUrl\)/);
+  assert.doesNotMatch(chauffeurSource, /cardRouteOptionsWrap/);
+});
+
+test("client app provides Fastest and Safest (Highway) route options", () => {
+  const clientSource = readProjectFile("app/client/index.tsx");
+  assert.match(clientSource, /title: "Fastest"/);
+  assert.match(clientSource, /title: "Safest"/);
+  assert.match(clientSource, /badge: "Highway"/);
+});
+
+test("floating driver overlay indicates incoming trips", () => {
+  const serviceSource = readProjectFile("modules/driver-overlay/android/src/main/java/expo/modules/driveroverlay/DriverOverlayService.kt");
+  assert.match(serviceSource, /isIncomingTrip/);
+  assert.match(serviceSource, /Incoming Trip Request/);
 });
 
 test("driver app detects destination and pickup arrival within geofence", () => {

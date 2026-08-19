@@ -201,9 +201,8 @@ let autocompleteDebugEntries: AutocompleteDebugEntry[] = [];
 const autocompleteDebugSubscribers = new Set<(entries: AutocompleteDebugEntry[]) => void>();
 
 function getRoutePreferenceLabel(routeId?: string | null): string {
-  if (routeId === "faster_route") return "Faster Route";
-  if (routeId === "safest_route") return "Safer Route";
-  return "Balanced Route";
+  if (routeId === "safest_route") return "Safest (Highway)";
+  return "Fastest";
 }
 
 function getPaymentMethodLabel(method?: string | null): string {
@@ -240,41 +239,31 @@ function buildRouteChoiceDescriptors(routes: DirectionRoute[]) {
     {
       id: "faster_route",
       route: fastestRoute,
-      title: "Faster Route",
+      title: "Fastest",
       subtitle: "Quickest arrival time",
-      badge: "Recommended",
+      badge: "Fastest",
       icon: "flash-outline",
     },
   ];
 
-  const balancedRoute = uniqueRoutes.find((route) => route.polyline !== fastestRoute.polyline);
+  // Safest is the Highway route / main arterials with highway preference
+  const safestCandidate = [...uniqueRoutes]
+    .filter((route) => route.polyline !== fastestRoute.polyline)
+    .sort((a, b) => calculateRouteSafetyScore(a) - calculateRouteSafetyScore(b) || b.distanceKm - a.distanceKm)[0];
 
-  if (balancedRoute) {
-    selected.push({
-      id: "gps_preferred",
-      route: balancedRoute,
-      title: "Balanced Route",
-      subtitle: "A well-rounded option from maps",
-      badge: "Balanced",
-      icon: "navigate-circle-outline",
-    });
-  }
+  const safestRoute = safestCandidate || {
+    ...fastestRoute,
+    summary: fastestRoute.summary ? `${fastestRoute.summary} (Highway)` : "Highway / Main Arterials",
+  };
 
-  const usedPolylines = new Set(selected.map((item) => item.route.polyline));
-  const safestRoute = [...uniqueRoutes]
-    .filter((route) => !usedPolylines.has(route.polyline))
-    .sort((a, b) => calculateRouteSafetyScore(a) - calculateRouteSafetyScore(b) || a.durationMin - b.durationMin)[0];
-
-  if (safestRoute) {
-    selected.push({
-      id: "safest_route",
-      route: safestRoute,
-      title: "Safer Route",
-      subtitle: "Simpler drive with fewer turns",
-      badge: "Calmer",
-      icon: "shield-checkmark-outline",
-    });
-  }
+  selected.push({
+    id: "safest_route",
+    route: safestRoute,
+    title: "Safest",
+    subtitle: "Highway & main arterials",
+    badge: "Highway",
+    icon: "shield-checkmark-outline",
+  });
 
   return selected;
 }
