@@ -872,10 +872,12 @@ export default function ChauffeurDashboard() {
     };
 
     on("ride:statusUpdate", handleRideUpdate);
+    on("ride:cancelled", handleRideUpdate);
     on("ride:accepted", handleRideAccepted);
     on("ride:stopsUpdated", handleStopsUpdated);
     return () => {
       off("ride:statusUpdate", handleRideUpdate);
+      off("ride:cancelled", handleRideUpdate);
       off("ride:accepted", handleRideAccepted);
       off("ride:stopsUpdated", handleStopsUpdated);
     };

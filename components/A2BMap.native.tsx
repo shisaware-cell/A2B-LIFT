@@ -119,12 +119,14 @@ const DriverMarker = React.memo(
 
 const driverMarkerStyle = {
   wrap: {
+    width: 44,
+    height: 76,
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
   image: {
-    width: 30,
-    height: 62,
+    width: 36,
+    height: 72,
   },
 };
 
@@ -342,7 +344,7 @@ export function A2BMap({
         rotateEnabled={false}
         toolbarEnabled={false}
       >
-        {pickupLocation && (
+        {pickupLocation && !(showDriver && driverLocation && Math.abs(pickupLocation.lat - driverLocation.lat) < 0.0003 && Math.abs(pickupLocation.lng - driverLocation.lng) < 0.0003) && (
           <Marker
             coordinate={{ latitude: pickupLocation.lat, longitude: pickupLocation.lng }}
             anchor={{ x: 0.5, y: 0.5 }}
@@ -611,12 +613,14 @@ const styles = StyleSheet.create({
     fontSize: 9,
   },
   nearbyDriverMarker: {
+    width: 44,
+    height: 76,
     alignItems: "center",
     justifyContent: "center",
   },
   nearbyDriverImage: {
-    width: 30,
-    height: 62,
+    width: 36,
+    height: 72,
   },
   nearbyEtaPill: {
     backgroundColor: "#FFFFFF",

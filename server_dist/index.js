@@ -10039,6 +10039,10 @@ If you did not request this, you can ignore this email.`,
           ...ride,
           driverCancellationEarnings: cancellationDriverEarnings
         });
+        io.emit("ride:cancelled", {
+          ...ride,
+          driverCancellationEarnings: cancellationDriverEarnings
+        });
         if (!res.headersSent) {
           res.json({
             ...ride,

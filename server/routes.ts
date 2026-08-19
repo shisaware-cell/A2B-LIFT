@@ -8797,6 +8797,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ...ride,
           driverCancellationEarnings: cancellationDriverEarnings,
         });
+        io.emit("ride:cancelled", {
+          ...ride,
+          driverCancellationEarnings: cancellationDriverEarnings,
+        });
         if (!res.headersSent) {
           res.json({
             ...ride,
