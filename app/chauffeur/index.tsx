@@ -235,12 +235,15 @@ export default function ChauffeurDashboard() {
   const [rideStatusUpdating, setRideStatusUpdating] = useState<string | null>(null);
   const [navigationVoiceEnabled, setNavigationVoiceEnabledState] = useState<boolean | null>(null);
   const [waitingElapsedSec, setWaitingElapsedSec] = useState(0);
+  const [cashReceivedInput, setCashReceivedInput] = useState("");
+  const [cashSettling, setCashSettling] = useState(false);
 
   const soundRef = useRef<TripAlertSound | null>(null);
   const tripAlertTokenRef = useRef(0);
   const tripAlertEnabledRef = useRef(false);
   const seenRideIdRef = useRef<string | null>(null);
   const destinationArrivalPromptedRideIdRef = useRef<string | null>(null);
+  const pickupArrivalPromptedRideIdRef = useRef<string | null>(null);
   const suppressedRideAlertIdRef = useRef<string | null>(null);
   const suppressedRideIdsRef = useRef<Record<string, number>>({});
   const clientSummaryCacheRef = useRef<Record<string, ClientSummary>>({});
@@ -318,30 +321,12 @@ export default function ChauffeurDashboard() {
 
   async function openAcceptedRideNavigation() {
     if (!currentRide) return;
-
-    const activeTripTarget = getActiveTripTarget(currentRide);
-    const coordinate = currentRide.status === "trip_started"
-      ? { lat: activeTripTarget.lat, lng: activeTripTarget.lng }
-      : { lat: Number(currentRide.pickupLat), lng: Number(currentRide.pickupLng) };
-    const platform = Platform.OS === "android" ? "android" : Platform.OS === "ios" ? "ios" : "web";
-    const waypoints: { lat: number; lng: number }[] = [];
-    const appUrl = buildGoogleMapsNavigationUrl(coordinate, platform, waypoints);
-    const webUrl = buildGoogleMapsWebNavigationUrl(coordinate, waypoints);
-
-    if (!appUrl || !webUrl) {
-      Alert.alert("Navigation unavailable", "This trip does not have a valid destination yet.");
-      return;
-    }
-
-    try {
-      if (platform !== "web" && await Linking.canOpenURL(appUrl)) {
-        await Linking.openURL(appUrl);
-        return;
-      }
-
-      await Linking.openURL(webUrl);
-    } catch {
-      Alert.alert("Could not open Google Maps", "Please check that Google Maps is installed and try again.");
+    setShowNavModal(true);
+    const target = getActiveTripTarget(currentRide);
+    if (myLocation && target.lat && target.lng) {
+      void fetchDriverRoute(target.lat, target.lng, {
+        routeKey: `nav:${currentRide.id}:${target.type}:${target.lat.toFixed(5)}:${target.lng.toFixed(5)}`,
+      });
     }
   }
 
@@ -1267,8 +1252,8 @@ export default function ChauffeurDashboard() {
     if (!Number.isFinite(dropoffLat) || !Number.isFinite(dropoffLng)) return;
 
     const distanceKm = haversineDistance(myLocation.lat, myLocation.lng, dropoffLat, dropoffLng);
-    // If driver is within 75 meters of the destination and has not yet been prompted for this ride
-    if (distanceKm <= 0.075 && destinationArrivalPromptedRideIdRef.current !== currentRide.id) {
+    // If driver is within 100 meters of the destination and has not yet been prompted for this ride
+    if (distanceKm <= 0.100 && destinationArrivalPromptedRideIdRef.current !== currentRide.id) {
       destinationArrivalPromptedRideIdRef.current = currentRide.id;
       if (Platform.OS !== "web") {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -1297,6 +1282,52 @@ export default function ChauffeurDashboard() {
     myLocation?.lng,
     currentRide?.dropoffLat,
     currentRide?.dropoffLng,
+  ]);
+
+  // ─── Pickup Arrival Geofence Detection ────────────────────────────────────
+  useEffect(() => {
+    if (
+      !currentRide ||
+      (currentRide.status !== "chauffeur_assigned" && currentRide.status !== "chauffeur_arriving") ||
+      !myLocation ||
+      !currentRide.pickupLat ||
+      !currentRide.pickupLng
+    ) {
+      return;
+    }
+    const pLat = parseFloat(currentRide.pickupLat);
+    const pLng = parseFloat(currentRide.pickupLng);
+    if (!Number.isFinite(pLat) || !Number.isFinite(pLng)) return;
+
+    const distanceKm = haversineDistance(myLocation.lat, myLocation.lng, pLat, pLng);
+    if (distanceKm <= 0.100 && pickupArrivalPromptedRideIdRef.current !== currentRide.id) {
+      pickupArrivalPromptedRideIdRef.current = currentRide.id;
+      if (Platform.OS !== "web") {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        try {
+          Speech.speak("You have arrived at the pickup location.", { language: "en-ZA", rate: 0.95 });
+        } catch {}
+      }
+      Alert.alert(
+        "Arrived at Pickup",
+        "You have reached the pickup location. Tap I've Arrived to notify the rider.",
+        [
+          { text: "Not Yet", style: "cancel" },
+          {
+            text: "I've Arrived",
+            style: "default",
+            onPress: () => updateRideStatus("chauffeur_arrived"),
+          },
+        ],
+      );
+    }
+  }, [
+    currentRide?.id,
+    currentRide?.status,
+    myLocation?.lat,
+    myLocation?.lng,
+    currentRide?.pickupLat,
+    currentRide?.pickupLng,
   ]);
 
   // ─── 5-Minute Waiting Timer (when arrived at pickup) ───────────────────────
@@ -1774,6 +1805,27 @@ export default function ChauffeurDashboard() {
     }
   }
 
+  async function submitCashSettlementAndContinue() {
+    if (!completedTrip || cashSettling) return;
+    const received = parseFloat(cashReceivedInput);
+    if (isNaN(received) || received < 0) {
+      Alert.alert("Invalid Amount", "Please enter a valid cash amount received from the rider.");
+      return;
+    }
+
+    try {
+      setCashSettling(true);
+      await apiRequest("POST", `/api/rides/${completedTrip.id}/cash-settlement`, {
+        amountReceived: received,
+      });
+    } catch (error: any) {
+      console.log("Cash settlement error (non-fatal):", error?.message || error);
+    } finally {
+      setCashSettling(false);
+      beginClientRating();
+    }
+  }
+
   function beginClientRating() {
     if (!completedTrip?.clientId) {
       setCompletedTrip(null);
@@ -1936,7 +1988,10 @@ export default function ChauffeurDashboard() {
           : await enrichRideClientDetails(rideWithFallbackName, "Client");
       if (status === "trip_completed" || status === "cancelled") {
         suppressRideAlert(currentRide.id);
-        if (status === "trip_completed") setCompletedTrip(rideWithName);
+        if (status === "trip_completed") {
+          setCompletedTrip(rideWithName);
+          setCashReceivedInput(getRideFare(rideWithName).toFixed(0));
+        }
         currentRideRef.current = null;
         setCurrentRide(null);
         AsyncStorage.removeItem("a2b_current_ride").catch(() => {});
@@ -2872,18 +2927,80 @@ export default function ChauffeurDashboard() {
 
       {/* ─── Post-trip payment popup ─── */}
       <Modal visible={!!completedTrip} transparent animationType="fade" onRequestClose={() => setCompletedTrip(null)}>
-        <View style={styles.payPopupOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.payPopupOverlay}
+        >
           <View style={styles.payPopupCard}>
             {completedTrip?.paymentMethod === "cash" ? (
               <>
                 <View style={styles.payPopupIconWrap}>
-                  <Ionicons name="cash-outline" size={40} color={Colors.success} />
+                  <Ionicons name="cash-outline" size={38} color={Colors.success} />
                 </View>
-                <Text style={styles.payPopupTitle}>Cash Fare</Text>
-                <Text style={styles.payPopupAmount}>R {getRideFare(completedTrip).toFixed(0)}</Text>
-                <Text style={styles.payPopupBody}>
-                  The full cash fare is R {getRideFare(completedTrip).toFixed(0)}. The rider can confirm the cash amount in their A2B app.
+                <Text style={styles.payPopupTitle}>Cash Fare Settlement</Text>
+                <Text style={styles.payPopupSubtitle}>
+                  The full cash fare is R {getRideFare(completedTrip).toFixed(2)}.
                 </Text>
+
+                <View style={styles.cashInputCard}>
+                  <Text style={styles.cashInputLabel}>Cash amount received from rider (R):</Text>
+                  <TextInput
+                    style={styles.cashAmountTextInput}
+                    value={cashReceivedInput}
+                    onChangeText={setCashReceivedInput}
+                    keyboardType="numeric"
+                    placeholder={getRideFare(completedTrip).toFixed(0)}
+                    placeholderTextColor="#666"
+                    selectTextOnFocus
+                  />
+                </View>
+
+                {(() => {
+                  const fare = getRideFare(completedTrip);
+                  const received = parseFloat(cashReceivedInput) || 0;
+                  const difference = Math.round((received - fare) * 100) / 100;
+
+                  if (difference > 0) {
+                    return (
+                      <View style={[styles.cashDiffBox, styles.cashDiffPositive]}>
+                        <Ionicons name="add-circle" size={20} color="#22C55E" />
+                        <Text style={styles.cashDiffTextPositive}>
+                          Overpayment of +R {difference.toFixed(2)}. This change will be credited to the rider's A2B wallet.
+                        </Text>
+                      </View>
+                    );
+                  } else if (difference < 0) {
+                    return (
+                      <View style={[styles.cashDiffBox, styles.cashDiffNegative]}>
+                        <Ionicons name="alert-circle" size={20} color="#EF4444" />
+                        <Text style={styles.cashDiffTextNegative}>
+                          Underpayment of -R {Math.abs(difference).toFixed(2)}. This shortage will be debited from the rider's wallet.
+                        </Text>
+                      </View>
+                    );
+                  } else {
+                    return (
+                      <View style={[styles.cashDiffBox, styles.cashDiffNeutral]}>
+                        <Ionicons name="checkmark-circle" size={20} color="#3B82F6" />
+                        <Text style={styles.cashDiffTextNeutral}>
+                          Exact cash fare received (R {fare.toFixed(2)}).
+                        </Text>
+                      </View>
+                    );
+                  }
+                })()}
+
+                <Pressable
+                  style={[styles.payPopupBtn, cashSettling && { opacity: 0.6 }]}
+                  disabled={cashSettling}
+                  onPress={submitCashSettlementAndContinue}
+                >
+                  {cashSettling ? (
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                  ) : (
+                    <Text style={styles.payPopupBtnText}>Confirm Settlement & Continue</Text>
+                  )}
+                </Pressable>
               </>
             ) : (
               <>
@@ -2895,13 +3012,13 @@ export default function ChauffeurDashboard() {
                 <Text style={styles.payPopupBody}>
                   The rider paid R {getRideClientFare(completedTrip).toFixed(0)} for this trip. Your category commission is reflected in your earnings and wallet.
                 </Text>
+                <Pressable style={styles.payPopupBtn} onPress={beginClientRating}>
+                  <Text style={styles.payPopupBtnText}>Continue</Text>
+                </Pressable>
               </>
             )}
-            <Pressable style={styles.payPopupBtn} onPress={beginClientRating}>
-              <Text style={styles.payPopupBtnText}>Continue</Text>
-            </Pressable>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ─── Post-trip client rating modal ─── */}
@@ -3183,13 +3300,82 @@ const styles = StyleSheet.create({
 
   // Post-trip payment popup
   payPopupOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.75)", alignItems: "center", justifyContent: "center", paddingHorizontal: 24 },
-  payPopupCard: { width: "100%", backgroundColor: "#1a1a2e", borderRadius: 24, padding: 28, alignItems: "center", gap: 12, borderWidth: 1, borderColor: GLASS_BORDER },
-  payPopupIconWrap: { width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(255,255,255,0.07)", alignItems: "center", justifyContent: "center", marginBottom: 4 },
+  payPopupCard: { width: "100%", backgroundColor: "#1a1a2e", borderRadius: 24, padding: 24, alignItems: "center", gap: 12, borderWidth: 1, borderColor: GLASS_BORDER },
+  payPopupIconWrap: { width: 64, height: 64, borderRadius: 32, backgroundColor: "rgba(255,255,255,0.07)", alignItems: "center", justifyContent: "center", marginBottom: 2 },
   payPopupTitle: { fontSize: 20, fontFamily: "Inter_700Bold", color: Colors.white, textAlign: "center" },
+  payPopupSubtitle: { fontSize: 14, fontFamily: "Inter_500Medium", color: Colors.textMuted, textAlign: "center" },
   payPopupAmount: { fontSize: 36, fontFamily: "Inter_700Bold", color: Colors.white, textAlign: "center" },
   payPopupBody: { fontSize: 15, fontFamily: "Inter_400Regular", color: Colors.textMuted, textAlign: "center", lineHeight: 22 },
   payPopupBtn: { marginTop: 8, backgroundColor: Colors.white, borderRadius: 14, paddingHorizontal: 40, paddingVertical: 14, width: "100%", alignItems: "center" },
   payPopupBtnText: { fontSize: 16, fontFamily: "Inter_700Bold", color: Colors.primary },
+  cashInputCard: {
+    width: "100%",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    gap: 8,
+  },
+  cashInputLabel: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.textMuted,
+  },
+  cashAmountTextInput: {
+    backgroundColor: "#111122",
+    borderRadius: 12,
+    fontSize: 22,
+    fontFamily: "Inter_700Bold",
+    color: Colors.white,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: Colors.accent,
+    textAlign: "center",
+  },
+  cashDiffBox: {
+    width: "100%",
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+  },
+  cashDiffPositive: {
+    backgroundColor: "rgba(34, 197, 94, 0.12)",
+    borderColor: "rgba(34, 197, 94, 0.4)",
+  },
+  cashDiffNegative: {
+    backgroundColor: "rgba(239, 68, 68, 0.12)",
+    borderColor: "rgba(239, 68, 68, 0.4)",
+  },
+  cashDiffNeutral: {
+    backgroundColor: "rgba(59, 130, 246, 0.12)",
+    borderColor: "rgba(59, 130, 246, 0.4)",
+  },
+  cashDiffTextPositive: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: "#22C55E",
+    lineHeight: 18,
+  },
+  cashDiffTextNegative: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: "#EF4444",
+    lineHeight: 18,
+  },
+  cashDiffTextNeutral: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: "#93C5FD",
+    lineHeight: 18,
+  },
 
   // Rating modal
   ratingModalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.75)" },

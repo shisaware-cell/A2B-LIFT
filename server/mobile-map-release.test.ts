@@ -202,3 +202,27 @@ test("includes ordered ride stops in Google Maps navigation", () => {
   assert.match(String(url), /waypoints=/);
   assert.ok(String(url).indexOf("-26.200000") < String(url).indexOf("-26.250000"));
 });
+
+test("driver app navigate button opens in-app turn-by-turn navigation modal", () => {
+  const chauffeurSource = readProjectFile("app/chauffeur/index.tsx");
+  assert.match(chauffeurSource, /async function openAcceptedRideNavigation\(\)/);
+  assert.match(chauffeurSource, /setShowNavModal\(true\)/);
+  assert.doesNotMatch(chauffeurSource, /Linking\.openURL\(appUrl\)/);
+});
+
+test("driver app detects destination and pickup arrival within geofence", () => {
+  const chauffeurSource = readProjectFile("app/chauffeur/index.tsx");
+  assert.match(chauffeurSource, /Destination Arrival Geofence Detection/);
+  assert.match(chauffeurSource, /Pickup Arrival Geofence Detection/);
+  assert.match(chauffeurSource, /You have arrived at your destination/);
+  assert.match(chauffeurSource, /You have arrived at the pickup location/);
+});
+
+test("driver app provides cash settlement with live overpayment and underpayment wallet adjustment", () => {
+  const chauffeurSource = readProjectFile("app/chauffeur/index.tsx");
+  assert.match(chauffeurSource, /submitCashSettlementAndContinue/);
+  assert.match(chauffeurSource, /\/api\/rides\/\$\{completedTrip\.id\}\/cash-settlement/);
+  assert.match(chauffeurSource, /Cash Fare Settlement/);
+  assert.match(chauffeurSource, /Overpayment of \+R/);
+  assert.match(chauffeurSource, /Underpayment of -R/);
+});

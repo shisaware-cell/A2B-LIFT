@@ -10421,6 +10421,109 @@ If you did not request this, you can ignore this email.`,
       return;
     }
   });
+  app2.post("/api/rides/:id/cash-settlement", requireAuth, async (req, res) => {
+    try {
+      const ride = await storage.getRide(req.params.id);
+      if (!ride) return res.status(404).json({ message: "Ride not found" });
+      const callerUser = await storage.getUser(req.auth.sub);
+      if (!callerUser) return res.status(403).json({ message: "Forbidden" });
+      let isChauffeur = false;
+      if (ride.chauffeurId) {
+        const ch = await storage.getChauffeur(ride.chauffeurId);
+        isChauffeur = ch?.userId === callerUser.id;
+      }
+      const isAdmin = callerUser.role === "admin";
+      if (!isChauffeur && !isAdmin) {
+        return res.status(403).json({ message: "Forbidden: only the assigned chauffeur can record cash settlement" });
+      }
+      const { amountReceived } = req.body;
+      const parsedAmountReceived = Number(amountReceived);
+      if (!Number.isFinite(parsedAmountReceived) || parsedAmountReceived < 0) {
+        return res.status(400).json({ message: "Valid cash amount received is required" });
+      }
+      const finalFare = Math.max(0, Number(ride.finalFare || ride.price || 0));
+      const difference = Math.round((parsedAmountReceived - finalFare) * 100) / 100;
+      let updatedRider = null;
+      if (difference !== 0 && ride.clientId) {
+        const rider = await storage.getUser(ride.clientId);
+        if (rider) {
+          const balanceBefore = Number(rider.walletBalance || 0);
+          const balanceAfter = Math.round((balanceBefore + difference) * 100) / 100;
+          updatedRider = await storage.updateUser(rider.id, { walletBalance: balanceAfter });
+          if (difference > 0) {
+            await storage.createWalletTransaction({
+              userId: rider.id,
+              type: "deposit",
+              amount: difference,
+              balanceBefore,
+              balanceAfter,
+              reference: `cash_change_${ride.id}_${Date.now()}`,
+              description: `Cash change credited for trip #${ride.id.slice(0, 8)} (Paid R${parsedAmountReceived.toFixed(2)} for R${finalFare.toFixed(2)} fare)`,
+              rideId: ride.id,
+              status: "completed"
+            });
+            await storage.createNotification({
+              userId: rider.id,
+              title: "Cash Change Credited",
+              body: `R${difference.toFixed(2)} cash change from your trip was credited to your A2B wallet.`,
+              type: "wallet"
+            });
+            if (rider?.pushToken) {
+              sendExpoPushNotification(
+                [rider.pushToken],
+                "Cash Change Credited",
+                `R${difference.toFixed(2)} cash change from your trip was credited to your A2B wallet.`,
+                { rideId: ride.id, type: "wallet:credit" },
+                { urgent: true, channelId: "client-alerts" }
+              );
+            }
+          } else {
+            const shortage = Math.abs(difference);
+            await storage.createWalletTransaction({
+              userId: rider.id,
+              type: "payment",
+              amount: shortage,
+              balanceBefore,
+              balanceAfter,
+              reference: `cash_shortage_${ride.id}_${Date.now()}`,
+              description: `Cash underpayment deduction for trip #${ride.id.slice(0, 8)} (Paid R${parsedAmountReceived.toFixed(2)} of R${finalFare.toFixed(2)} fare)`,
+              rideId: ride.id,
+              status: "completed"
+            });
+            await storage.createNotification({
+              userId: rider.id,
+              title: "Cash Underpayment Recorded",
+              body: `R${shortage.toFixed(2)} cash underpayment was deducted from your A2B wallet.`,
+              type: "wallet"
+            });
+            if (rider?.pushToken) {
+              sendExpoPushNotification(
+                [rider.pushToken],
+                "Cash Underpayment Recorded",
+                `R${shortage.toFixed(2)} cash underpayment was deducted from your A2B wallet.`,
+                { rideId: ride.id, type: "wallet:debit" },
+                { urgent: true, channelId: "client-alerts" }
+              );
+            }
+          }
+        }
+      }
+      const updatedRide = await storage.updateRide(ride.id, {
+        cashAmountReceived: parsedAmountReceived,
+        walletAdjustment: difference
+      });
+      return res.json({
+        success: true,
+        ride: updatedRide,
+        amountReceived: parsedAmountReceived,
+        finalFare,
+        walletAdjustment: difference,
+        riderWalletBalance: updatedRider?.walletBalance
+      });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
   app2.put("/api/rides/:id/stops/complete", requireAuth, async (req, res) => {
     try {
       const existingRide = await storage.getRide(req.params.id);
