@@ -218,10 +218,13 @@ test("client app provides Fastest and Safest (Highway) route options", () => {
   assert.match(clientSource, /badge: "Highway"/);
 });
 
-test("floating driver overlay indicates incoming trips", () => {
+test("floating driver overlay indicates incoming trips and active trip live blinking dot", () => {
   const serviceSource = readProjectFile("modules/driver-overlay/android/src/main/java/expo/modules/driveroverlay/DriverOverlayService.kt");
   assert.match(serviceSource, /isIncomingTrip/);
-  assert.match(serviceSource, /Incoming Trip Request/);
+  assert.match(serviceSource, /isTripActive/);
+  assert.match(serviceSource, /liveDot/);
+  assert.match(serviceSource, /clipToOutline/);
+  assert.match(serviceSource, /Trip in Progress/);
 });
 
 test("driver app detects destination and pickup arrival within geofence", () => {

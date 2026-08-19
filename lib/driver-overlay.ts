@@ -4,9 +4,10 @@ import { requireOptionalNativeModule } from "expo-modules-core";
 type DriverOverlayNativeModule = {
   hasPermission(): Promise<boolean>;
   requestPermission(): Promise<boolean>;
-  start(eventCount: number): Promise<boolean>;
+  start(eventCount: number, tripActive?: boolean, tripLabel?: string): Promise<boolean>;
   stop(): Promise<boolean>;
   setEventCount(eventCount: number): Promise<boolean>;
+  setOverlayState?(eventCount: number, tripActive: boolean, tripLabel?: string): Promise<boolean>;
 };
 
 const nativeModule = Platform.OS === "android"
@@ -27,8 +28,8 @@ export async function requestDriverOverlayPermission() {
   return nativeModule ? nativeModule.requestPermission() : false;
 }
 
-export async function startDriverOverlay(eventCount = 0) {
-  return nativeModule ? nativeModule.start(Math.max(0, eventCount)) : false;
+export async function startDriverOverlay(eventCount = 0, tripActive = false, tripLabel = "") {
+  return nativeModule ? nativeModule.start(Math.max(0, eventCount), tripActive, tripLabel) : false;
 }
 
 export async function stopDriverOverlay() {
@@ -37,4 +38,20 @@ export async function stopDriverOverlay() {
 
 export async function setDriverOverlayEventCount(eventCount: number) {
   return nativeModule ? nativeModule.setEventCount(Math.max(0, eventCount)) : false;
+}
+
+export async function updateDriverOverlayState({
+  eventCount = 0,
+  tripActive = false,
+  tripLabel = "",
+}: {
+  eventCount?: number;
+  tripActive?: boolean;
+  tripLabel?: string;
+}) {
+  if (!nativeModule) return false;
+  if (typeof nativeModule.setOverlayState === "function") {
+    return nativeModule.setOverlayState(Math.max(0, eventCount), tripActive, tripLabel);
+  }
+  return nativeModule.setEventCount(Math.max(0, eventCount));
 }

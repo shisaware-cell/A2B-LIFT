@@ -50,6 +50,7 @@ import {
   isDriverOverlayAvailable,
   startDriverOverlay,
   setDriverOverlayEventCount,
+  updateDriverOverlayState,
 } from "@/lib/driver-overlay";
 import {
   getNavigationVoiceEnabled,
@@ -735,14 +736,23 @@ export default function ChauffeurDashboard() {
 
   useEffect(() => {
     if (!isDriverOverlayAvailable()) return;
+    const isTripActive = Boolean(currentRide?.id && ["chauffeur_assigned", "chauffeur_arriving", "chauffeur_arrived", "trip_started"].includes(currentRide.status));
     const eventCount = unreadCount + (incomingRide?.id ? 1 : 0);
+    const tripLabel = isTripActive
+      ? (currentRide?.status === "trip_started" ? "ON TRIP" : "PICKUP")
+      : (incomingRide?.id ? "NEW" : "");
+
     void (async () => {
       const enabled = await AsyncStorage.getItem(DRIVER_OVERLAY_ENABLED_KEY) === "true";
       if (enabled && await hasDriverOverlayPermission()) {
-        await startDriverOverlay(eventCount);
+        await updateDriverOverlayState({
+          eventCount,
+          tripActive: isTripActive,
+          tripLabel,
+        });
       }
     })();
-  }, [incomingRide?.id, unreadCount]);
+  }, [currentRide?.id, currentRide?.status, incomingRide?.id, unreadCount]);
 
   // ─── Socket: incoming ride ────────────────────────────────────────────────
   useEffect(() => {
