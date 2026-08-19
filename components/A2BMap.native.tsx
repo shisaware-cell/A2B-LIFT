@@ -317,7 +317,7 @@ export function A2BMap({
 
   return (
     <View style={[styles.container, { backgroundColor: mapBackground }]}>
-      {loading && (
+      {loading && !pickupLocation && (
         <View style={styles.locatingOverlay}>
           <ActivityIndicator size="small" color={Colors.white} />
           <Text style={styles.locatingText}>Locating you...</Text>
@@ -330,9 +330,6 @@ export function A2BMap({
         customMapStyle={customMapStyle}
         initialRegion={initialRegionRef.current}
         onMapReady={handleMapReady}
-        loadingEnabled={true}
-        loadingBackgroundColor={mapBackground}
-        loadingIndicatorColor={isDay ? "#111111" : "#FFFFFF"}
         userInterfaceStyle={isDay ? "light" : "dark"}
         showsUserLocation={false}
         showsMyLocationButton={false}
