@@ -7337,11 +7337,13 @@ If you did not request this, you can ignore this email.`,
     const activeVehicle = targetVehicleId ? await storage.getVehicle(targetVehicleId).catch(() => void 0) : void 0;
     const ratings = await storage.getRatingsByChauffeur(chauffeurId).catch(() => []);
     const avgRating = ratings.length > 0 ? parseFloat((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1)) : user?.rating ?? 5;
+    const application = chauffeur.userId ? await storage.getDriverApplicationByUserId(chauffeur.userId).catch(() => void 0) : void 0;
+    const resolvedPhoto = chauffeur.profilePhoto || user?.profilePhoto || application?.profilePhoto || application?.selfieUrl || null;
     return {
       id: chauffeur.id,
       driverName: user?.name || "Driver",
       driverPhone: chauffeur.phone || user?.phone || null,
-      profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null,
+      profilePhoto: resolvedPhoto,
       carMake: activeVehicle?.carMake || activeVehicle?.make || chauffeur.carMake || null,
       vehicleModel: activeVehicle?.vehicleModel || activeVehicle?.model || chauffeur.vehicleModel || null,
       plateNumber: activeVehicle?.plateNumber || chauffeur.plateNumber || null,

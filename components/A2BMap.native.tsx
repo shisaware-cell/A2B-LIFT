@@ -119,14 +119,14 @@ const DriverMarker = React.memo(
 
 const driverMarkerStyle = {
   wrap: {
-    width: 44,
-    height: 76,
+    width: 52,
+    height: 88,
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
   image: {
-    width: 36,
-    height: 72,
+    width: 40,
+    height: 80,
   },
 };
 
@@ -613,14 +613,14 @@ const styles = StyleSheet.create({
     fontSize: 9,
   },
   nearbyDriverMarker: {
-    width: 44,
-    height: 76,
+    width: 52,
+    height: 88,
     alignItems: "center",
     justifyContent: "center",
   },
   nearbyDriverImage: {
-    width: 36,
-    height: 72,
+    width: 40,
+    height: 80,
   },
   nearbyEtaPill: {
     backgroundColor: "#FFFFFF",

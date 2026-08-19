@@ -1944,10 +1944,10 @@ export default function ClientHomeScreen() {
 
   useEffect(() => {
     const handleDriverLocation = (data: any) => {
-      if (currentRide && data.chauffeurId === currentRide.chauffeurId) {
+      if (currentRide && String(data.chauffeurId) === String(currentRide.chauffeurId)) {
         const driverLoc = {
-          lat: data.lat,
-          lng: data.lng,
+          lat: Number(data.lat),
+          lng: Number(data.lng),
           heading: typeof data.heading === "number" && !isNaN(data.heading) ? data.heading : undefined,
           speed: typeof data.speed === "number" && !isNaN(data.speed) ? data.speed : undefined,
         };

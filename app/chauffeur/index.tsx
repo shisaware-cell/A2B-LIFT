@@ -763,23 +763,24 @@ export default function ChauffeurDashboard() {
   // ─── Socket: ride cancellation ────────────────────────────────────────────
   function handleRideCancellation(ride: any, wasVisibleOffer = false) {
     const activeRide = currentRideRef.current;
-    if (
-      !ride?.id ||
-      ride.status !== "cancelled" ||
-      handledCancellationRideIdsRef.current.has(ride.id)
-    ) {
+    if (!ride?.id || ride.status !== "cancelled") {
       return;
     }
+    const rideIdStr = String(ride.id);
 
-    if (!activeRide || ride.id !== activeRide.id) {
-      if (wasVisibleOffer) {
-        handledCancellationRideIdsRef.current.add(ride.id);
+    if (!activeRide || String(activeRide.id) !== rideIdStr) {
+      if (wasVisibleOffer && !handledCancellationRideIdsRef.current.has(rideIdStr)) {
+        handledCancellationRideIdsRef.current.add(rideIdStr);
         Alert.alert("Ride Request Cancelled", "The rider cancelled this request.");
       }
       return;
     }
 
-    handledCancellationRideIdsRef.current.add(ride.id);
+    if (handledCancellationRideIdsRef.current.has(rideIdStr)) {
+      return;
+    }
+
+    handledCancellationRideIdsRef.current.add(rideIdStr);
     suppressRideAlert(ride.id);
     currentRideRef.current = null;
     setCurrentRide(null);
@@ -818,13 +819,14 @@ export default function ChauffeurDashboard() {
   useEffect(() => {
     const clearRideFromDiscovery = (ride: any) => {
       if (!ride?.id) return false;
+      const rideIdStr = String(ride.id);
       suppressRideAlert(ride.id);
-      const clearedIncomingRide = incomingRideRef.current?.id === ride.id;
-      const clearedAvailableRide = availableTripsRef.current.some((trip) => trip.id === ride.id);
-      setAvailableTrips((prev) => prev.filter((trip) => trip.id !== ride.id));
+      const clearedIncomingRide = Boolean(incomingRideRef.current?.id && String(incomingRideRef.current.id) === rideIdStr);
+      const clearedAvailableRide = availableTripsRef.current.some((trip) => String(trip.id) === rideIdStr);
+      setAvailableTrips((prev) => prev.filter((trip) => String(trip.id) !== rideIdStr));
       if (
         clearedIncomingRide &&
-        (ride.status === "cancelled" || (ride.chauffeurId && ride.chauffeurId !== chauffeur?.id))
+        (ride.status === "cancelled" || (ride.chauffeurId && String(ride.chauffeurId) !== String(chauffeur?.id)))
       ) {
         clearIncomingRide();
         void stopTripAlert();

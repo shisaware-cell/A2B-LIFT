@@ -5660,11 +5660,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ratings.length > 0
         ? parseFloat((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1))
         : (user?.rating ?? 5.0);
+    const application = chauffeur.userId
+      ? await storage.getDriverApplicationByUserId(chauffeur.userId).catch(() => undefined)
+      : undefined;
+    const resolvedPhoto =
+      chauffeur.profilePhoto ||
+      user?.profilePhoto ||
+      (application as any)?.profilePhoto ||
+      (application as any)?.selfieUrl ||
+      null;
     return {
       id: chauffeur.id,
       driverName: user?.name || "Driver",
       driverPhone: chauffeur.phone || user?.phone || null,
-      profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null,
+      profilePhoto: resolvedPhoto,
       carMake: activeVehicle?.carMake || (activeVehicle as any)?.make || chauffeur.carMake || null,
       vehicleModel: activeVehicle?.vehicleModel || (activeVehicle as any)?.model || chauffeur.vehicleModel || null,
       plateNumber: activeVehicle?.plateNumber || chauffeur.plateNumber || null,
