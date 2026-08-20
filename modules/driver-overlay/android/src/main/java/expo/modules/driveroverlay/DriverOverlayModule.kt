@@ -29,7 +29,7 @@ class DriverOverlayModule : Module() {
       true
     }
 
-    AsyncFunction("start") { eventCount: Int, tripActive: Boolean?, tripLabel: String? ->
+    AsyncFunction("start") { eventCount: Int ->
       val context = requireNotNull(appContext.reactContext)
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
         return@AsyncFunction false
@@ -38,8 +38,6 @@ class DriverOverlayModule : Module() {
       val intent = Intent(context, DriverOverlayService::class.java)
         .setAction(DriverOverlayService.ACTION_START)
         .putExtra(DriverOverlayService.EXTRA_EVENT_COUNT, eventCount.coerceAtLeast(0))
-        .putExtra(DriverOverlayService.EXTRA_TRIP_ACTIVE, tripActive ?: false)
-        .putExtra(DriverOverlayService.EXTRA_TRIP_LABEL, tripLabel ?: "")
       ContextCompat.startForegroundService(context, intent)
       true
     }
@@ -59,13 +57,13 @@ class DriverOverlayModule : Module() {
       true
     }
 
-    AsyncFunction("setOverlayState") { eventCount: Int, tripActive: Boolean, tripLabel: String? ->
+    AsyncFunction("setOverlayState") { eventCount: Int, tripActive: Boolean, tripLabel: String ->
       val context = requireNotNull(appContext.reactContext)
       val intent = Intent(context, DriverOverlayService::class.java)
         .setAction(DriverOverlayService.ACTION_UPDATE)
         .putExtra(DriverOverlayService.EXTRA_EVENT_COUNT, eventCount.coerceAtLeast(0))
         .putExtra(DriverOverlayService.EXTRA_TRIP_ACTIVE, tripActive)
-        .putExtra(DriverOverlayService.EXTRA_TRIP_LABEL, tripLabel ?: "")
+        .putExtra(DriverOverlayService.EXTRA_TRIP_LABEL, tripLabel)
       ContextCompat.startForegroundService(context, intent)
       true
     }

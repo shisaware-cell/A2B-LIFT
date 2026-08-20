@@ -4,10 +4,10 @@ import { requireOptionalNativeModule } from "expo-modules-core";
 type DriverOverlayNativeModule = {
   hasPermission(): Promise<boolean>;
   requestPermission(): Promise<boolean>;
-  start(eventCount: number, tripActive?: boolean, tripLabel?: string): Promise<boolean>;
+  start(eventCount: number): Promise<boolean>;
   stop(): Promise<boolean>;
   setEventCount(eventCount: number): Promise<boolean>;
-  setOverlayState?(eventCount: number, tripActive: boolean, tripLabel?: string): Promise<boolean>;
+  setOverlayState?(eventCount: number, tripActive: boolean, tripLabel: string): Promise<boolean>;
 };
 
 const nativeModule = Platform.OS === "android"
@@ -29,7 +29,12 @@ export async function requestDriverOverlayPermission() {
 }
 
 export async function startDriverOverlay(eventCount = 0, tripActive = false, tripLabel = "") {
-  return nativeModule ? nativeModule.start(Math.max(0, eventCount), tripActive, tripLabel) : false;
+  if (!nativeModule) return false;
+  const started = await nativeModule.start(Math.max(0, eventCount));
+  if (started && (tripActive || tripLabel)) {
+    await updateDriverOverlayState({ eventCount, tripActive, tripLabel });
+  }
+  return started;
 }
 
 export async function stopDriverOverlay() {
