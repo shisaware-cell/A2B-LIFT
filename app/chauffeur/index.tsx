@@ -307,18 +307,31 @@ export default function ChauffeurDashboard() {
 
   async function presentIncomingRide(ride: any, allowSuppressed = false) {
     if (!ride?.id) return null;
-    const token = ++incomingRideHydrationTokenRef.current;
-    const enrichedRide = await enrichRideClientDetails(ride, "Client");
     if (
-      token !== incomingRideHydrationTokenRef.current ||
       currentRideRef.current ||
       (!allowSuppressed && isRideAlertSuppressed(ride.id))
     ) {
       return null;
     }
-    incomingRideRef.current = enrichedRide;
-    setIncomingRide(enrichedRide);
-    return enrichedRide;
+    const token = ++incomingRideHydrationTokenRef.current;
+    // Immediately present the incoming ride card synchronously so the driver sees Accept/Decline instantly
+    incomingRideRef.current = ride;
+    setIncomingRide(ride);
+
+    // Enrich client details asynchronously in the background
+    void enrichRideClientDetails(ride, "Client").then((enrichedRide) => {
+      if (
+        token !== incomingRideHydrationTokenRef.current ||
+        currentRideRef.current ||
+        (!allowSuppressed && isRideAlertSuppressed(ride.id))
+      ) {
+        return;
+      }
+      incomingRideRef.current = enrichedRide;
+      setIncomingRide(enrichedRide);
+    }).catch(() => {});
+
+    return ride;
   }
 
   async function openAcceptedRideNavigation() {
@@ -766,7 +779,7 @@ export default function ChauffeurDashboard() {
         if (isDriverOverlayAvailable()) {
           void setDriverOverlayEventCount(1);
         }
-        if (notificationsRef.current) {
+        if (notificationsRef.current && AppState.currentState !== "active") {
           void notificationsRef.current.scheduleNotificationAsync({
             content: {
               title: "🚗 Incoming Trip Request!",

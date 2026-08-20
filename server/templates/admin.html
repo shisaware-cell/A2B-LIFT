@@ -611,7 +611,7 @@ tbody tr:hover { background:#fafaf8; }
 <script>
 // Use same-origin when the admin is served by the production API host.
 // Static/legacy admin deployments may still override this in localStorage.
-const PROD_API = 'https://a2blift.com';
+const PROD_API = 'https://a2b-lift-backend-production-4fea.up.railway.app';
 const API = (() => {
   const host = window.location.hostname || '';
   if (host === 'a2blift.com' || host === 'www.a2blift.com') {
@@ -632,6 +632,52 @@ function dropToken() { localStorage.removeItem(TOKEN_KEY); }
 function authHeaders() {
   const t = getToken();
   return t ? { 'Authorization': 'Bearer ' + t } : {};
+}
+
+function resolveDocUrl(url) {
+  if (!url) return '';
+  const trimmed = String(url).trim();
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return trimmed;
+  if (trimmed.startsWith('/api/')) {
+    return (API || '') + trimmed;
+  }
+  if (trimmed.startsWith('/')) {
+    return (API || '') + trimmed;
+  }
+  if (trimmed.includes('/api/media/')) {
+    const mediaId = trimmed.split('/api/media/')[1];
+    return (API || PROD_API || '') + '/api/media/' + mediaId;
+  }
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    if (trimmed.includes('a2blift.com/api/')) {
+      const path = trimmed.split('a2blift.com')[1];
+      return (API || PROD_API || '') + path;
+    }
+    return trimmed;
+  }
+  return (API || '') + '/' + trimmed;
+}
+
+async function downloadDoc(url, filename) {
+  const resolved = resolveDocUrl(url);
+  if (!resolved) { toast('❌ Document URL not found', 'err'); return; }
+  try {
+    toast('⬇️ Downloading document…', 'ok');
+    const res = await fetch(resolved, { headers: authHeaders() });
+    if (!res.ok) throw new Error('Status: ' + res.status);
+    const blob = await res.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    const ext = blob.type === 'application/pdf' ? '.pdf' : blob.type === 'image/png' ? '.png' : '.jpg';
+    a.download = (filename || 'document-' + Date.now()) + (filename && filename.includes('.') ? '' : ext);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => window.URL.revokeObjectURL(blobUrl), 10000);
+  } catch (err) {
+    window.open(resolved, '_blank', 'noopener,noreferrer');
+  }
 }
 
 async function apiFetch(path, opts = {}) {
@@ -1571,17 +1617,26 @@ function renderDocsModal(docs) {
     return;
   }
   document.getElementById('m-body').innerHTML = `<div class="docs-grid">
-    ${list.map(d => `<div class="doc-card">
-      <div class="doc-label">${d.type || 'Document'}</div>
-      ${d.url ? `<img src="${d.url}" class="doc-img" onerror="this.style.display='none'"/>` : ''}
-      ${d.url ? `<a href="${d.url}" target="_blank" class="doc-link">Open full document</a>` : '<div class="empty-sub">No file URL</div>'}
-      <div style="margin-top:8px"><span class="badge ${d.status==='approved'?'b-approved':d.status==='rejected'?'b-rejected':'b-pending'}">${d.status || 'pending'}</span></div>
-      ${d.reviewReason ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">${escapeHtml(d.reviewReason)}</div>` : ''}
-      <div class="action-cell" style="margin-top:8px">
-        ${d.status !== 'approved' ? `<button class="btn-sm btn-approve" onclick="reviewDocument('${d.id}','approved')">✓ Activate</button>` : ''}
-        ${d.status !== 'rejected' ? `<button class="btn-sm btn-reject" onclick="reviewDocument('${d.id}','rejected')">✕ Reject</button>` : ''}
-      </div>
-    </div>`).join('')}
+    ${list.map(d => {
+      const docUrl = resolveDocUrl(d.url);
+      const isImg = /\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(docUrl) || (docUrl.includes('supabase') && !docUrl.includes('.pdf')) || docUrl.includes('/api/media/');
+      return `<div class="doc-card">
+        <div class="doc-label">${escapeHtml(d.type || 'Document')}</div>
+        ${docUrl && isImg ? `<img src="${docUrl}" class="doc-img" onerror="this.style.display='none'"/>` : `<div style="font-size:36px;margin:12px 0">📄</div>`}
+        ${docUrl ? `
+          <div style="display:flex;gap:6px;justify-content:center;margin-top:8px">
+            <a href="${docUrl}" target="_blank" rel="noopener" class="btn-sm btn-detail" style="text-decoration:none">View ↗</a>
+            <button class="btn-sm btn-detail" onclick="downloadDoc('${docUrl}','${escapeHtml(d.type || 'document')}')">Download ⬇</button>
+          </div>
+        ` : '<div class="empty-sub">No file URL</div>'}
+        <div style="margin-top:8px"><span class="badge ${d.status==='approved'?'b-approved':d.status==='rejected'?'b-rejected':'b-pending'}">${d.status || 'pending'}</span></div>
+        ${d.reviewReason ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">${escapeHtml(d.reviewReason)}</div>` : ''}
+        <div class="action-cell" style="margin-top:8px">
+          ${d.status !== 'approved' ? `<button class="btn-sm btn-approve" onclick="reviewDocument('${d.id}','approved')">✓ Activate</button>` : ''}
+          ${d.status !== 'rejected' ? `<button class="btn-sm btn-reject" onclick="reviewDocument('${d.id}','rejected')">✕ Reject</button>` : ''}
+        </div>
+      </div>`;
+    }).join('')}
   </div>`;
 }
 
@@ -1619,13 +1674,16 @@ function renderDocuments() {
   else if (documentsFilter !== 'all') list = list.filter(d => String(d.type || '').startsWith(documentsFilter + ':'));
   const root = document.getElementById('documents-table');
   if (!list.length) { root.innerHTML = emptyState('📂', 'No documents', 'Uploaded documents will appear here.'); return; }
-  root.innerHTML = `<table><thead><tr><th>Document</th><th>Type</th><th>Status</th><th>Uploaded</th><th>Actions</th></tr></thead><tbody>${list.map(d => `<tr>
-    <td><a href="${d.url}" target="_blank" class="doc-link">Open document</a></td>
+  root.innerHTML = `<table><thead><tr><th>Document</th><th>Type</th><th>Status</th><th>Uploaded</th><th>Actions</th></tr></thead><tbody>${list.map(d => {
+    const docUrl = resolveDocUrl(d.url);
+    return `<tr>
+    <td><div style="display:flex;gap:6px;align-items:center"><a href="${docUrl}" target="_blank" rel="noopener" class="doc-link">Open ↗</a> <button class="btn-sm btn-detail" style="padding:2px 8px;font-size:11px" onclick="downloadDoc('${docUrl}','${escapeHtml(String(d.type||'doc'))}')">⬇</button></div></td>
     <td>${escapeHtml(String(d.type || '').replace(':', ' · '))}</td>
     <td><span class="badge ${d.status==='approved'?'b-approved':d.status==='rejected'?'b-rejected':'b-pending'}">${d.status || 'pending'}</span>${d.reviewReason ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">${escapeHtml(d.reviewReason)}</div>` : ''}</td>
     <td>${fmt(d.uploadedAt)}</td>
     <td><div class="action-cell">${d.status !== 'approved' ? `<button class="btn-sm btn-approve" onclick="reviewDocument('${d.id}','approved')">✓ Activate</button>` : ''}${d.status !== 'rejected' ? `<button class="btn-sm btn-reject" onclick="reviewDocument('${d.id}','rejected')">✕ Reject</button>` : ''}</div></td>
-  </tr>`).join('')}</tbody></table>`;
+  </tr>`;
+  }).join('')}</tbody></table>`;
 }
 
 async function viewOperatorDocs(userId, name) {
@@ -1908,11 +1966,15 @@ async function viewDocs(chauffeurId, name) {
     let html = '<div class="docs-grid">';
     for (const d of docs) {
       const label = DOC_LABELS[d.documentType] || (d.documentType || '').replace(/_/g,' ').replace(/\b\w/g, l => l.toUpperCase());
-      const isImg = /\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(d.url || '') || (d.url || '').includes('supabase');
+      const docUrl = resolveDocUrl(d.url);
+      const isImg = /\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(docUrl) || (docUrl.includes('supabase') && !docUrl.includes('.pdf')) || docUrl.includes('/api/media/');
       html += `<div class="doc-card">
-        <div class="doc-label">${label}</div>
-        ${isImg ? `<img class="doc-img" src="${d.url}" onerror="this.style.display='none'" />` : `<div style="font-size:36px;margin:12px 0">📄</div>`}
-        <a class="doc-link" href="${d.url}" target="_blank">View / Download ↗</a>
+        <div class="doc-label">${escapeHtml(label)}</div>
+        ${docUrl && isImg ? `<img class="doc-img" src="${docUrl}" onerror="this.style.display='none'" />` : `<div style="font-size:36px;margin:12px 0">📄</div>`}
+        <div style="display:flex;gap:6px;justify-content:center;margin-top:8px">
+          <a class="btn-sm btn-detail" href="${docUrl}" target="_blank" rel="noopener" style="text-decoration:none">View ↗</a>
+          <button class="btn-sm btn-detail" onclick="downloadDoc('${docUrl}','${escapeHtml(label)}')">Download ⬇</button>
+        </div>
         <button class="btn-sm btn-delete" style="margin-top:8px;width:100%" onclick="adminDelete('document','${d.id}','${label.replace(/'/g,"\\'")}')">🗑 Delete</button>
       </div>`;
     }
@@ -2413,7 +2475,11 @@ function openPayLater(id) {
       <div class="info-row"><div class="info-label">Submitted</div><div class="info-val">${fmtFull(item.submittedAt)}</div></div>
     </div>
     <div style="margin-top:18px;font-weight:600">Documents</div>
-    <div style="margin-top:8px">${docs.map(doc => `<div class="info-row" style="margin-bottom:8px"><div><div class="info-label">${escapeHtml(payLaterDocumentLabel(doc.type))}</div><div class="info-val">${escapeHtml(doc.status || 'pending')}</div></div><div class="action-cell"><a class="btn-sm btn-detail" href="${escapeHtml(doc.url)}" target="_blank" rel="noopener">View</a><a class="btn-sm btn-detail" href="${escapeHtml(doc.url)}" download>Download</a><button class="btn-sm btn-delete" onclick="deletePayLaterDocument('${item.id}','${doc.id}')">Delete</button></div></div>`).join('') || '<div class="muted">No documents.</div>'}</div>
+    <div style="margin-top:8px">${docs.map(doc => {
+      const docUrl = resolveDocUrl(doc.url);
+      const label = payLaterDocumentLabel(doc.type);
+      return `<div class="info-row" style="margin-bottom:8px"><div><div class="info-label">${escapeHtml(label)}</div><div class="info-val">${escapeHtml(doc.status || 'pending')}</div></div><div class="action-cell"><a class="btn-sm btn-detail" href="${escapeHtml(docUrl)}" target="_blank" rel="noopener" style="text-decoration:none">View ↗</a><button class="btn-sm btn-detail" onclick="downloadDoc('${escapeHtml(docUrl)}','${escapeHtml(label)}')">Download ⬇</button><button class="btn-sm btn-delete" onclick="deletePayLaterDocument('${item.id}','${doc.id}')">Delete</button></div></div>`;
+    }).join('') || '<div class="muted">No documents.</div>'}</div>
     <label class="field"><span>Rejection reason</span><textarea class="f-input" id="payLaterReason" rows="3">${escapeHtml(item.rejectionReason || '')}</textarea></label>
     <label class="field"><span>Add credit</span><input class="f-input" id="payLaterCredit" type="number" min="1" step="0.01" placeholder="Amount in rand" /></label>`;
   document.getElementById('m-foot').innerHTML = `

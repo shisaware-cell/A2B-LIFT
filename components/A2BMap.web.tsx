@@ -78,6 +78,7 @@ interface A2BMapProps {
   etaText?: string;
   statusText?: string;
   initialZoom?: "street" | "city";
+  mapMode?: "auto" | "dark" | "light";
 }
 
 export default function A2BMap({
@@ -94,6 +95,7 @@ export default function A2BMap({
   etaText,
   statusText,
   initialZoom = "street",
+  mapMode = "auto",
 }: A2BMapProps & { followDriver?: boolean }) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -167,14 +169,14 @@ export default function A2BMap({
       { featureType: "transit", stylers: [{ visibility: "off" }] },
     ];
 
-    const day = isDaytimeNow();
+    const isEffectiveDay = mapMode === "dark" ? false : mapMode === "light" ? true : isDaytimeNow();
     const map = new google.maps.Map(mapContainerRef.current, {
       center: { lat: pickupLocation.lat, lng: pickupLocation.lng },
       zoom: initialZoom === "city" ? 12 : 17,
-      styles: day ? LIGHT_MAP_JS_STYLE : darkStyle,
+      styles: isEffectiveDay ? LIGHT_MAP_JS_STYLE : darkStyle,
       disableDefaultUI: true,
       gestureHandling: "greedy",
-      backgroundColor: day ? "#E9ECEF" : "#1d1d1d",
+      backgroundColor: isEffectiveDay ? "#E9ECEF" : "#1d1d1d",
     });
 
     mapInstanceRef.current = map;

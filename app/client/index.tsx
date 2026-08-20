@@ -49,14 +49,15 @@ const CATEGORY_LUXURY_ART = require("../../assets/images/category-luxury.png");
 const CATEGORY_VIP_ART = require("../../assets/images/category-vip.png");
 const CATEGORY_VAN_ART = require("../../assets/images/category-van.png");
 const CATEGORY_A2B_LITE_ART = require("../../assets/images/category-a2b-lite.png");
+const CATEGORY_V_CLASS_ART = require("../../assets/images/category-v-class.png");
 
 const VEHICLE_TYPES = [
-  { id: "budget", name: "Budget", desc: "Toyota Corolla, Toyota Quest", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.budget, badge: "recommended" },
   { id: "a2b_lite", name: "A2B Lite", desc: "Hyundai i10 and similar compact cars", artwork: CATEGORY_A2B_LITE_ART, ...VEHICLE_CATEGORY_PRICING.a2b_lite, badge: "cheapest" },
+  { id: "budget", name: "Budget", desc: "Toyota Corolla, Toyota Quest", artwork: CATEGORY_SEDAN_ART, ...VEHICLE_CATEGORY_PRICING.budget, badge: "recommended" },
+  { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", artwork: CATEGORY_V_CLASS_ART, ...VEHICLE_CATEGORY_PRICING.luxury_van, badge: "premium" },
   { id: "luxury", name: "Luxury", desc: "BMW 3 Series, Mercedes C-Class", artwork: CATEGORY_LUXURY_ART, ...VEHICLE_CATEGORY_PRICING.luxury },
   { id: "business", name: "VIP", desc: "BMW 5/7 Series, Mercedes E/S-Class", artwork: CATEGORY_VIP_ART, ...VEHICLE_CATEGORY_PRICING.business },
   { id: "van", name: "Van", desc: "Hyundai H1, Mercedes Vito, Staria", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.van },
-  { id: "luxury_van", name: "V-Class", desc: "Mercedes-Benz V-Class", artwork: CATEGORY_VAN_ART, ...VEHICLE_CATEGORY_PRICING.luxury_van, badge: "premium" },
 ];
 
 function getRideVehicle(vehicleType: unknown) {
@@ -1181,7 +1182,7 @@ export default function ClientHomeScreen() {
           }));
 
         const nearbyReal = center
-          ? realOnline.filter((d) => haversineDistance(center.lat, center.lng, d.lat, d.lng) <= 35)
+          ? realOnline.filter((d) => haversineDistance(center.lat, center.lng, d.lat, d.lng) <= 4)
           : realOnline;
 
         if (nearbyReal.length > 0) {
@@ -2857,6 +2858,7 @@ export default function ClientHomeScreen() {
           followDriver={rideStatus === "arriving" || rideStatus === "in_trip"}
           loading={locationLoading && !location}
           initialZoom={mapHasLiveRideFocus ? "street" : "city"}
+          mapMode="dark"
           etaText={etaText || undefined}
           statusText={
             rideStatus === "in_trip" ? "Trip In Progress" : undefined

@@ -67,7 +67,7 @@ import {
   storeMediaObject,
 } from "./media-object-store";
 
-const RIDE_MATCH_RADIUS_KM = 25;
+const RIDE_MATCH_RADIUS_KM = 4;
 const CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
 const TOTAL_COMMISSION_RATE = PLATFORM_COMMISSION_RATE;
 const DRIVER_ANNUAL_SHARE_RATE = 0.05;
@@ -1180,7 +1180,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const media = await getMediaObject(req.params.id);
       if (!media) return res.status(404).end();
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
       res.setHeader("Content-Type", media.mimeType);
+      res.setHeader("Content-Disposition", "inline");
       res.setHeader("Content-Length", String(media.data.length));
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");

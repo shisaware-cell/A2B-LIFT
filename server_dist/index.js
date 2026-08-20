@@ -2690,7 +2690,7 @@ async function deleteMediaObject(id) {
 }
 
 // server/routes.ts
-var RIDE_MATCH_RADIUS_KM = 25;
+var RIDE_MATCH_RADIUS_KM = 4;
 var CHAUFFEUR_LOCATION_STALE_WINDOW_MS = 10 * 60 * 1e3;
 var TOTAL_COMMISSION_RATE = PLATFORM_COMMISSION_RATE;
 var DRIVER_ANNUAL_SHARE_RATE = 0.05;
@@ -3583,7 +3583,10 @@ async function registerRoutes(app2) {
       }
       const media = await getMediaObject(req.params.id);
       if (!media) return res.status(404).end();
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
       res.setHeader("Content-Type", media.mimeType);
+      res.setHeader("Content-Disposition", "inline");
       res.setHeader("Content-Length", String(media.data.length));
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");

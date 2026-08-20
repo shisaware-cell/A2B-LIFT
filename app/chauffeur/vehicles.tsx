@@ -17,10 +17,10 @@ const VEHICLE_DOCS = [
 const VEHICLE_CATEGORIES = [
   { id: "a2b_lite", label: "A2B Lite", desc: "Hyundai i10 and similar compact cars" },
   { id: "budget", label: "Budget", desc: "Toyota Corolla, Toyota Quest" },
+  { id: "luxury_van", label: "V-Class / Luxury Van", desc: "Mercedes-Benz V-Class" },
   { id: "luxury", label: "Luxury", desc: "BMW 3 Series, Mercedes C Class" },
-  { id: "business", label: "Business Class", desc: "BMW 5 Series, Mercedes E Class" },
+  { id: "business", label: "VIP / Business Class", desc: "BMW 5 Series, Mercedes E Class" },
   { id: "van", label: "Van", desc: "Hyundai H1, Mercedes Vito, Staria" },
-  { id: "luxury_van", label: "Luxury Van", desc: "Mercedes V Class" },
 ];
 
 export default function VehiclesScreen() {

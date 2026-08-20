@@ -241,6 +241,7 @@ export type A2BMapProps = {
   etaText?: string | null;
   statusText?: string | null;
   initialZoom?: "city" | "street";
+  mapMode?: "auto" | "dark" | "light";
 };
 
 export function A2BMap({
@@ -257,6 +258,7 @@ export function A2BMap({
   etaText,
   statusText,
   initialZoom = "street",
+  mapMode = "auto",
 }: A2BMapProps) {
   const IDLE_DELTA = initialZoom === "city" ? 0.11 : 0.004;
   const mapRef = useRef<MapView>(null);
@@ -267,10 +269,11 @@ export function A2BMap({
     return () => clearInterval(id);
   }, []);
 
-  const customMapStyle = isDay ? LIGHT_MAP_STYLE : DARK_MAP_STYLE;
-  const mapBackground = isDay ? "#E9ECEF" : "#0B0B0B";
-  const routeColor = isDay ? "#111111" : "#FFFFFF";
-  const edgeShade = isDay ? "255,255,255" : "0,0,0";
+  const isEffectiveDay = mapMode === "dark" ? false : mapMode === "light" ? true : isDay;
+  const customMapStyle = isEffectiveDay ? LIGHT_MAP_STYLE : DARK_MAP_STYLE;
+  const mapBackground = isEffectiveDay ? "#E9ECEF" : "#0B0B0B";
+  const routeColor = isEffectiveDay ? "#111111" : "#FFFFFF";
+  const edgeShade = isEffectiveDay ? "255,255,255" : "0,0,0";
 
   // Use user's location for initialRegion if available, else Johannesburg
   const center = pickupLocation || DEFAULT_REGION;
@@ -359,7 +362,7 @@ export function A2BMap({
         customMapStyle={customMapStyle}
         initialRegion={initialRegionRef.current}
         onMapReady={handleMapReady}
-        userInterfaceStyle={isDay ? "light" : "dark"}
+        userInterfaceStyle={isEffectiveDay ? "light" : "dark"}
         showsUserLocation={false}
         showsMyLocationButton={false}
         showsCompass={false}

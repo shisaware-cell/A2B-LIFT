@@ -1,7 +1,7 @@
 import { Platform } from "react-native";
 import * as Location from "expo-location";
 
-export const RIDE_MATCH_RADIUS_KM = 25;
+export const RIDE_MATCH_RADIUS_KM = 4;
 export const LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
 export const LOCATION_DISTANCE_INTERVAL_M = 5;
 export const LOCATION_TIME_INTERVAL_MS = 3000;
