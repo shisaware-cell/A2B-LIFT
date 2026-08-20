@@ -82,19 +82,19 @@ class DriverOverlayService : Service() {
       clipToOutline = true
       elevation = dp(8).toFloat()
     }
-    val background = GradientDrawable().apply {
+    val containerBg = GradientDrawable().apply {
       shape = GradientDrawable.OVAL
       setColor(Color.rgb(15, 23, 42))
       setStroke(dp(2), Color.WHITE)
     }
-    container.background = background
+    container.background = containerBg
 
     // Circular icon wrapper to ensure square app icons never bleed outside the circle
     val iconContainer = FrameLayout(this).apply {
-      background = GradientDrawable().apply {
+      setBackground(GradientDrawable().apply {
         shape = GradientDrawable.OVAL
         setColor(Color.rgb(10, 10, 10))
-      }
+      })
       outlineProvider = ViewOutlineProvider.BACKGROUND
       clipToOutline = true
     }
@@ -108,11 +108,11 @@ class DriverOverlayService : Service() {
 
     // Live blinking green dot for active trips
     val liveDot = View(this).apply {
-      background = GradientDrawable().apply {
+      setBackground(GradientDrawable().apply {
         shape = GradientDrawable.OVAL
         setColor(Color.rgb(34, 197, 94))
         setStroke(dp(1), Color.WHITE)
-      }
+      })
       visibility = View.GONE
     }
     val liveDotParams = FrameLayout.LayoutParams(dp(12), dp(12), Gravity.TOP or Gravity.START).apply {
