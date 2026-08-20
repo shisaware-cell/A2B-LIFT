@@ -66,7 +66,7 @@ class DriverOverlayService : Service() {
     overlayView?.let {
       try {
         windowManager.removeView(it)
-      } catch (_: IllegalArgumentException) {
+      } catch (e: IllegalArgumentException) {
       }
     }
     overlayView = null
