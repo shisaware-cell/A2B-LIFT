@@ -59,9 +59,9 @@ test("keeps the client map centred on a city or active ride while GPS settles", 
 
 test("renders nearby drivers with the bundled rich car marker", () => {
   const mapSource = readProjectFile("components/A2BMap.native.tsx");
-  const nearbyMarkerStart = mapSource.indexOf("Nearby idle drivers");
+  const nearbyMarkerStart = mapSource.indexOf("NearbyDriverMarker =");
   const nearbyMarkerEnd = mapSource.indexOf(
-    "{showDriver && driverLocation",
+    "function decodePolyline",
     nearbyMarkerStart,
   );
   const nearbyMarkerBlock = mapSource.slice(nearbyMarkerStart, nearbyMarkerEnd);
@@ -69,7 +69,7 @@ test("renders nearby drivers with the bundled rich car marker", () => {
   assert.match(mapSource, /nearby-car-marker\.png/);
   assert.match(nearbyMarkerBlock, /<Image/);
   assert.match(nearbyMarkerBlock, /source=\{NEARBY_CAR_MARKER\}/);
-  assert.match(nearbyMarkerBlock, /tracksViewChanges=\{false\}/);
+  assert.match(nearbyMarkerBlock, /tracksViewChanges=\{tracksViewChanges\}/);
   assert.doesNotMatch(nearbyMarkerBlock, /name="car-sport"/);
 });
 

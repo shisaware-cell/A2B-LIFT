@@ -6086,27 +6086,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/chauffeurs", async (_req: Request, res: Response) => {
-    try {
-      const allChauffeurs = await storage.getAllChauffeurs();
-      // Enrich with user details (name, username, phone)
-      const enriched = await Promise.all(
-        allChauffeurs.map(async (c) => {
-          const user = c.userId ? await storage.getUser(c.userId) : null;
-          return {
-            ...c,
-            userName: user?.name || "—",
-            userPhone: user?.phone || c.phone || "—",
-            userEmail: user?.username || "—",
-          };
-        })
-      );
-      return res.json(enriched);
-    } catch (error: any) {
-      return res.status(500).json({ message: error.message });
-    }
-  });
-
   function normalizeLongDistanceCity(value?: string | null) {
     return String(value || "")
       .replace(/\([^)]*\)/g, " ")

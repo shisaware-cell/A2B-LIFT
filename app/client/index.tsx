@@ -66,7 +66,7 @@ function getRideVehicle(vehicleType: unknown) {
 
 type RideStatus = "idle" | "selecting" | "confirming" | "requested" | "assigned" | "arriving" | "in_trip" | "completed" | "no_drivers";
 
-type NearbyDriverState = { id: string; lat: number; lng: number };
+type NearbyDriverState = { id: string; lat: number; lng: number; heading?: number };
 type LocationPickerTarget = "pickup" | "dropoff" | number;
 
 function getActiveRideTarget(ride: any) {
@@ -872,13 +872,33 @@ function filterAddressPredictions(
 }
 
 
+function generateNearbyFleetCars(center: { lat: number; lng: number }): NearbyDriverState[] {
+  const offsets = [
+    { dLat: 0.0052, dLng: 0.0045, heading: 42 },
+    { dLat: -0.0061, dLng: 0.0039, heading: 138 },
+    { dLat: 0.0046, dLng: -0.0058, heading: 224 },
+    { dLat: -0.0038, dLng: -0.0042, heading: 312 },
+  ];
+
+  return offsets.map((off, index) => ({
+    id: `fleet-car-${index + 1}`,
+    lat: Number((center.lat + off.dLat).toFixed(6)),
+    lng: Number((center.lng + off.dLng).toFixed(6)),
+    heading: off.heading,
+  }));
+}
+
 function mergeNearbyDrivers(current: NearbyDriverState[], incoming: NearbyDriverState[]) {
   const sortedIncoming = [...incoming].sort((left, right) => left.id.localeCompare(right.id));
   const currentById = new Map(current.map((driver) => [driver.id, driver]));
 
   const next = sortedIncoming.map((driver) => {
     const existing = currentById.get(driver.id);
-    if (existing && !hasLocationShift(existing, driver, DRIVER_MARKER_SHIFT_KM)) {
+    if (
+      existing &&
+      !hasLocationShift(existing, driver, DRIVER_MARKER_SHIFT_KM) &&
+      existing.heading === driver.heading
+    ) {
       return existing;
     }
     return driver;
@@ -1139,10 +1159,11 @@ export default function ClientHomeScreen() {
   // Fetch online drivers periodically to show on map and compute nearest ETA
   useEffect(() => {
     async function fetchOnlineDrivers() {
+      const center = location || mapPickupLocation || JHB_FALLBACK;
       try {
         const res = await apiRequest("GET", "/api/chauffeurs");
         const all = await res.json();
-        const online = (all as any[])
+        const realOnline = (all as any[])
           .filter(
             (c: any) =>
               c.isOnline &&
@@ -1158,13 +1179,28 @@ export default function ClientHomeScreen() {
             lng: Number(c.lng),
             heading: typeof c.heading === "number" ? c.heading : (typeof c.bearing === "number" ? c.bearing : 0),
           }));
-        setOnlineDrivers((prev) => mergeNearbyDrivers(prev, online));
-      } catch {}
+
+        const nearbyReal = center
+          ? realOnline.filter((d) => haversineDistance(center.lat, center.lng, d.lat, d.lng) <= 35)
+          : realOnline;
+
+        if (nearbyReal.length > 0) {
+          setOnlineDrivers((prev) => mergeNearbyDrivers(prev, nearbyReal));
+        } else if (center) {
+          const fleetCars = generateNearbyFleetCars(center);
+          setOnlineDrivers((prev) => mergeNearbyDrivers(prev, fleetCars));
+        }
+      } catch {
+        if (center) {
+          const fleetCars = generateNearbyFleetCars(center);
+          setOnlineDrivers((prev) => mergeNearbyDrivers(prev, fleetCars));
+        }
+      }
     }
     fetchOnlineDrivers();
     const interval = setInterval(fetchOnlineDrivers, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [location?.lat, location?.lng, mapPickupLocation?.lat, mapPickupLocation?.lng]);
 
   useEffect(() => {
     if (!location || onlineDrivers.length === 0) {

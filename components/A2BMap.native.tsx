@@ -82,6 +82,7 @@ const DriverMarker = React.memo(
   ({ latitude, longitude, heading }: { latitude: number; longitude: number; heading?: number }) => {
     const prevCoordRef = useRef({ latitude, longitude });
     const [rotation, setRotation] = useState(heading ?? 0);
+    const [tracksViewChanges, setTracksViewChanges] = useState(true);
 
     useEffect(() => {
       const prev = prevCoordRef.current;
@@ -96,12 +97,16 @@ const DriverMarker = React.memo(
         setRotation(computedBearing);
       }
       prevCoordRef.current = { latitude, longitude };
+      setTracksViewChanges(true);
+      const timer = setTimeout(() => setTracksViewChanges(false), 500);
+      return () => clearTimeout(timer);
     }, [latitude, longitude, heading]);
 
     return (
       <Marker
         coordinate={{ latitude, longitude }}
         anchor={{ x: 0.5, y: 0.5 }}
+        tracksViewChanges={tracksViewChanges}
         flat={true}
         rotation={rotation}
       >
@@ -110,6 +115,11 @@ const DriverMarker = React.memo(
             source={NEARBY_CAR_MARKER}
             style={driverMarkerStyle.image}
             resizeMode="contain"
+            fadeDuration={0}
+            onLoadEnd={() => {
+              setTracksViewChanges(true);
+              setTimeout(() => setTracksViewChanges(false), 300);
+            }}
           />
         </View>
       </Marker>
@@ -117,18 +127,70 @@ const DriverMarker = React.memo(
   },
 );
 
-const driverMarkerStyle = {
+const NearbyDriverMarker = React.memo(
+  ({
+    id,
+    latitude,
+    longitude,
+    heading,
+    etaText,
+  }: {
+    id: string | number;
+    latitude: number;
+    longitude: number;
+    heading?: number;
+    etaText?: string;
+  }) => {
+    const [tracksViewChanges, setTracksViewChanges] = useState(true);
+
+    useEffect(() => {
+      setTracksViewChanges(true);
+      const timer = setTimeout(() => setTracksViewChanges(false), 500);
+      return () => clearTimeout(timer);
+    }, [latitude, longitude, heading, etaText]);
+
+    return (
+      <Marker
+        coordinate={{ latitude, longitude }}
+        anchor={{ x: 0.5, y: 0.5 }}
+        tracksViewChanges={tracksViewChanges}
+        flat={true}
+        rotation={heading || 0}
+      >
+        <View style={driverMarkerStyle.wrap}>
+          {etaText ? (
+            <View style={styles.nearbyEtaPill}>
+              <Text style={styles.nearbyEtaPillText}>{etaText}</Text>
+              <View style={styles.nearbyEtaPillArrow} />
+            </View>
+          ) : null}
+          <Image
+            source={NEARBY_CAR_MARKER}
+            style={driverMarkerStyle.image}
+            resizeMode="contain"
+            fadeDuration={0}
+            onLoadEnd={() => {
+              setTracksViewChanges(true);
+              setTimeout(() => setTracksViewChanges(false), 300);
+            }}
+          />
+        </View>
+      </Marker>
+    );
+  },
+);
+
+const driverMarkerStyle = StyleSheet.create({
   wrap: {
-    width: 52,
-    height: 88,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 2,
   },
   image: {
-    width: 40,
-    height: 80,
+    width: 36,
+    height: 76,
   },
-};
+});
 
 function decodePolyline(encoded: string): { latitude: number; longitude: number }[] {
   const points: { latitude: number; longitude: number }[] = [];
@@ -383,28 +445,14 @@ export function A2BMap({
 
         {/* Nearby idle drivers shown when not in an active ride */}
         {!showDriver && nearbyDrivers.map((driver, index) => (
-          <Marker
+          <NearbyDriverMarker
             key={`nearby-${driver.id}`}
-            coordinate={{ latitude: driver.lat, longitude: driver.lng }}
-            anchor={{ x: 0.5, y: 0.5 }}
-            tracksViewChanges={false}
-            flat={true}
-            rotation={driver.heading || 0}
-          >
-            <View style={styles.nearbyDriverMarker}>
-              {index === 0 && etaText && (
-                <View style={styles.nearbyEtaPill}>
-                  <Text style={styles.nearbyEtaPillText}>{etaText}</Text>
-                  <View style={styles.nearbyEtaPillArrow} />
-                </View>
-              )}
-              <Image
-                source={NEARBY_CAR_MARKER}
-                style={styles.nearbyDriverImage}
-                resizeMode="contain"
-              />
-            </View>
-          </Marker>
+            id={driver.id}
+            latitude={driver.lat}
+            longitude={driver.lng}
+            heading={driver.heading}
+            etaText={index === 0 ? etaText : undefined}
+          />
         ))}
 
         {showDriver && driverLocation && (

@@ -7724,25 +7724,6 @@ If you did not request this, you can ignore this email.`,
       return res.status(500).json({ message: error.message });
     }
   });
-  app2.get("/api/chauffeurs", async (_req, res) => {
-    try {
-      const allChauffeurs = await storage.getAllChauffeurs();
-      const enriched = await Promise.all(
-        allChauffeurs.map(async (c) => {
-          const user = c.userId ? await storage.getUser(c.userId) : null;
-          return {
-            ...c,
-            userName: user?.name || "\u2014",
-            userPhone: user?.phone || c.phone || "\u2014",
-            userEmail: user?.username || "\u2014"
-          };
-        })
-      );
-      return res.json(enriched);
-    } catch (error) {
-      return res.status(500).json({ message: error.message });
-    }
-  });
   function normalizeLongDistanceCity(value) {
     return String(value || "").replace(/\([^)]*\)/g, " ").replace(/\b(south africa|sa)\b/gi, " ").split(",")[0].replace(/[^a-zA-Z\s'-]/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
   }
