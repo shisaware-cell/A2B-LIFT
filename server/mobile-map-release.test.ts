@@ -69,7 +69,7 @@ test("renders nearby drivers with the bundled rich car marker", () => {
   assert.match(mapSource, /nearby-car-marker\.png/);
   assert.match(nearbyMarkerBlock, /<Image/);
   assert.match(nearbyMarkerBlock, /source=\{NEARBY_CAR_MARKER\}/);
-  assert.match(nearbyMarkerBlock, /tracksViewChanges=\{tracksViewChanges\}/);
+  assert.match(nearbyMarkerBlock, /tracksViewChanges=\{false\}/);
   assert.doesNotMatch(nearbyMarkerBlock, /name="car-sport"/);
 });
 

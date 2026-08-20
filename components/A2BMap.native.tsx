@@ -82,7 +82,6 @@ const DriverMarker = React.memo(
   ({ latitude, longitude, heading }: { latitude: number; longitude: number; heading?: number }) => {
     const prevCoordRef = useRef({ latitude, longitude });
     const [rotation, setRotation] = useState(heading ?? 0);
-    const [tracksViewChanges, setTracksViewChanges] = useState(true);
 
     useEffect(() => {
       const prev = prevCoordRef.current;
@@ -97,31 +96,22 @@ const DriverMarker = React.memo(
         setRotation(computedBearing);
       }
       prevCoordRef.current = { latitude, longitude };
-      setTracksViewChanges(true);
-      const timer = setTimeout(() => setTracksViewChanges(false), 500);
-      return () => clearTimeout(timer);
     }, [latitude, longitude, heading]);
 
     return (
       <Marker
         coordinate={{ latitude, longitude }}
         anchor={{ x: 0.5, y: 0.5 }}
-        tracksViewChanges={tracksViewChanges}
+        tracksViewChanges={false}
         flat={true}
         rotation={rotation}
       >
-        <View style={driverMarkerStyle.wrap}>
-          <Image
-            source={NEARBY_CAR_MARKER}
-            style={driverMarkerStyle.image}
-            resizeMode="contain"
-            fadeDuration={0}
-            onLoadEnd={() => {
-              setTracksViewChanges(true);
-              setTimeout(() => setTracksViewChanges(false), 300);
-            }}
-          />
-        </View>
+        <Image
+          source={NEARBY_CAR_MARKER}
+          style={driverMarkerStyle.image}
+          resizeMode="contain"
+          fadeDuration={0}
+        />
       </Marker>
     );
   },
@@ -129,52 +119,30 @@ const DriverMarker = React.memo(
 
 const NearbyDriverMarker = React.memo(
   ({
-    id,
     latitude,
     longitude,
     heading,
-    etaText,
   }: {
-    id: string | number;
+    id?: string | number;
     latitude: number;
     longitude: number;
     heading?: number;
     etaText?: string;
   }) => {
-    const [tracksViewChanges, setTracksViewChanges] = useState(true);
-
-    useEffect(() => {
-      setTracksViewChanges(true);
-      const timer = setTimeout(() => setTracksViewChanges(false), 500);
-      return () => clearTimeout(timer);
-    }, [latitude, longitude, heading, etaText]);
-
     return (
       <Marker
         coordinate={{ latitude, longitude }}
         anchor={{ x: 0.5, y: 0.5 }}
-        tracksViewChanges={tracksViewChanges}
+        tracksViewChanges={false}
         flat={true}
         rotation={heading || 0}
       >
-        <View style={driverMarkerStyle.wrap}>
-          {etaText ? (
-            <View style={styles.nearbyEtaPill}>
-              <Text style={styles.nearbyEtaPillText}>{etaText}</Text>
-              <View style={styles.nearbyEtaPillArrow} />
-            </View>
-          ) : null}
-          <Image
-            source={NEARBY_CAR_MARKER}
-            style={driverMarkerStyle.image}
-            resizeMode="contain"
-            fadeDuration={0}
-            onLoadEnd={() => {
-              setTracksViewChanges(true);
-              setTimeout(() => setTracksViewChanges(false), 300);
-            }}
-          />
-        </View>
+        <Image
+          source={NEARBY_CAR_MARKER}
+          style={driverMarkerStyle.image}
+          resizeMode="contain"
+          fadeDuration={0}
+        />
       </Marker>
     );
   },
@@ -184,11 +152,10 @@ const driverMarkerStyle = StyleSheet.create({
   wrap: {
     alignItems: "center",
     justifyContent: "center",
-    padding: 2,
   },
   image: {
-    width: 36,
-    height: 76,
+    width: 28,
+    height: 58,
   },
 });
 
@@ -406,12 +373,20 @@ export function A2BMap({
         {pickupLocation && !(showDriver && driverLocation && Math.abs(pickupLocation.lat - driverLocation.lat) < 0.0003 && Math.abs(pickupLocation.lng - driverLocation.lng) < 0.0003) && (
           <Marker
             coordinate={{ latitude: pickupLocation.lat, longitude: pickupLocation.lng }}
-            anchor={{ x: 0.5, y: 0.5 }}
+            anchor={etaText ? { x: 0.18, y: 0.82 } : { x: 0.5, y: 0.5 }}
           >
-            <View style={styles.pickupMarker}>
-              <View style={styles.pickupBeam} />
-              <View style={styles.pickupOuterRing}>
-                <View style={styles.pickupDot} />
+            <View style={styles.pickupMarkerContainer}>
+              {etaText ? (
+                <View style={styles.pickupEtaCallout}>
+                  <Text style={styles.pickupEtaCalloutText}>{etaText}</Text>
+                  <View style={styles.pickupEtaCalloutArrow} />
+                </View>
+              ) : null}
+              <View style={styles.pickupMarker}>
+                <View style={styles.pickupBeam} />
+                <View style={styles.pickupOuterRing}>
+                  <View style={styles.pickupDot} />
+                </View>
               </View>
             </View>
           </Marker>
@@ -444,14 +419,13 @@ export function A2BMap({
         ))}
 
         {/* Nearby idle drivers shown when not in an active ride */}
-        {!showDriver && nearbyDrivers.map((driver, index) => (
+        {!showDriver && nearbyDrivers.map((driver) => (
           <NearbyDriverMarker
             key={`nearby-${driver.id}`}
             id={driver.id}
             latitude={driver.lat}
             longitude={driver.lng}
             heading={driver.heading}
-            etaText={index === 0 ? etaText : undefined}
           />
         ))}
 
@@ -553,6 +527,44 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: 13,
     fontFamily: "Inter_500Medium",
+  },
+  pickupMarkerContainer: {
+    alignItems: "flex-start",
+    justifyContent: "center",
+  },
+  pickupEtaCallout: {
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    marginBottom: 4,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  pickupEtaCalloutText: {
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+    color: "#000000",
+  },
+  pickupEtaCalloutArrow: {
+    position: "absolute",
+    bottom: -4,
+    left: 12,
+    width: 0,
+    height: 0,
+    backgroundColor: "transparent",
+    borderStyle: "solid",
+    borderLeftWidth: 4,
+    borderRightWidth: 4,
+    borderTopWidth: 4,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderTopColor: "#FFFFFF",
   },
   pickupMarker: {
     alignItems: "center",
