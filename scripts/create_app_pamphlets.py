@@ -186,7 +186,28 @@ def draw_qr(canvas: Canvas, value: str, x: float, y: float, container_size: floa
     renderPDF.draw(drawing, canvas, x + padding, y + padding)
 
 
-def draw_driver_pamphlet(output_path: Path, vehicle: Path, icon: Path) -> None:
+def draw_store_badges(canvas: Canvas, apple_badge: Path, google_badge: Path, x: float, y: float) -> None:
+    badge_w = 18.3 * mm
+    badge_h = badge_w * (45 / 150)
+    gap = 1.4 * mm
+    canvas.drawImage(str(apple_badge), x, y, width=badge_w, height=badge_h, mask="auto")
+    canvas.drawImage(
+        str(google_badge),
+        x + badge_w + gap,
+        y,
+        width=badge_w,
+        height=badge_h,
+        mask="auto",
+    )
+
+
+def draw_driver_pamphlet(
+    output_path: Path,
+    vehicle: Path,
+    icon: Path,
+    apple_badge: Path,
+    google_badge: Path,
+) -> None:
     canvas = Canvas(str(output_path), pagesize=A5)
     canvas.setTitle("A2B LIFT DRIVER - Download Pamphlet")
     canvas.setAuthor("A2B LIFT")
@@ -247,7 +268,7 @@ def draw_driver_pamphlet(output_path: Path, vehicle: Path, icon: Path) -> None:
 
     qr_size = 39 * mm
     qr_x = PAGE_W - MARGIN - qr_size
-    qr_y = 10 * mm
+    qr_y = 14 * mm
 
     draw_text_with_spacing(
         canvas,
@@ -259,12 +280,19 @@ def draw_driver_pamphlet(output_path: Path, vehicle: Path, icon: Path) -> None:
         color=SOFT_WHITE,
     )
     draw_qr(canvas, DRIVER_URL, qr_x, qr_y, qr_size)
+    draw_store_badges(canvas, apple_badge, google_badge, qr_x + 0.5 * mm, 5.5 * mm)
 
     canvas.showPage()
     canvas.save()
 
 
-def draw_client_pamphlet(output_path: Path, hero: Path, icon: Path) -> None:
+def draw_client_pamphlet(
+    output_path: Path,
+    hero: Path,
+    icon: Path,
+    apple_badge: Path,
+    google_badge: Path,
+) -> None:
     canvas = Canvas(str(output_path), pagesize=A5)
     canvas.setTitle("A2B LIFT - Rider App Download Pamphlet")
     canvas.setAuthor("A2B LIFT")
@@ -330,7 +358,7 @@ def draw_client_pamphlet(output_path: Path, hero: Path, icon: Path) -> None:
 
     qr_size = 39 * mm
     qr_x = PAGE_W - MARGIN - qr_size
-    qr_y = 10 * mm
+    qr_y = 14 * mm
 
     draw_text_with_spacing(
         canvas,
@@ -342,6 +370,7 @@ def draw_client_pamphlet(output_path: Path, hero: Path, icon: Path) -> None:
         color=INK,
     )
     draw_qr(canvas, CLIENT_URL, qr_x, qr_y, qr_size)
+    draw_store_badges(canvas, apple_badge, google_badge, qr_x + 0.5 * mm, 5.5 * mm)
 
     canvas.showPage()
     canvas.save()
@@ -371,8 +400,16 @@ def main() -> None:
         OUTPUT_DIR / "A2B-Lift-Driver-Pamphlet.pdf",
         ROOT / "assets" / "images" / "category-v-class.png",
         driver_icon,
+        ROOT / "assets" / "images" / "apple.png",
+        ROOT / "assets" / "images" / "google.png",
     )
-    draw_client_pamphlet(OUTPUT_DIR / "A2B-Lift-Client-Pamphlet.pdf", client_hero, client_icon)
+    draw_client_pamphlet(
+        OUTPUT_DIR / "A2B-Lift-Client-Pamphlet.pdf",
+        client_hero,
+        client_icon,
+        ROOT / "assets" / "images" / "apple.png",
+        ROOT / "assets" / "images" / "google.png",
+    )
 
 
 if __name__ == "__main__":
