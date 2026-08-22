@@ -8,6 +8,11 @@ import * as fs from "fs";
 import * as path from "path";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import { pool } from "./db";
+import {
+  getPlatformDownloadUrl,
+  renderDownloadChooser,
+  type MobileApp,
+} from "./app-download-links";
 
 const app = express();
 const log = console.log;
@@ -352,11 +357,24 @@ async function configureExpoAndLanding(app: express.Application) {
     res.status(200).send(fs.readFileSync(passwordResetTemplatePath, "utf-8"));
   });
 
+  const serveAppDownload = (appVariant: MobileApp) => (req: Request, res: Response) => {
+    const destination = getPlatformDownloadUrl(appVariant, req.get("user-agent") || "");
+    res.setHeader("Cache-Control", "public, max-age=300");
+
+    if (destination) {
+      return res.redirect(302, destination);
+    }
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.status(200).send(renderDownloadChooser(appVariant));
+  };
+
+  app.get("/download/driver", serveAppDownload("driver"));
+  app.get("/download/client", serveAppDownload("client"));
+
   // Short link used in driver SMS/emails so the message fits one SMS.
-  // /driver → the driver app store listing.
-  app.get("/driver", (_req: Request, res: Response) => {
-    res.redirect(302, process.env.DRIVER_APP_STORE_URL || "https://play.google.com/store/apps/details?id=com.a2blift");
-  });
+  // Keep /driver as a backwards-compatible alias for the smart driver download link.
+  app.get("/driver", serveAppDownload("driver"));
 
   const serveReferralLaunch = (req: Request, res: Response) => {
     const referralCode = req.params.code;

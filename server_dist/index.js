@@ -12399,6 +12399,103 @@ var import_helmet = __toESM(require("helmet"));
 var fs = __toESM(require("fs"));
 var path = __toESM(require("path"));
 var import_http_proxy_middleware = require("http-proxy-middleware");
+
+// server/app-download-links.ts
+var DEFAULT_DOWNLOAD_LINKS = {
+  driver: {
+    appName: "A2B LIFT DRIVER",
+    androidUrl: "https://play.google.com/store/apps/details?id=com.a2blift",
+    iosUrl: "https://apps.apple.com/za/app/a2b-lift-driver/id6779553841"
+  },
+  client: {
+    appName: "A2B LIFT",
+    androidUrl: "https://play.google.com/store/apps/details?id=com.a2blift.client",
+    iosUrl: "https://apps.apple.com/za/app/a2b-lift/id6779557968"
+  }
+};
+function detectMobilePlatform(userAgent = "") {
+  if (/android/i.test(userAgent)) return "android";
+  if (/iphone|ipad|ipod/i.test(userAgent)) return "ios";
+  return "other";
+}
+function getAppDownloadLinks(app2, env = process.env) {
+  const defaults = DEFAULT_DOWNLOAD_LINKS[app2];
+  const prefix = app2 === "driver" ? "A2B_DRIVER" : "A2B_CLIENT";
+  return {
+    appName: defaults.appName,
+    androidUrl: env[`${prefix}_ANDROID_STORE_URL`] || env[`EXPO_PUBLIC_${prefix}_ANDROID_STORE_URL`] || defaults.androidUrl,
+    iosUrl: env[`${prefix}_IOS_APP_STORE_URL`] || env[`EXPO_PUBLIC_${prefix}_IOS_APP_STORE_URL`] || defaults.iosUrl
+  };
+}
+function getPlatformDownloadUrl(app2, userAgent = "", env = process.env) {
+  const platform = detectMobilePlatform(userAgent);
+  const links = getAppDownloadLinks(app2, env);
+  if (platform === "android") return links.androidUrl;
+  if (platform === "ios") return links.iosUrl;
+  return void 0;
+}
+function escapeHtml(value) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+function renderDownloadChooser(app2, env = process.env) {
+  const links = getAppDownloadLinks(app2, env);
+  const title = escapeHtml(links.appName);
+  const iosUrl = escapeHtml(links.iosUrl);
+  const androidUrl = escapeHtml(links.androidUrl);
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Download ${title}</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: #090b0d;
+        color: #f7f7f5;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      main { width: min(100%, 420px); }
+      .eyebrow { color: #a6abb2; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+      h1 { margin: 12px 0 10px; font-size: 34px; line-height: 1.06; }
+      p { margin: 0 0 26px; color: #b8bcc2; font-size: 16px; line-height: 1.55; }
+      a {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 58px;
+        margin-top: 12px;
+        padding: 0 18px;
+        border: 1px solid #30343a;
+        border-radius: 8px;
+        color: #f7f7f5;
+        text-decoration: none;
+        font-size: 16px;
+        font-weight: 700;
+      }
+      a:first-of-type { background: #f7f7f5; color: #090b0d; border-color: #f7f7f5; }
+      span { font-size: 20px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">A2B LIFT</div>
+      <h1>Download ${title}</h1>
+      <p>Select the app store for your device. Phones scanning the pamphlet QR code are sent to the correct store automatically.</p>
+      <a href="${iosUrl}">Download for iPhone <span aria-hidden="true">&#8599;</span></a>
+      <a href="${androidUrl}">Download for Android <span aria-hidden="true">&#8599;</span></a>
+    </main>
+  </body>
+</html>`;
+}
+
+// server/index.ts
 var app = (0, import_express.default)();
 var log = console.log;
 var projectRootCandidates = Array.from(
@@ -12626,9 +12723,18 @@ async function configureExpoAndLanding(app2) {
     res.setHeader("Cache-Control", "no-store");
     res.status(200).send(fs.readFileSync(passwordResetTemplatePath, "utf-8"));
   });
-  app2.get("/driver", (_req, res) => {
-    res.redirect(302, process.env.DRIVER_APP_STORE_URL || "https://play.google.com/store/apps/details?id=com.a2blift");
-  });
+  const serveAppDownload = (appVariant) => (req, res) => {
+    const destination = getPlatformDownloadUrl(appVariant, req.get("user-agent") || "");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    if (destination) {
+      return res.redirect(302, destination);
+    }
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.status(200).send(renderDownloadChooser(appVariant));
+  };
+  app2.get("/download/driver", serveAppDownload("driver"));
+  app2.get("/download/client", serveAppDownload("client"));
+  app2.get("/driver", serveAppDownload("driver"));
   const serveReferralLaunch = (req, res) => {
     const referralCode = req.params.code;
     const appTarget = String(req.query.app || req.query.source || req.query.role || "").trim();
