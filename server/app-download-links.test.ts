@@ -43,6 +43,14 @@ test("allows deployment store URLs to override defaults", () => {
   assert.equal(links.iosUrl, "https://example.com/ios");
 });
 
+test("corrects stale Apple storefront overrides to South Africa", () => {
+  const links = getAppDownloadLinks("client", {
+    A2B_CLIENT_IOS_APP_STORE_URL: "https://apps.apple.com/us/app/a2b-lift/id6779557968",
+  } as NodeJS.ProcessEnv);
+
+  assert.equal(links.iosUrl, "https://apps.apple.com/za/app/a2b-lift/id6779557968");
+});
+
 test("renders a desktop chooser with both client store destinations", () => {
   const html = renderDownloadChooser("client", {} as NodeJS.ProcessEnv);
 

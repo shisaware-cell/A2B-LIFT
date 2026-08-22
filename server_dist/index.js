@@ -12418,13 +12418,29 @@ function detectMobilePlatform(userAgent = "") {
   if (/iphone|ipad|ipod/i.test(userAgent)) return "ios";
   return "other";
 }
+function useSouthAfricanAppleStorefront(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    if (url.hostname !== "apps.apple.com") return rawUrl;
+    if (/^\/[a-z]{2}\//i.test(url.pathname)) {
+      url.pathname = url.pathname.replace(/^\/[a-z]{2}\//i, "/za/");
+    } else {
+      url.pathname = `/za${url.pathname.startsWith("/") ? "" : "/"}${url.pathname}`;
+    }
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
 function getAppDownloadLinks(app2, env = process.env) {
   const defaults = DEFAULT_DOWNLOAD_LINKS[app2];
   const prefix = app2 === "driver" ? "A2B_DRIVER" : "A2B_CLIENT";
   return {
     appName: defaults.appName,
     androidUrl: env[`${prefix}_ANDROID_STORE_URL`] || env[`EXPO_PUBLIC_${prefix}_ANDROID_STORE_URL`] || defaults.androidUrl,
-    iosUrl: env[`${prefix}_IOS_APP_STORE_URL`] || env[`EXPO_PUBLIC_${prefix}_IOS_APP_STORE_URL`] || defaults.iosUrl
+    iosUrl: useSouthAfricanAppleStorefront(
+      env[`${prefix}_IOS_APP_STORE_URL`] || env[`EXPO_PUBLIC_${prefix}_IOS_APP_STORE_URL`] || defaults.iosUrl
+    )
   };
 }
 function getPlatformDownloadUrl(app2, userAgent = "", env = process.env) {

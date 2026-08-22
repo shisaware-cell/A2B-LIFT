@@ -26,6 +26,22 @@ export function detectMobilePlatform(userAgent = ""): MobilePlatform {
   return "other";
 }
 
+function useSouthAfricanAppleStorefront(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    if (url.hostname !== "apps.apple.com") return rawUrl;
+
+    if (/^\/[a-z]{2}\//i.test(url.pathname)) {
+      url.pathname = url.pathname.replace(/^\/[a-z]{2}\//i, "/za/");
+    } else {
+      url.pathname = `/za${url.pathname.startsWith("/") ? "" : "/"}${url.pathname}`;
+    }
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 export function getAppDownloadLinks(
   app: MobileApp,
   env: NodeJS.ProcessEnv = process.env,
@@ -39,10 +55,11 @@ export function getAppDownloadLinks(
       env[`${prefix}_ANDROID_STORE_URL`] ||
       env[`EXPO_PUBLIC_${prefix}_ANDROID_STORE_URL`] ||
       defaults.androidUrl,
-    iosUrl:
+    iosUrl: useSouthAfricanAppleStorefront(
       env[`${prefix}_IOS_APP_STORE_URL`] ||
-      env[`EXPO_PUBLIC_${prefix}_IOS_APP_STORE_URL`] ||
-      defaults.iosUrl,
+        env[`EXPO_PUBLIC_${prefix}_IOS_APP_STORE_URL`] ||
+        defaults.iosUrl,
+    ),
   };
 }
 
