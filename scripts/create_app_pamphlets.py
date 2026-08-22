@@ -155,6 +155,9 @@ def draw_multiline(
 
 def draw_feature(canvas: Canvas, x: float, center_y: float, title: str, *, dark: bool) -> None:
     text_color = SOFT_WHITE if dark else INK
+    font_size = 8.6
+    face = pdfmetrics.getFont("A2B-Bold").face
+    baseline_offset = ((face.ascent + face.descent) / 2000) * font_size
     canvas.setStrokeColor(GREEN if dark else HexColor("#27965C"))
     canvas.setLineWidth(1.7)
     canvas.circle(x + 2.3 * mm, center_y, 2.3 * mm, stroke=1, fill=0)
@@ -164,9 +167,9 @@ def draw_feature(canvas: Canvas, x: float, center_y: float, title: str, *, dark:
         canvas,
         title,
         x + 8 * mm,
-        center_y - 2.4 * mm,
+        center_y - baseline_offset,
         font="A2B-Bold",
-        size=8.6,
+        size=font_size,
         color=text_color,
     )
 
@@ -400,15 +403,15 @@ def main() -> None:
         OUTPUT_DIR / "A2B-Lift-Driver-Pamphlet.pdf",
         ROOT / "assets" / "images" / "category-v-class.png",
         driver_icon,
-        ROOT / "assets" / "images" / "apple.png",
-        ROOT / "assets" / "images" / "google.png",
+        ROOT / "website" / "assets" / "apple.webp",
+        ROOT / "website" / "assets" / "google.webp",
     )
     draw_client_pamphlet(
         OUTPUT_DIR / "A2B-Lift-Client-Pamphlet.pdf",
         client_hero,
         client_icon,
-        ROOT / "assets" / "images" / "apple.png",
-        ROOT / "assets" / "images" / "google.png",
+        ROOT / "website" / "assets" / "apple.webp",
+        ROOT / "website" / "assets" / "google.webp",
     )
 
 
