@@ -637,6 +637,9 @@ function authHeaders() {
 function resolveDocUrl(url) {
   if (!url) return '';
   const trimmed = String(url).trim();
+  if (trimmed.startsWith('file:') || trimmed.startsWith('content:')) {
+    return '';
+  }
   if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return trimmed;
   if (trimmed.startsWith('/api/')) {
     return (API || '') + trimmed;
@@ -655,12 +658,15 @@ function resolveDocUrl(url) {
     }
     return trimmed;
   }
-  return (API || '') + '/' + trimmed;
+  return '';
 }
 
 async function downloadDoc(url, filename) {
   const resolved = resolveDocUrl(url);
-  if (!resolved) { toast('❌ Document URL not found', 'err'); return; }
+  if (!resolved) {
+    toast('⚠️ Document was saved as a local device path. Driver must re-upload this document.', 'err');
+    return;
+  }
   try {
     toast('⬇️ Downloading document…', 'ok');
     const res = await fetch(resolved, { headers: authHeaders() });
@@ -1632,21 +1638,24 @@ function renderDocsModal(docs) {
         <div style="margin-top:8px"><span class="badge ${d.status==='approved'?'b-approved':d.status==='rejected'?'b-rejected':'b-pending'}">${d.status || 'pending'}</span></div>
         ${d.reviewReason ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">${escapeHtml(d.reviewReason)}</div>` : ''}
         <div class="action-cell" style="margin-top:8px">
-          ${d.status !== 'approved' ? `<button class="btn-sm btn-approve" onclick="reviewDocument('${d.id}','approved')">✓ Activate</button>` : ''}
-          ${d.status !== 'rejected' ? `<button class="btn-sm btn-reject" onclick="reviewDocument('${d.id}','rejected')">✕ Reject</button>` : ''}
+          ${d.status !== 'approved' && docUrl ? `<button class="btn-sm btn-approve" onclick="reviewDocument('${d.id}','approved')">✓ Activate</button>` : ''}
+          ${d.status !== 'rejected' ? `<button class="btn-sm btn-reject" onclick="reviewDocument('${d.id}','rejected', '${!docUrl ? 'Document photo was not received by cloud storage. Please re-upload.' : ''}')">${!docUrl ? 'Request Re-upload' : '✕ Reject'}</button>` : ''}
         </div>
       </div>`;
     }).join('')}
   </div>`;
 }
 
-async function reviewDocument(id, status) {
-  const reviewReason = status === 'rejected' ? window.prompt('Give the document rejection reason:') : '';
-  if (status === 'rejected' && !reviewReason?.trim()) return;
+async function reviewDocument(id, status, defaultReason = '') {
+  let reviewReason = '';
+  if (status === 'rejected') {
+    reviewReason = window.prompt('Document rejection / re-upload reason:', defaultReason || 'Please re-upload this document.');
+    if (!reviewReason || !reviewReason.trim()) return;
+  }
   try {
-    const res = await apiFetch('/api/admin/documents/' + id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status, reviewReason}) });
+    const res = await apiFetch('/api/admin/documents/' + id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status, reviewReason: reviewReason.trim()}) });
     if (!res.ok) throw new Error(await res.text());
-    toast(status === 'approved' ? '✅ Document activated.' : '🚫 Document rejected.', status === 'approved' ? 'ok' : 'err');
+    toast(status === 'approved' ? '✅ Document activated.' : '🚫 Document rejected. Driver notified.', status === 'approved' ? 'ok' : 'err');
     loadDocuments(); loadVehicles();
   } catch(e) { toast('❌ ' + e.message, 'err'); }
 }
@@ -1676,12 +1685,15 @@ function renderDocuments() {
   if (!list.length) { root.innerHTML = emptyState('📂', 'No documents', 'Uploaded documents will appear here.'); return; }
   root.innerHTML = `<table><thead><tr><th>Document</th><th>Type</th><th>Status</th><th>Uploaded</th><th>Actions</th></tr></thead><tbody>${list.map(d => {
     const docUrl = resolveDocUrl(d.url);
+    const docActions = docUrl
+      ? `<div style="display:flex;gap:6px;align-items:center"><a href="${docUrl}" target="_blank" rel="noopener" class="doc-link">Open ↗</a> <button class="btn-sm btn-detail" style="padding:2px 8px;font-size:11px" onclick="downloadDoc('${docUrl}','${escapeHtml(String(d.type||'doc'))}')">⬇</button></div>`
+      : `<span class="badge b-rejected" style="font-size:11px" title="Document was saved as a local device path. Driver must re-upload.">⚠️ Re-upload needed</span>`;
     return `<tr>
-    <td><div style="display:flex;gap:6px;align-items:center"><a href="${docUrl}" target="_blank" rel="noopener" class="doc-link">Open ↗</a> <button class="btn-sm btn-detail" style="padding:2px 8px;font-size:11px" onclick="downloadDoc('${docUrl}','${escapeHtml(String(d.type||'doc'))}')">⬇</button></div></td>
+    <td>${docActions}</td>
     <td>${escapeHtml(String(d.type || '').replace(':', ' · '))}</td>
     <td><span class="badge ${d.status==='approved'?'b-approved':d.status==='rejected'?'b-rejected':'b-pending'}">${d.status || 'pending'}</span>${d.reviewReason ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">${escapeHtml(d.reviewReason)}</div>` : ''}</td>
     <td>${fmt(d.uploadedAt)}</td>
-    <td><div class="action-cell">${d.status !== 'approved' ? `<button class="btn-sm btn-approve" onclick="reviewDocument('${d.id}','approved')">✓ Activate</button>` : ''}${d.status !== 'rejected' ? `<button class="btn-sm btn-reject" onclick="reviewDocument('${d.id}','rejected')">✕ Reject</button>` : ''}</div></td>
+    <td><div class="action-cell">${d.status !== 'approved' && docUrl ? `<button class="btn-sm btn-approve" onclick="reviewDocument('${d.id}','approved')">✓ Activate</button>` : ''}${d.status !== 'rejected' ? `<button class="btn-sm btn-reject" onclick="reviewDocument('${d.id}','rejected', '${!docUrl ? 'Document photo was not received by cloud storage. Please re-upload.' : ''}')">${!docUrl ? 'Request Re-upload' : '✕ Reject'}</button>` : ''}</div></td>
   </tr>`;
   }).join('')}</tbody></table>`;
 }
@@ -1832,27 +1844,42 @@ function vehicleDetail(id) {
 
 function editVehicle(id) {
   const v = allVehicles.find(x => x.id === id); if (!v) return;
-  document.getElementById('m-title').textContent = 'Edit Vehicle';
+  document.getElementById('m-title').textContent = 'Edit Vehicle Details';
   document.getElementById('m-sub').textContent = [v.carMake, v.vehicleModel, v.plateNumber].filter(Boolean).join(' · ');
   document.getElementById('m-body').innerHTML = `
     <div class="info-grid" style="gap:12px">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Car Make</label><input id="vehicle-carMake" class="f-input" value="${escapeHtml(v.carMake || '')}" /></div>
-        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Model</label><input id="vehicle-vehicleModel" class="f-input" value="${escapeHtml(v.vehicleModel || '')}" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Vehicle Model</label><input id="vehicle-vehicleModel" class="f-input" value="${escapeHtml(v.vehicleModel || '')}" /></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Plate</label><input id="vehicle-plateNumber" class="f-input" value="${escapeHtml(v.plateNumber || '')}" /></div>
-        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Color</label><input id="vehicle-carColor" class="f-input" value="${escapeHtml(v.carColor || '')}" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">License Plate</label><input id="vehicle-plateNumber" class="f-input" value="${escapeHtml(v.plateNumber || '')}" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Car Color</label><input id="vehicle-carColor" class="f-input" value="${escapeHtml(v.carColor || '')}" /></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
         <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Year</label><input id="vehicle-vehicleYear" class="f-input" type="number" value="${escapeHtml(v.vehicleYear || '')}" /></div>
         <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Passengers</label><input id="vehicle-passengerCapacity" class="f-input" type="number" value="${v.passengerCapacity || 4}" /></div>
-        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Luggage</label><input id="vehicle-luggageCapacity" class="f-input" type="number" value="${v.luggageCapacity || 2}" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Luggage (Bags)</label><input id="vehicle-luggageCapacity" class="f-input" type="number" value="${v.luggageCapacity || 2}" /></div>
       </div>
-      <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Category</label>
-        <select id="vehicle-vehicleType" class="f-input">
-          ${vehicleCategoryOptions(v.vehicleType)}
-        </select>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Category / Ride Class</label>
+          <select id="vehicle-vehicleType" class="f-input">
+            ${vehicleCategoryOptions(v.vehicleType)}
+          </select>
+        </div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Approval Status</label>
+          <select id="vehicle-status" class="f-input">
+            <option value="pending" ${v.status==='pending'?'selected':''}>Pending</option>
+            <option value="approved" ${v.status==='approved'?'selected':''}>Approved</option>
+            <option value="waitlisted" ${v.status==='waitlisted'?'selected':''}>Waitlisted</option>
+            <option value="rejected" ${v.status==='rejected'?'selected':''}>Rejected</option>
+            <option value="draft" ${v.status==='draft'?'selected':''}>Draft</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Rejection Reason / Admin Notes</label>
+        <input id="vehicle-rejectionReason" class="f-input" placeholder="Optional notes or reason for rejection" value="${escapeHtml(v.rejectionReason || '')}" />
       </div>
     </div>`;
   document.getElementById('m-foot').innerHTML = `
@@ -1863,10 +1890,13 @@ function editVehicle(id) {
 
 function vehicleCategoryOptions(selected) {
   return [
-    ['budget','Budget'],
-    ['luxury','Luxury'],
+    ['budget','A2B Lite / Budget'],
+    ['sedan','Sedan / Standard'],
     ['business','Business Class'],
-    ['van','Van'],
+    ['luxury','Luxury / VIP'],
+    ['vip','VIP Exclusive'],
+    ['van','Van / 7-Seater'],
+    ['v_class','V-Class / Luxury Van'],
     ['luxury_van','Luxury Van'],
   ].map(([value,label]) => `<option value="${value}" ${selected===value?'selected':''}>${label}</option>`).join('');
 }
@@ -1881,6 +1911,8 @@ async function saveVehicleEdit(id) {
     passengerCapacity: parseInt(document.getElementById('vehicle-passengerCapacity')?.value || '4', 10),
     luggageCapacity: parseInt(document.getElementById('vehicle-luggageCapacity')?.value || '2', 10),
     vehicleType: document.getElementById('vehicle-vehicleType')?.value || 'budget',
+    status: document.getElementById('vehicle-status')?.value || 'pending',
+    rejectionReason: document.getElementById('vehicle-rejectionReason')?.value.trim() || '',
   };
   closeModal();
   try {
@@ -1890,7 +1922,7 @@ async function saveVehicleEdit(id) {
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(await res.text());
-    toast('✅ Vehicle updated.', 'ok');
+    toast('✅ Vehicle updated successfully.', 'ok');
     loadVehicles();
   } catch(e) { toast('❌ ' + e.message, 'err'); }
 }
@@ -1955,7 +1987,9 @@ async function viewDocs(chauffeurId, name) {
       pdrp_certificate:'PDRP Certificate', drivers_license:"Driver's License",
       driver_evaluation:'Driver Evaluation', criminal_background_check:'Background Check',
       double_license_disk:'License Disk', passenger_liability_insurance:'Liability Insurance',
-      dekra_report:'Dekra Report', driver_photo:'Driver Photo',
+      insurance:'Liability Insurance', dekra_report:'Dekra Report', driver_photo:'Driver Photo',
+      inspection_photos:'Vehicle Photos (5 Angles)', photo_front:'Front View', photo_back:'Rear View',
+      photo_left:'Left Side View', photo_right:'Right Side View', photo_inside:'Interior View',
       id_document:'ID / Passport', proof_of_address:'Proof of Address',
       vehicle_registration:'Vehicle Registration', prDP:'PrDP Certificate',
     };
@@ -1971,10 +2005,12 @@ async function viewDocs(chauffeurId, name) {
       html += `<div class="doc-card">
         <div class="doc-label">${escapeHtml(label)}</div>
         ${docUrl && isImg ? `<img class="doc-img" src="${docUrl}" onerror="this.style.display='none'" />` : `<div style="font-size:36px;margin:12px 0">📄</div>`}
-        <div style="display:flex;gap:6px;justify-content:center;margin-top:8px">
-          <a class="btn-sm btn-detail" href="${docUrl}" target="_blank" rel="noopener" style="text-decoration:none">View ↗</a>
-          <button class="btn-sm btn-detail" onclick="downloadDoc('${docUrl}','${escapeHtml(label)}')">Download ⬇</button>
-        </div>
+        ${docUrl ? `
+          <div style="display:flex;gap:6px;justify-content:center;margin-top:8px">
+            <a class="btn-sm btn-detail" href="${docUrl}" target="_blank" rel="noopener" style="text-decoration:none">View ↗</a>
+            <button class="btn-sm btn-detail" onclick="downloadDoc('${docUrl}','${escapeHtml(label)}')">Download ⬇</button>
+          </div>
+        ` : `<div class="empty-sub" style="color:var(--red,#e53e3e);font-size:11px;margin-top:8px">⚠️ Re-upload needed (stored as local path)</div>`}
         <button class="btn-sm btn-delete" style="margin-top:8px;width:100%" onclick="adminDelete('document','${d.id}','${label.replace(/'/g,"\\'")}')">🗑 Delete</button>
       </div>`;
     }
@@ -2298,7 +2334,7 @@ function renderLiftClubApplications() {
     <thead><tr><th>Member</th><th>Status</th><th>Fee</th><th>Proof</th><th>Submitted</th><th>Reviewed</th><th>Actions</th></tr></thead>
     <tbody>${rows.map(m => {
       const user = m.user || {};
-      const proofUrl = m.proofDocument?.url || m.proofDocument?.fileUrl || m.proofDocument?.path || '';
+      const proofUrl = resolveDocUrl(m.proofDocument?.url || m.proofDocument?.fileUrl || m.proofDocument?.path || '');
       const statusCls = m.status === 'approved' ? 'b-liftclub' : m.status === 'rejected' ? 'b-rejected' : `b-${m.status || 'pending'}`;
       return `<tr>
         <td>
@@ -2343,7 +2379,7 @@ function openLiftClubMembershipModal(id, mode = 'edit') {
   const membership = allLiftClubMemberships.find(m => m.id === id);
   if (!membership) return toast('❌ Membership not found', 'err');
   const user = membership.user || {};
-  const proofUrl = membership.proofDocument?.url || membership.proofDocument?.fileUrl || membership.proofDocument?.path || '';
+  const proofUrl = resolveDocUrl(membership.proofDocument?.url || membership.proofDocument?.fileUrl || membership.proofDocument?.path || '');
   const selectedStatus = mode === 'reject' ? 'rejected' : (membership.status || 'pending_payment');
   document.getElementById('m-title').textContent = mode === 'reject' ? 'Reject Lift Club application' : 'Lift Club member';
   document.getElementById('m-sub').textContent = [user.name, user.username].filter(Boolean).join(' · ') || 'Membership details';

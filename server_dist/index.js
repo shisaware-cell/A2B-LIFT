@@ -1580,6 +1580,62 @@ var import_drizzle_orm4 = require("drizzle-orm");
 
 // server/livenessPhotoService.ts
 var import_drizzle_orm3 = require("drizzle-orm");
+
+// server/media-object-store.ts
+var import_node_crypto = __toESM(require("node:crypto"));
+var ensureTablePromise = null;
+async function ensureMediaObjectStore() {
+  if (!ensureTablePromise) {
+    ensureTablePromise = pool2.query(`
+      CREATE TABLE IF NOT EXISTS app_media_objects (
+        id varchar PRIMARY KEY,
+        owner_user_id varchar,
+        purpose text NOT NULL,
+        mime_type text NOT NULL,
+        data bytea NOT NULL,
+        created_at timestamp NOT NULL DEFAULT now()
+      );
+      ALTER TABLE app_media_objects ALTER COLUMN owner_user_id DROP NOT NULL;
+      ALTER TABLE app_media_objects DROP CONSTRAINT IF EXISTS app_media_objects_owner_user_id_fkey;
+    `).then(() => void 0).catch((error) => {
+      ensureTablePromise = null;
+      throw error;
+    });
+  }
+  return ensureTablePromise;
+}
+async function storeMediaObject(input) {
+  await ensureMediaObjectStore();
+  const id = import_node_crypto.default.randomUUID();
+  await pool2.query(
+    `INSERT INTO app_media_objects (id, owner_user_id, purpose, mime_type, data)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [id, input.ownerUserId || null, input.purpose, input.mimeType, input.data]
+  );
+  return id;
+}
+async function getMediaObject(id) {
+  await ensureMediaObjectStore();
+  const result = await pool2.query(
+    `SELECT id, mime_type, data
+       FROM app_media_objects
+      WHERE id = $1
+      LIMIT 1`,
+    [id]
+  );
+  if (!result.rows[0]) return null;
+  return {
+    id: result.rows[0].id,
+    mimeType: result.rows[0].mime_type,
+    data: result.rows[0].data
+  };
+}
+async function deleteMediaObject(id) {
+  await ensureMediaObjectStore();
+  await pool2.query("DELETE FROM app_media_objects WHERE id = $1", [id]);
+}
+
+// server/livenessPhotoService.ts
 var SUPABASE_URL = process.env.SUPABASE_URL || "https://zzwkieiktbhptvgsqerd.supabase.co";
 var SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 async function uploadLivenessPhoto(params) {
@@ -1599,39 +1655,60 @@ async function uploadLivenessPhoto(params) {
   const safeSession = sessionId.replace(/[^a-zA-Z0-9_-]/g, "");
   const safeUser = userId.replace(/[^a-zA-Z0-9_-]/g, "");
   const storagePath = photoType === "cash_selfie" ? `rides/${rideId ?? safeSession}/${safeUser}_cash_selfie_${timestamp2}.${ext}` : `sessions/${safeSession}/${safeUser}_liveness_${timestamp2}.${ext}`;
-  const uploadRes = await fetch(
-    `${SUPABASE_URL}/storage/v1/object/${bucket}/${storagePath}`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-        apikey: SUPABASE_SERVICE_KEY,
-        "Content-Type": mimeType,
-        "x-upsert": "false"
-      },
-      body: buffer
+  let publicUrl = "";
+  try {
+    const uploadRes = await fetch(
+      `${SUPABASE_URL}/storage/v1/object/${bucket}/${storagePath}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+          apikey: SUPABASE_SERVICE_KEY,
+          "Content-Type": mimeType,
+          "x-upsert": "false"
+        },
+        body: buffer
+      }
+    );
+    if (uploadRes.ok) {
+      publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${storagePath}`;
+    } else {
+      const errText = await uploadRes.text().catch(() => uploadRes.statusText);
+      console.warn("[livenessPhotoService] Supabase upload failed, falling back to local media store:", errText);
     }
-  );
-  if (!uploadRes.ok) {
-    const errText = await uploadRes.text().catch(() => uploadRes.statusText);
-    console.error("[livenessPhotoService] upload error:", uploadRes.status, errText);
-    return { success: false, error: errText };
+  } catch (e) {
+    console.warn("[livenessPhotoService] Supabase upload error, falling back to local media store:", e.message);
   }
-  const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${storagePath}`;
+  let finalStorageRef = storagePath;
+  if (!publicUrl) {
+    try {
+      const mediaId = await storeMediaObject({
+        ownerUserId: safeUser,
+        purpose: photoType,
+        mimeType,
+        data: buffer
+      });
+      publicUrl = `https://a2blift.com/api/media/${mediaId}`;
+      finalStorageRef = publicUrl;
+    } catch (fallbackErr) {
+      console.error("[livenessPhotoService] Media store fallback error:", fallbackErr.message);
+      return { success: false, error: fallbackErr.message };
+    }
+  }
   try {
     if (photoType === "liveness") {
       await db2.update(livenessSessions).set({
-        verifiedPhotoUrl: storagePath,
+        verifiedPhotoUrl: finalStorageRef,
         rideId: rideId ?? null,
         updatedAt: /* @__PURE__ */ new Date()
       }).where((0, import_drizzle_orm3.eq)(livenessSessions.id, sessionId));
     } else {
-      await db2.update(rides).set({ cashSelfieUrl: storagePath }).where((0, import_drizzle_orm3.eq)(rides.id, rideId ?? sessionId));
+      await db2.update(rides).set({ cashSelfieUrl: finalStorageRef }).where((0, import_drizzle_orm3.eq)(rides.id, rideId ?? sessionId));
     }
   } catch (dbErr) {
     console.warn("[livenessPhotoService] DB update error:", dbErr.message);
   }
-  return { success: true, storagePath, publicUrl };
+  return { success: true, storagePath: finalStorageRef, publicUrl };
 }
 async function getAdminSignedUrl(bucket, storagePath, expiresInSeconds = 3600) {
   try {
@@ -2266,6 +2343,181 @@ function renderBrandedEmail(opts) {
   </div></body></html>`;
 }
 
+// server/email-templates.ts
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+async function sendDriverSignupReceivedEmail(props) {
+  const driverName = escapeHtml(props.name || "Chauffeur");
+  const html = renderBrandedEmail({
+    heading: `Welcome to A2B LIFT, ${driverName}!`,
+    bodyHtml: `
+      <p>Thank you for submitting your driver application to <strong>A2B LIFT</strong>. We have successfully received your profile and documents.</p>
+      <p>Our team is currently reviewing your documents and vehicle details. Application reviews typically take <strong>24 to 48 hours</strong>.</p>
+      <div style="background:#f4f4f6;padding:16px;border-radius:12px;margin:18px 0;font-size:14px;color:#333;">
+        <strong style="color:#000;">What happens next?</strong>
+        <ul style="margin:8px 0 0;padding-left:20px;line-height:1.6;">
+          <li>We verify your driver's license, PrDP, and vehicle documents.</li>
+          <li>You will receive an email confirmation once your profile is activated.</li>
+          <li>You can log into the <strong>A2B Driver app</strong> anytime to check your real-time status.</li>
+        </ul>
+      </div>
+      <p>We look forward to partnering with you!</p>
+    `,
+    ctaLabel: "Open A2B Driver",
+    ctaUrl: "https://a2blift.com"
+  });
+  return sendEmail({
+    to: props.to,
+    subject: "Welcome to A2B LIFT - Driver Application Received",
+    html
+  });
+}
+async function sendDriverApprovedEmail(props) {
+  const driverName = escapeHtml(props.name || "Chauffeur");
+  const html = renderBrandedEmail({
+    heading: `\u{1F389} Congratulations ${driverName}, You're Approved!`,
+    bodyHtml: `
+      <p>Great news! Your driver application and submitted documents have been reviewed and <strong>approved</strong> by our team.</p>
+      <p>Your chauffeur account is now fully active. You are ready to go online, accept trip requests across South Africa, and start earning on A2B LIFT.</p>
+      <div style="background:#ecfdf5;border-left:4px solid #10b981;padding:16px;border-radius:8px;margin:18px 0;color:#065f46;font-size:14px;line-height:1.5;">
+        <strong>Quick Checklist Before Going Online:</strong>
+        <ul style="margin:8px 0 0;padding-left:20px;">
+          <li>Ensure your GPS and notifications are enabled.</li>
+          <li>Select your active approved vehicle.</li>
+          <li>Switch your status to <strong>Online</strong> to receive nearby trip requests.</li>
+        </ul>
+      </div>
+      <p>Thank you for choosing A2B LIFT. Drive safely and let's elevate travel together!</p>
+    `,
+    ctaLabel: "Go Online in Driver App",
+    ctaUrl: "https://a2blift.com"
+  });
+  return sendEmail({
+    to: props.to,
+    subject: "\u{1F389} Your A2B Driver Application is Approved!",
+    html
+  });
+}
+async function sendDriverRejectedEmail(props) {
+  const driverName = escapeHtml(props.name || "Chauffeur");
+  const reasonHtml = props.reason ? `<div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;border-radius:8px;margin:18px 0;color:#991b1b;font-size:14px;line-height:1.5;">
+        <strong>Feedback / Reason from Admin:</strong><br>
+        <span style="display:inline-block;margin-top:6px;">${escapeHtml(props.reason)}</span>
+      </div>` : "";
+  const html = renderBrandedEmail({
+    heading: "Update on Your A2B Driver Application",
+    bodyHtml: `
+      <p>Hi ${driverName},</p>
+      <p>Thank you for your interest in partnering with A2B LIFT. We have reviewed your driver application and submitted documents.</p>
+      <p>Unfortunately, we could not approve your application at this time.</p>
+      ${reasonHtml}
+      <p>If you need to upload clearer or updated documents, please log into the <strong>A2B Driver app</strong>, go to <strong>Settings &gt; Documents</strong>, and re-submit your files for review.</p>
+      <p>If you have any questions, feel free to contact our support team at <a href="mailto:support@a2blift.com" style="color:#000;font-weight:600;">support@a2blift.com</a>.</p>
+    `,
+    ctaLabel: "Update Documents in App",
+    ctaUrl: "https://a2blift.com"
+  });
+  return sendEmail({
+    to: props.to,
+    subject: "Update on Your A2B Driver Application",
+    html
+  });
+}
+async function sendVehicleApprovedEmail(props) {
+  const ownerName = escapeHtml(props.name || "Partner");
+  const carInfo = escapeHtml(
+    [props.carMake, props.vehicleModel, props.plateNumber ? `(${props.plateNumber})` : ""].filter(Boolean).join(" ") || "Your vehicle"
+  );
+  const html = renderBrandedEmail({
+    heading: `\u{1F697} Vehicle Approved: ${carInfo}`,
+    bodyHtml: `
+      <p>Hi ${ownerName},</p>
+      <p>Great news! Your vehicle <strong>${carInfo}</strong> has been inspected, reviewed, and <strong>approved</strong> for service on A2B LIFT.</p>
+      <p>This vehicle is now active and can be selected by assigned drivers to accept ride requests immediately.</p>
+    `,
+    ctaLabel: "View in Fleet & Vehicles",
+    ctaUrl: "https://a2blift.com"
+  });
+  return sendEmail({
+    to: props.to,
+    subject: `\u{1F697} Vehicle Approved: ${carInfo}`,
+    html
+  });
+}
+async function sendVehicleRejectedEmail(props) {
+  const ownerName = escapeHtml(props.name || "Partner");
+  const carInfo = escapeHtml(
+    [props.carMake, props.vehicleModel, props.plateNumber ? `(${props.plateNumber})` : ""].filter(Boolean).join(" ") || "Your vehicle"
+  );
+  const reasonHtml = props.reason ? `<div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;border-radius:8px;margin:18px 0;color:#991b1b;font-size:14px;line-height:1.5;">
+        <strong>Reason for Rejection:</strong><br>
+        <span style="display:inline-block;margin-top:6px;">${escapeHtml(props.reason)}</span>
+      </div>` : "";
+  const html = renderBrandedEmail({
+    heading: "Vehicle Review Update",
+    bodyHtml: `
+      <p>Hi ${ownerName},</p>
+      <p>We have reviewed the submission and documents for <strong>${carInfo}</strong>.</p>
+      <p>Unfortunately, this vehicle could not be approved for service at this time.</p>
+      ${reasonHtml}
+      <p>Please open the A2B app to review and update your vehicle details or re-upload the required vehicle photos/inspection reports.</p>
+    `,
+    ctaLabel: "Open Vehicles Screen",
+    ctaUrl: "https://a2blift.com"
+  });
+  return sendEmail({
+    to: props.to,
+    subject: `Vehicle Review Update: ${carInfo}`,
+    html
+  });
+}
+async function sendDocumentApprovedEmail(props) {
+  const name = escapeHtml(props.name || "Driver");
+  const docLabel = escapeHtml(
+    (props.docType || "Document").replace(/^driver:|^partner:|^vehicle:/, "").replace(/_/g, " ")
+  );
+  const html = renderBrandedEmail({
+    heading: `Document Approved: ${docLabel}`,
+    bodyHtml: `
+      <p>Hi ${name},</p>
+      <p>Your uploaded document <strong>${docLabel}</strong> has been reviewed and <strong>activated</strong> by our verification team.</p>
+    `
+  });
+  return sendEmail({
+    to: props.to,
+    subject: `Document Approved: ${docLabel}`,
+    html
+  });
+}
+async function sendDocumentRejectedEmail(props) {
+  const name = escapeHtml(props.name || "Driver");
+  const docLabel = escapeHtml(
+    (props.docType || "Document").replace(/^driver:|^partner:|^vehicle:/, "").replace(/_/g, " ")
+  );
+  const reasonHtml = props.reason ? `<div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;border-radius:8px;margin:18px 0;color:#991b1b;font-size:14px;line-height:1.5;">
+        <strong>Reason:</strong><br>
+        <span style="display:inline-block;margin-top:6px;">${escapeHtml(props.reason)}</span>
+      </div>` : "";
+  const html = renderBrandedEmail({
+    heading: `Document Update Needed: ${docLabel}`,
+    bodyHtml: `
+      <p>Hi ${name},</p>
+      <p>We reviewed your uploaded document <strong>${docLabel}</strong>, but unfortunately could not accept it.</p>
+      ${reasonHtml}
+      <p>Please upload a clear, valid replacement document in the A2B app.</p>
+    `,
+    ctaLabel: "Upload Document in App",
+    ctaUrl: "https://a2blift.com"
+  });
+  return sendEmail({
+    to: props.to,
+    subject: `Document Update Needed: ${docLabel}`,
+    html
+  });
+}
+
 // shared/ride-stops.ts
 function normalizeRideStops(value) {
   if (!Array.isArray(value)) return [];
@@ -2587,11 +2839,11 @@ function combineDirectionSegments(segments) {
 }
 
 // server/password-reset.ts
-var import_node_crypto = __toESM(require("node:crypto"));
+var import_node_crypto2 = __toESM(require("node:crypto"));
 var PASSWORD_RESET_TOKEN_TTL_MS = 30 * 60 * 1e3;
 var PASSWORD_RESET_MIN_LENGTH = 8;
 function createPasswordResetToken() {
-  const token = import_node_crypto.default.randomBytes(32).toString("base64url");
+  const token = import_node_crypto2.default.randomBytes(32).toString("base64url");
   return {
     token,
     tokenHash: hashPasswordResetToken(token),
@@ -2599,7 +2851,7 @@ function createPasswordResetToken() {
   };
 }
 function hashPasswordResetToken(token) {
-  return import_node_crypto.default.createHash("sha256").update(token).digest("hex");
+  return import_node_crypto2.default.createHash("sha256").update(token).digest("hex");
 }
 function buildPasswordResetUrl(token, baseUrl) {
   const url = new URL(
@@ -2636,58 +2888,6 @@ var UserIdentityConflictError = class extends Error {
     this.name = "UserIdentityConflictError";
   }
 };
-
-// server/media-object-store.ts
-var import_node_crypto2 = __toESM(require("node:crypto"));
-var ensureTablePromise = null;
-async function ensureMediaObjectStore() {
-  if (!ensureTablePromise) {
-    ensureTablePromise = pool2.query(`
-      CREATE TABLE IF NOT EXISTS app_media_objects (
-        id varchar PRIMARY KEY,
-        owner_user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        purpose text NOT NULL,
-        mime_type text NOT NULL,
-        data bytea NOT NULL,
-        created_at timestamp NOT NULL DEFAULT now()
-      )
-    `).then(() => void 0).catch((error) => {
-      ensureTablePromise = null;
-      throw error;
-    });
-  }
-  return ensureTablePromise;
-}
-async function storeMediaObject(input) {
-  await ensureMediaObjectStore();
-  const id = import_node_crypto2.default.randomUUID();
-  await pool2.query(
-    `INSERT INTO app_media_objects (id, owner_user_id, purpose, mime_type, data)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [id, input.ownerUserId, input.purpose, input.mimeType, input.data]
-  );
-  return id;
-}
-async function getMediaObject(id) {
-  await ensureMediaObjectStore();
-  const result = await pool2.query(
-    `SELECT id, mime_type, data
-       FROM app_media_objects
-      WHERE id = $1
-      LIMIT 1`,
-    [id]
-  );
-  if (!result.rows[0]) return null;
-  return {
-    id: result.rows[0].id,
-    mimeType: result.rows[0].mime_type,
-    data: result.rows[0].data
-  };
-}
-async function deleteMediaObject(id) {
-  await ensureMediaObjectStore();
-  await pool2.query("DELETE FROM app_media_objects WHERE id = $1", [id]);
-}
 
 // server/routes.ts
 var RIDE_MATCH_RADIUS_KM = 4;
@@ -6375,8 +6575,29 @@ If you did not request this, you can ignore this email.`,
   ]);
   const VEHICLE_REQUIRED_DOCS = /* @__PURE__ */ new Set([
     "vehicle:double_license_disk",
+    "vehicle:passenger_liability_insurance"
+  ]);
+  const ALLOWED_VEHICLE_DOCS = /* @__PURE__ */ new Set([
+    "vehicle:double_license_disk",
     "vehicle:passenger_liability_insurance",
-    "vehicle:dekra_report"
+    "vehicle:insurance",
+    "vehicle:inspection_photos",
+    "vehicle:photo_front",
+    "vehicle:photo_back",
+    "vehicle:photo_left",
+    "vehicle:photo_right",
+    "vehicle:photo_inside",
+    "vehicle:dekra_report",
+    "double_license_disk",
+    "passenger_liability_insurance",
+    "insurance",
+    "inspection_photos",
+    "photo_front",
+    "photo_back",
+    "photo_left",
+    "photo_right",
+    "photo_inside",
+    "dekra_report"
   ]);
   function requireStringField(body, field) {
     const value = String(body?.[field] || "").trim();
@@ -6501,6 +6722,9 @@ If you did not request this, you can ignore this email.`,
     try {
       const type = requireStringField(req.body, "type");
       const url = requireStringField(req.body, "url");
+      if (url.startsWith("file:") || url.startsWith("content:")) {
+        return res.status(400).json({ message: "Invalid document URL. Documents must be uploaded via /api/upload-document." });
+      }
       if (!type.startsWith("driver:") && !type.startsWith("partner:")) {
         return res.status(400).json({ message: "Document type must start with driver: or partner:" });
       }
@@ -6579,6 +6803,16 @@ If you did not request this, you can ignore this email.`,
           status: "pending",
           submittedAt: /* @__PURE__ */ new Date()
         });
+      }
+      try {
+        const user = await storage.getUser(req.auth.sub);
+        if (user?.email) {
+          await sendDriverSignupReceivedEmail({
+            to: user.email,
+            name: user.name
+          }).catch((err) => console.warn("[email] sendDriverSignupReceivedEmail error:", err?.message || err));
+        }
+      } catch {
       }
       return res.status(201).json({ profile, chauffeur, application });
     } catch (error) {
@@ -6762,10 +6996,16 @@ If you did not request this, you can ignore this email.`,
       if (vehicle.ownerOperatorProfileId !== profile.id && req.auth.role !== "admin") {
         return res.status(403).json({ message: "Forbidden" });
       }
-      const type = requireStringField(req.body, "type");
+      let type = requireStringField(req.body, "type");
       const url = requireStringField(req.body, "url");
-      if (!VEHICLE_REQUIRED_DOCS.has(type)) {
+      if (url.startsWith("file:") || url.startsWith("content:")) {
+        return res.status(400).json({ message: "Invalid document URL. Documents must be uploaded via /api/upload-document." });
+      }
+      if (!ALLOWED_VEHICLE_DOCS.has(type) && !ALLOWED_VEHICLE_DOCS.has(`vehicle:${type}`)) {
         return res.status(400).json({ message: "Invalid vehicle document type" });
+      }
+      if (!type.startsWith("vehicle:")) {
+        type = `vehicle:${type}`;
       }
       const doc = await storage.createDocument({
         userId: req.auth.sub,
@@ -6792,10 +7032,14 @@ If you did not request this, you can ignore this email.`,
       }
       const docs = await storage.getDocumentsByVehicle(vehicle.id);
       const uploadedTypes = new Set(docs.map((doc) => doc.type));
+      const hasPhotos = uploadedTypes.has("vehicle:inspection_photos") || uploadedTypes.has("vehicle:photo_front") && uploadedTypes.has("vehicle:photo_back") && uploadedTypes.has("vehicle:photo_left") && uploadedTypes.has("vehicle:photo_right") && uploadedTypes.has("vehicle:photo_inside") || uploadedTypes.has("vehicle:dekra_report");
       const missingDocs = [...VEHICLE_REQUIRED_DOCS].filter((type) => !uploadedTypes.has(type));
+      if (!hasPhotos) {
+        missingDocs.push("vehicle:inspection_photos");
+      }
       if (missingDocs.length > 0) {
         return res.status(400).json({
-          message: `Please upload all required vehicle documents: ${missingDocs.map((type) => type.replace("vehicle:", "")).join(", ")}`
+          message: `Please upload all required vehicle documents: ${missingDocs.map((type) => type.replace("vehicle:", "").replace(/_/g, " ")).join(", ")}`
         });
       }
       const updated = await storage.updateVehicle(vehicle.id, { status: "pending", submittedAt: /* @__PURE__ */ new Date(), rejectionReason: null });
@@ -8810,6 +9054,30 @@ If you did not request this, you can ignore this email.`,
       }).catch((error) => {
         console.warn("[admin/vehicles] notification skipped:", error?.message || error);
       });
+      try {
+        const ownerUser = await storage.getUser(ownerProfile.userId);
+        if (ownerUser?.email) {
+          if (status === "approved") {
+            await sendVehicleApprovedEmail({
+              to: ownerUser.email,
+              name: ownerUser.name,
+              carMake: vehicle.carMake,
+              vehicleModel: vehicle.vehicleModel,
+              plateNumber: vehicle.plateNumber
+            }).catch((e) => console.warn("[email] sendVehicleApprovedEmail error:", e?.message || e));
+          } else if (status === "rejected" || status === "suspended") {
+            await sendVehicleRejectedEmail({
+              to: ownerUser.email,
+              name: ownerUser.name,
+              carMake: vehicle.carMake,
+              vehicleModel: vehicle.vehicleModel,
+              plateNumber: vehicle.plateNumber,
+              reason: reason || null
+            }).catch((e) => console.warn("[email] sendVehicleRejectedEmail error:", e?.message || e));
+          }
+        }
+      } catch {
+      }
       return res.json(await serializeVehicle(updated));
     } catch (error) {
       return res.status(400).json({ message: error.message });
@@ -8819,6 +9087,7 @@ If you did not request this, you can ignore this email.`,
     try {
       const vehicle = await storage.getVehicle(req.params.id);
       if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
+      const previousStatus = vehicle.status;
       const update = {};
       for (const field of ["carMake", "vehicleModel", "plateNumber", "vehicleType", "carColor", "status", "rejectionReason"]) {
         if (req.body[field] !== void 0) update[field] = String(req.body[field]).trim();
@@ -8827,6 +9096,35 @@ If you did not request this, you can ignore this email.`,
       if (req.body.passengerCapacity !== void 0) update.passengerCapacity = Number.parseInt(String(req.body.passengerCapacity), 10) || 4;
       if (req.body.luggageCapacity !== void 0) update.luggageCapacity = Number.parseInt(String(req.body.luggageCapacity), 10) || 2;
       const updated = await storage.updateVehicle(vehicle.id, update);
+      if (update.status && update.status !== previousStatus) {
+        try {
+          const ownerProfile = await storage.getOperatorProfile(vehicle.ownerOperatorProfileId);
+          if (ownerProfile) {
+            const ownerUser = await storage.getUser(ownerProfile.userId);
+            if (ownerUser?.email) {
+              if (update.status === "approved") {
+                await sendVehicleApprovedEmail({
+                  to: ownerUser.email,
+                  name: ownerUser.name,
+                  carMake: update.carMake || vehicle.carMake,
+                  vehicleModel: update.vehicleModel || vehicle.vehicleModel,
+                  plateNumber: update.plateNumber || vehicle.plateNumber
+                }).catch(() => void 0);
+              } else if (update.status === "rejected" || update.status === "suspended") {
+                await sendVehicleRejectedEmail({
+                  to: ownerUser.email,
+                  name: ownerUser.name,
+                  carMake: update.carMake || vehicle.carMake,
+                  vehicleModel: update.vehicleModel || vehicle.vehicleModel,
+                  plateNumber: update.plateNumber || vehicle.plateNumber,
+                  reason: update.rejectionReason || null
+                }).catch(() => void 0);
+              }
+            }
+          }
+        } catch {
+        }
+      }
       return res.json(await serializeVehicle(updated));
     } catch (error) {
       return res.status(400).json({ message: error.message });
@@ -8888,6 +9186,24 @@ If you did not request this, you can ignore this email.`,
           body: status === "approved" ? "Your driver profile has been approved. Add or select an approved vehicle before going online." : status === "waitlisted" ? `Your driver profile has been waitlisted.${notes ? ` Reason: ${String(notes).trim()}.` : ""}` : `Your driver application was not approved.${notes ? ` Reason: ${String(notes).trim()}.` : ""}`,
           data: { driverApplicationId: updated.id, operatorProfileId: profile?.id }
         });
+        try {
+          const driverUser = await storage.getUser(updated.userId);
+          if (driverUser?.email) {
+            if (status === "approved") {
+              await sendDriverApprovedEmail({
+                to: driverUser.email,
+                name: driverUser.name
+              }).catch((e) => console.warn("[email] sendDriverApprovedEmail error:", e?.message || e));
+            } else if (status === "rejected" || status === "waitlisted") {
+              await sendDriverRejectedEmail({
+                to: driverUser.email,
+                name: driverUser.name,
+                reason: notes ? String(notes).trim() : null
+              }).catch((e) => console.warn("[email] sendDriverRejectedEmail error:", e?.message || e));
+            }
+          }
+        } catch {
+        }
       }
       return res.json(updated);
     }
@@ -8915,34 +9231,16 @@ If you did not request this, you can ignore this email.`,
       if (base64Data.length > 7e6) {
         return res.status(400).json({ message: "Image too large. Maximum 5 MB." });
       }
-      const SUPABASE_URL2 = process.env.SUPABASE_URL || "https://zzwkieiktbhptvgsqerd.supabase.co";
-      const SUPABASE_SERVICE_KEY2 = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-      const BUCKET = "driver-documents";
+      const normalizedBase64 = String(base64Data).replace(/^data:[^;]+;base64,/, "").replace(/\s/g, "");
+      const buffer = Buffer.from(normalizedBase64, "base64");
       const safeId = chauffeurId.replace(/[^a-zA-Z0-9_-]/g, "");
-      const fileName = `${safeId}/profile_${Date.now()}.jpg`;
-      const buffer = Buffer.from(base64Data, "base64");
-      const uploadRes = await fetch(
-        `${SUPABASE_URL2}/storage/v1/object/${BUCKET}/${fileName}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${SUPABASE_SERVICE_KEY2}`,
-            apikey: SUPABASE_SERVICE_KEY2,
-            "Content-Type": "image/jpeg",
-            "x-upsert": "true"
-          },
-          body: buffer
-        }
-      );
-      if (!uploadRes.ok) {
-        const errText = await uploadRes.text().catch(() => uploadRes.statusText);
-        console.error("[upload/profile-photo] Supabase error:", uploadRes.status, errText);
-        if (uploadRes.status === 401 || uploadRes.status === 403) {
-          return res.status(500).json({ message: "Photo upload failed: Supabase service key not configured. Please add SUPABASE_SERVICE_ROLE_KEY to environment secrets." });
-        }
-        return res.status(500).json({ message: `Photo upload failed (${uploadRes.status}): ${errText}` });
-      }
-      const url = `${SUPABASE_URL2}/storage/v1/object/public/${BUCKET}/${fileName}`;
+      const storedMediaId = await storeMediaObject({
+        ownerUserId: safeId,
+        purpose: "profile_photo",
+        mimeType: "image/jpeg",
+        data: buffer
+      });
+      const url = `https://a2blift.com/api/media/${storedMediaId}`;
       try {
         await storage.updateChauffeur(chauffeurId, { profilePhoto: url });
       } catch {
@@ -8955,65 +9253,28 @@ If you did not request this, you can ignore this email.`,
   });
   app2.post("/api/upload-document", authOptional, async (req, res) => {
     try {
-      const { base64Data, userId, docType, mimeType, fileExtension } = req.body;
+      const { base64Data, userId, docType, mimeType } = req.body;
       if (!base64Data || !userId || !docType) {
         return res.status(400).json({ message: "base64Data, userId, and docType are required" });
       }
-      const SUPABASE_URL2 = process.env.SUPABASE_URL || "https://zzwkieiktbhptvgsqerd.supabase.co";
-      const SUPABASE_ANON_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-      const BUCKET = "driver-documents";
+      const normalizedBase64 = String(base64Data).replace(/^data:[^;]+;base64,/, "").replace(/\s/g, "");
+      const buffer = Buffer.from(normalizedBase64, "base64");
+      if (buffer.length === 0) {
+        return res.status(400).json({ message: "Invalid document data" });
+      }
       const contentType = typeof mimeType === "string" && mimeType.includes("/") ? mimeType : "image/jpeg";
-      const extension = typeof fileExtension === "string" && /^[a-zA-Z0-9]{1,10}$/.test(fileExtension) ? fileExtension.toLowerCase() : contentType === "application/pdf" ? "pdf" : "jpg";
-      const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, "_") || "user";
       const safeDocType = String(docType).replace(/[^a-zA-Z0-9_-]/g, "_") || "document";
-      const fileName = `${safeUserId}/${safeDocType}_${Date.now()}.${extension}`;
-      const buffer = Buffer.from(base64Data, "base64");
-      const uploadRes = await fetch(
-        `${SUPABASE_URL2}/storage/v1/object/${BUCKET}/${fileName}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-            apikey: SUPABASE_ANON_KEY,
-            "Content-Type": contentType,
-            "x-upsert": "true"
-          },
-          body: buffer
-        }
-      );
-      if (!uploadRes.ok) {
-        const err = await uploadRes.text();
-        console.warn("[upload-document] Supabase upload failed, falling back to local media store:", err);
-        const storedMediaId = await storeMediaObject({
-          ownerUserId: safeUserId,
-          purpose: safeDocType,
-          mimeType: contentType,
-          data: buffer
-        });
-        return res.json({ url: `/api/media/${storedMediaId}` });
-      }
-      const url = `${SUPABASE_URL2}/storage/v1/object/public/${BUCKET}/${fileName}`;
-      return res.json({ url });
+      const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, "_") || "user";
+      const storedMediaId = await storeMediaObject({
+        ownerUserId: safeUserId,
+        purpose: safeDocType,
+        mimeType: contentType,
+        data: buffer
+      });
+      const url = `https://a2blift.com/api/media/${storedMediaId}`;
+      return res.json({ url, mediaId: storedMediaId });
     } catch (error) {
-      console.warn("[upload-document] Error during upload, attempting local media store fallback:", error.message);
-      try {
-        const { base64Data, userId, docType, mimeType } = req.body;
-        if (base64Data && userId && docType) {
-          const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, "_") || "user";
-          const safeDocType = String(docType).replace(/[^a-zA-Z0-9_-]/g, "_") || "document";
-          const contentType = typeof mimeType === "string" && mimeType.includes("/") ? mimeType : "image/jpeg";
-          const buffer = Buffer.from(base64Data, "base64");
-          const storedMediaId = await storeMediaObject({
-            ownerUserId: safeUserId,
-            purpose: safeDocType,
-            mimeType: contentType,
-            data: buffer
-          });
-          return res.json({ url: `/api/media/${storedMediaId}` });
-        }
-      } catch (fallbackError) {
-        console.error("[upload-document] Fallback media store failed:", fallbackError.message);
-      }
+      console.error("[upload-document] Upload error:", error.message);
       return res.status(500).json({ message: error.message || "Failed to upload document" });
     }
   });
@@ -9021,6 +9282,9 @@ If you did not request this, you can ignore this email.`,
     const { applicationId, chauffeurId, type, url, userId: bodyUserId } = req.body;
     const userId = req.auth?.sub || bodyUserId;
     if (!type || !url) return res.status(400).json({ message: "type and url are required" });
+    if (typeof url === "string" && (url.startsWith("file:") || url.startsWith("content:"))) {
+      return res.status(400).json({ message: "Invalid document URL. Documents must be uploaded via /api/upload-document." });
+    }
     if (!userId) return res.status(400).json({ message: "userId required" });
     const doc = await storage.createDocument({
       userId,
@@ -9061,13 +9325,34 @@ If you did not request this, you can ignore this email.`,
     requireAuth,
     requireRole(["admin"]),
     async (req, res) => {
-      const { status } = req.body;
+      const { status, reviewReason } = req.body;
       const doc = await storage.updateDocument(req.params.id, {
         status,
+        reviewReason: status === "rejected" ? reviewReason ? String(reviewReason).trim() : null : null,
         reviewedAt: /* @__PURE__ */ new Date(),
         reviewerAdminId: req.auth.sub
       });
       if (!doc) return res.status(404).json({ message: "Document not found" });
+      try {
+        const user = await storage.getUser(doc.userId);
+        if (user?.email) {
+          if (status === "approved") {
+            await sendDocumentApprovedEmail({
+              to: user.email,
+              name: user.name,
+              docType: doc.type
+            }).catch(() => void 0);
+          } else if (status === "rejected") {
+            await sendDocumentRejectedEmail({
+              to: user.email,
+              name: user.name,
+              docType: doc.type,
+              reason: reviewReason ? String(reviewReason).trim() : null
+            }).catch(() => void 0);
+          }
+        }
+      } catch {
+      }
       return res.json(doc);
     }
   );
@@ -9801,6 +10086,110 @@ If you did not request this, you can ignore this email.`,
       });
     }
   });
+  const handleUpdateRideDestination = async (req, res) => {
+    try {
+      const existingRide = await storage.getRide(req.params.id);
+      if (!existingRide) return res.status(404).json({ message: "Ride not found" });
+      const callerUserId = req.auth?.sub || req.body?.clientId;
+      const isAdmin = req.auth?.role === "admin";
+      if (callerUserId && existingRide.clientId && existingRide.clientId !== callerUserId && !isAdmin) {
+        return res.status(403).json({ message: "Only the rider can update the destination." });
+      }
+      if (["trip_completed", "cancelled"].includes(existingRide.status)) {
+        return res.status(409).json({ message: "Destination cannot be changed after the trip has ended." });
+      }
+      const dropoffAddress = String(req.body?.dropoffAddress || "").trim();
+      const dropoffLat = Number(req.body?.dropoffLat);
+      const dropoffLng = Number(req.body?.dropoffLng);
+      if (!dropoffAddress || !Number.isFinite(dropoffLat) || !Number.isFinite(dropoffLng)) {
+        return res.status(400).json({ message: "A valid destination address and coordinates are required." });
+      }
+      const currentStops = normalizeRideStops(existingRide.stops);
+      const pickup = {
+        lat: Number(existingRide.pickupLat),
+        lng: Number(existingRide.pickupLng)
+      };
+      const newDestination = {
+        lat: dropoffLat,
+        lng: dropoffLng
+      };
+      const [verifiedRoute] = await fetchVerifiedDirections(
+        pickup,
+        newDestination,
+        currentStops
+      );
+      const priceEstimate = calculatePrice(
+        verifiedRoute.distanceKm,
+        existingRide.vehicleType || "budget",
+        {
+          isLateNight: isSouthAfricaLateNight(),
+          surgeMultiplier: Number(
+            existingRide.demandMultiplier || existingRide.surgeMultiplier || 1
+          ),
+          surgeReason: existingRide.surgeReason || void 0,
+          estimatedDurationMin: verifiedRoute.durationMin
+        }
+      );
+      const paymentMethod = existingRide.paymentMethod || "cash";
+      const paymentAlreadyCaptured = paymentMethod !== "cash" && existingRide.paymentStatus === "paid";
+      if (paymentAlreadyCaptured && Math.abs(Number(existingRide.price || 0) - priceEstimate.totalPrice) > 0.01) {
+        return res.status(409).json({
+          message: "Destination cannot be repriced after card or wallet payment has already been captured."
+        });
+      }
+      const updatedRide = await storage.updateRide(existingRide.id, {
+        dropoffAddress,
+        dropoffLat: String(dropoffLat),
+        dropoffLng: String(dropoffLng),
+        distanceKm: verifiedRoute.distanceKm,
+        durationMin: verifiedRoute.durationMin,
+        estimatedDurationMin: verifiedRoute.durationMin,
+        price: priceEstimate.totalPrice,
+        quotedFare: priceEstimate.totalPrice,
+        actualFare: priceEstimate.totalPrice,
+        finalFare: priceEstimate.totalPrice,
+        pricePerKm: priceEstimate.pricePerKm,
+        baseFare: priceEstimate.baseFare
+      });
+      if (!updatedRide) return res.status(404).json({ message: "Ride not found" });
+      const payload = {
+        ...updatedRide,
+        destinationUpdatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      io.emit("ride:destinationUpdated", payload);
+      io.emit("ride:statusUpdate", payload);
+      if (updatedRide.chauffeurId) {
+        try {
+          const chauffeur = await storage.getChauffeur(updatedRide.chauffeurId);
+          if (chauffeur?.userId) {
+            await storage.createNotification({
+              userId: chauffeur.userId,
+              title: "Destination Changed",
+              body: `The rider changed the destination to: ${dropoffAddress}. The route and fare (R ${Number(priceEstimate.totalPrice).toFixed(0)}) have been updated.`,
+              type: "ride"
+            });
+          }
+          if (chauffeur?.pushToken) {
+            sendExpoPushNotification(
+              [chauffeur.pushToken],
+              "Destination Changed",
+              `The rider changed the destination to: ${dropoffAddress}.`,
+              { rideId: updatedRide.id, type: "ride:destination-updated" }
+            );
+          }
+        } catch (notificationError) {
+          console.error("destination update notification failed (non-fatal):", notificationError.message);
+        }
+      }
+      return res.json(payload);
+    } catch (error) {
+      return res.status(500).json({
+        message: error.message || "Failed to update trip destination."
+      });
+    }
+  };
+  app2.put("/api/rides/:id/destination", authOptional, handleUpdateRideDestination);
+  app2.post("/api/rides/:id/destination", authOptional, handleUpdateRideDestination);
   app2.put("/api/rides/:id/accept", requireAuth, async (req, res) => {
     try {
       const { chauffeurId } = req.body;
@@ -10049,12 +10438,19 @@ If you did not request this, you can ignore this email.`,
           }
         } else if (cancelledBy === "driver") {
           const rider = await storage.getUser(rideBeforeUpdate.clientId).catch(() => void 0);
+          await storage.createNotification({
+            userId: rideBeforeUpdate.clientId,
+            title: "Driver Cancelled",
+            body: "Your driver cancelled the trip. We are automatically searching for another driver for you now.",
+            type: "ride"
+          }).catch(() => {
+          });
           if (rider?.pushToken) {
             sendExpoPushNotification(
               [rider.pushToken],
-              "Driver Cancelled Ride",
-              "Your driver cancelled the ride. You can request another vehicle now.",
-              { rideId: ride.id, type: "ride:cancelled", cancelledBy },
+              "Driver Cancelled Trip",
+              "Your driver had to cancel. We are automatically searching for another nearby driver for you now.",
+              { rideId: ride.id, type: "ride:cancelled", cancelledBy, autoReRequest: true },
               { urgent: true, channelId: "client-alerts" }
             );
           }
@@ -12450,14 +12846,14 @@ function getPlatformDownloadUrl(app2, userAgent = "", env = process.env) {
   if (platform === "ios") return links.iosUrl;
   return void 0;
 }
-function escapeHtml(value) {
+function escapeHtml2(value) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 function renderDownloadChooser(app2, env = process.env) {
   const links = getAppDownloadLinks(app2, env);
-  const title = escapeHtml(links.appName);
-  const iosUrl = escapeHtml(links.iosUrl);
-  const androidUrl = escapeHtml(links.androidUrl);
+  const title = escapeHtml2(links.appName);
+  const iosUrl = escapeHtml2(links.iosUrl);
+  const androidUrl = escapeHtml2(links.androidUrl);
   return `<!doctype html>
 <html lang="en">
   <head>

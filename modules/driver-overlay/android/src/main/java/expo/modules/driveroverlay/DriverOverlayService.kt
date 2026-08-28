@@ -6,11 +6,14 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -26,6 +29,7 @@ import kotlin.math.abs
 
 class DriverOverlayService : Service() {
   companion object {
+    private const val TAG = "DriverOverlayService"
     const val ACTION_START = "expo.modules.driveroverlay.START"
     const val ACTION_UPDATE = "expo.modules.driveroverlay.UPDATE"
     const val EXTRA_EVENT_COUNT = "eventCount"
@@ -35,7 +39,7 @@ class DriverOverlayService : Service() {
     private const val NOTIFICATION_ID = 7402
   }
 
-  private lateinit var windowManager: WindowManager
+  private var windowManager: WindowManager? = null
   private var overlayView: FrameLayout? = null
   private var badgeView: TextView? = null
   private var liveDotView: View? = null
@@ -44,8 +48,12 @@ class DriverOverlayService : Service() {
 
   override fun onCreate() {
     super.onCreate()
-    windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-    createNotificationChannel()
+    try {
+      windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+      createNotificationChannel()
+    } catch (e: Throwable) {
+      Log.e(TAG, "Error in onCreate: ${e.message}")
+    }
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -53,20 +61,40 @@ class DriverOverlayService : Service() {
     val tripActive = intent?.getBooleanExtra(EXTRA_TRIP_ACTIVE, false) ?: false
     val tripLabel = intent?.getStringExtra(EXTRA_TRIP_LABEL) ?: ""
 
-    startForeground(NOTIFICATION_ID, buildNotification(isIncomingTrip = count > 0 && !tripActive, isTripActive = tripActive, tripLabel = tripLabel))
-    if (overlayView == null) addOverlay()
-    updateOverlayState(count, tripActive, tripLabel)
+    try {
+      val notification = buildNotification(isIncomingTrip = count > 0 && !tripActive, isTripActive = tripActive, tripLabel = tripLabel)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+      } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE)
+      } else {
+        startForeground(NOTIFICATION_ID, notification)
+      }
+    } catch (e: Throwable) {
+      Log.e(TAG, "Failed to startForeground: ${e.message}")
+    }
+
+    try {
+      if (overlayView == null) addOverlay()
+      updateOverlayState(count, tripActive, tripLabel)
+    } catch (e: Throwable) {
+      Log.e(TAG, "Failed to update overlay: ${e.message}")
+    }
+
     return START_STICKY
   }
 
   override fun onBind(intent: Intent?): IBinder? = null
 
   override fun onDestroy() {
-    liveDotView?.clearAnimation()
-    overlayView?.let {
+    try {
+      liveDotView?.clearAnimation()
+    } catch (e: Throwable) {}
+    overlayView?.let { view ->
       try {
-        windowManager.removeView(it)
-      } catch (e: IllegalArgumentException) {
+        windowManager?.removeView(view)
+      } catch (e: Throwable) {
+        Log.w(TAG, "Error removing overlay view: ${e.message}")
       }
     }
     overlayView = null
@@ -76,95 +104,106 @@ class DriverOverlayService : Service() {
   }
 
   private fun addOverlay() {
-    val size = dp(64)
-    val container = FrameLayout(this).apply {
-      outlineProvider = ViewOutlineProvider.BACKGROUND
-      clipToOutline = true
-      elevation = dp(8).toFloat()
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+      Log.w(TAG, "Cannot add overlay: overlay permission not granted")
+      return
     }
-    val containerBg = GradientDrawable().apply {
-      shape = GradientDrawable.OVAL
-      setColor(Color.rgb(15, 23, 42))
-      setStroke(dp(2), Color.WHITE)
-    }
-    container.background = containerBg
+    val wm = windowManager ?: return
+    if (overlayView != null) return
 
-    // Circular icon wrapper to ensure square app icons never bleed outside the circle
-    val iconContainer = FrameLayout(this).apply {
-      setBackground(GradientDrawable().apply {
+    try {
+      val size = dp(64)
+      val container = FrameLayout(this).apply {
+        outlineProvider = ViewOutlineProvider.BACKGROUND
+        clipToOutline = true
+        elevation = dp(8).toFloat()
+      }
+      val containerBg = GradientDrawable().apply {
         shape = GradientDrawable.OVAL
-        setColor(Color.rgb(10, 10, 10))
-      })
-      outlineProvider = ViewOutlineProvider.BACKGROUND
-      clipToOutline = true
-    }
-    val icon = ImageView(this).apply {
-      setImageResource(applicationInfo.icon)
-      scaleType = ImageView.ScaleType.FIT_CENTER
-      setPadding(dp(3), dp(3), dp(3), dp(3))
-    }
-    iconContainer.addView(icon, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-    container.addView(iconContainer, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.CENTER))
+        setColor(Color.rgb(15, 23, 42))
+        setStroke(dp(2), Color.WHITE)
+      }
+      container.background = containerBg
 
-    // Live blinking green dot for active trips
-    val liveDot = View(this).apply {
-      setBackground(GradientDrawable().apply {
-        shape = GradientDrawable.OVAL
-        setColor(Color.rgb(34, 197, 94))
-        setStroke(dp(1), Color.WHITE)
-      })
-      visibility = View.GONE
-    }
-    val liveDotParams = FrameLayout.LayoutParams(dp(12), dp(12), Gravity.TOP or Gravity.START).apply {
-      topMargin = dp(4)
-      marginStart = dp(4)
-    }
-    container.addView(liveDot, liveDotParams)
-    liveDotView = liveDot
+      // Circular icon wrapper to ensure square app icons never bleed outside the circle
+      val iconContainer = FrameLayout(this).apply {
+        setBackground(GradientDrawable().apply {
+          shape = GradientDrawable.OVAL
+          setColor(Color.rgb(10, 10, 10))
+        })
+        outlineProvider = ViewOutlineProvider.BACKGROUND
+        clipToOutline = true
+      }
+      val icon = ImageView(this).apply {
+        setImageResource(applicationInfo.icon)
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        setPadding(dp(3), dp(3), dp(3), dp(3))
+      }
+      iconContainer.addView(icon, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+      container.addView(iconContainer, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.CENTER))
 
-    // Badge indicator (for "NEW", "TRIP", or event counts)
-    val badge = TextView(this).apply {
-      gravity = Gravity.CENTER
-      setTextColor(Color.WHITE)
-      textSize = 9f
-      setPadding(dp(4), dp(1), dp(4), dp(1))
-      setTypeface(typeface, android.graphics.Typeface.BOLD)
-      setBackground(GradientDrawable().apply {
-        shape = GradientDrawable.RECTANGLE
-        cornerRadius = dp(6).toFloat()
-        setColor(Color.rgb(211, 47, 47))
-      })
-      visibility = View.GONE
-    }
-    val badgeParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, dp(18), Gravity.TOP or Gravity.END).apply {
-      topMargin = dp(1)
-      marginEnd = dp(1)
-    }
-    container.addView(badge, badgeParams)
-    badgeView = badge
+      // Live blinking green dot for active trips
+      val liveDot = View(this).apply {
+        setBackground(GradientDrawable().apply {
+          shape = GradientDrawable.OVAL
+          setColor(Color.rgb(34, 197, 94))
+          setStroke(dp(1), Color.WHITE)
+        })
+        visibility = View.GONE
+      }
+      val liveDotParams = FrameLayout.LayoutParams(dp(12), dp(12), Gravity.TOP or Gravity.START).apply {
+        topMargin = dp(4)
+        marginStart = dp(4)
+      }
+      container.addView(liveDot, liveDotParams)
+      liveDotView = liveDot
 
-    val params = WindowManager.LayoutParams(
-      size,
-      size,
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-      } else {
-        @Suppress("DEPRECATION")
-        WindowManager.LayoutParams.TYPE_PHONE
-      },
-      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-      PixelFormat.TRANSLUCENT,
-    ).apply {
-      gravity = Gravity.TOP or Gravity.START
-      x = resources.displayMetrics.widthPixels - size - dp(16)
-      y = dp(180)
-    }
+      // Badge indicator (for "NEW", "TRIP", or event counts)
+      val badge = TextView(this).apply {
+        gravity = Gravity.CENTER
+        setTextColor(Color.WHITE)
+        textSize = 9f
+        setPadding(dp(4), dp(1), dp(4), dp(1))
+        setTypeface(typeface, android.graphics.Typeface.BOLD)
+        setBackground(GradientDrawable().apply {
+          shape = GradientDrawable.RECTANGLE
+          cornerRadius = dp(6).toFloat()
+          setColor(Color.rgb(211, 47, 47))
+        })
+        visibility = View.GONE
+      }
+      val badgeParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, dp(18), Gravity.TOP or Gravity.END).apply {
+        topMargin = dp(1)
+        marginEnd = dp(1)
+      }
+      container.addView(badge, badgeParams)
+      badgeView = badge
 
-    attachTouchHandler(container, params)
-    windowManager.addView(container, params)
-    overlayView = container
-    layoutParams = params
+      val params = WindowManager.LayoutParams(
+        size,
+        size,
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+          @Suppress("DEPRECATION")
+          WindowManager.LayoutParams.TYPE_PHONE
+        },
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+          WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+        PixelFormat.TRANSLUCENT,
+      ).apply {
+        gravity = Gravity.TOP or Gravity.START
+        x = resources.displayMetrics.widthPixels - size - dp(16)
+        y = dp(180)
+      }
+
+      attachTouchHandler(container, params)
+      wm.addView(container, params)
+      overlayView = container
+      layoutParams = params
+    } catch (e: Throwable) {
+      Log.e(TAG, "Failed to add overlay: ${e.message}")
+    }
   }
 
   private fun attachTouchHandler(view: View, params: WindowManager.LayoutParams) {
@@ -174,34 +213,43 @@ class DriverOverlayService : Service() {
     var touchY = 0f
 
     view.setOnTouchListener { _, event ->
-      when (event.action) {
-        MotionEvent.ACTION_DOWN -> {
-          startX = params.x
-          startY = params.y
-          touchX = event.rawX
-          touchY = event.rawY
-          true
+      try {
+        when (event.action) {
+          MotionEvent.ACTION_DOWN -> {
+            startX = params.x
+            startY = params.y
+            touchX = event.rawX
+            touchY = event.rawY
+            true
+          }
+          MotionEvent.ACTION_MOVE -> {
+            params.x = startX + (event.rawX - touchX).toInt()
+            params.y = startY + (event.rawY - touchY).toInt()
+            windowManager?.updateViewLayout(view, params)
+            true
+          }
+          MotionEvent.ACTION_UP -> {
+            val moved = abs(event.rawX - touchX) > dp(8) || abs(event.rawY - touchY) > dp(8)
+            if (!moved) openDriverApp()
+            true
+          }
+          else -> false
         }
-        MotionEvent.ACTION_MOVE -> {
-          params.x = startX + (event.rawX - touchX).toInt()
-          params.y = startY + (event.rawY - touchY).toInt()
-          windowManager.updateViewLayout(view, params)
-          true
-        }
-        MotionEvent.ACTION_UP -> {
-          val moved = abs(event.rawX - touchX) > dp(8) || abs(event.rawY - touchY) > dp(8)
-          if (!moved) openDriverApp()
-          true
-        }
-        else -> false
+      } catch (e: Throwable) {
+        Log.w(TAG, "Touch error: ${e.message}")
+        false
       }
     }
   }
 
   private fun openDriverApp() {
-    packageManager.getLaunchIntentForPackage(packageName)?.let {
-      it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-      startActivity(it)
+    try {
+      packageManager.getLaunchIntentForPackage(packageName)?.let {
+        it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        startActivity(it)
+      }
+    } catch (e: Throwable) {
+      Log.w(TAG, "Failed to launch driver app: ${e.message}")
     }
   }
 

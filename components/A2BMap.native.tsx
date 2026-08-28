@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useMemo, useCallback, useState } from "react"
 import { View, Text, StyleSheet, ActivityIndicator, Image, Pressable } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 
 const NEARBY_CAR_MARKER = require("../assets/images/nearby-car-marker.png");
@@ -9,6 +10,8 @@ const NEARBY_CAR_MARKER = require("../assets/images/nearby-car-marker.png");
 // Fallback region — Johannesburg CBD. Used when GPS not yet acquired so map
 // never renders at world zoom level.
 const DEFAULT_REGION = { lat: -26.2041, lng: 28.0473 };
+const STREET_DELTA = 0.005;
+const CITY_DELTA = 0.075;
 
 const DARK_MAP_STYLE = [
   { elementType: "geometry", stylers: [{ color: "#1d1d1d" }] },
@@ -102,7 +105,6 @@ const DriverMarker = React.memo(
       <Marker
         coordinate={{ latitude, longitude }}
         anchor={{ x: 0.5, y: 0.5 }}
-        tracksViewChanges={false}
         flat={true}
         rotation={rotation}
       >
@@ -194,6 +196,14 @@ function decodePolyline(encoded: string): { latitude: number; longitude: number 
 }
 
 function computeRegion(coords: { latitude: number; longitude: number }[]) {
+  if (!coords || coords.length === 0) {
+    return {
+      latitude: DEFAULT_REGION.lat,
+      longitude: DEFAULT_REGION.lng,
+      latitudeDelta: STREET_DELTA,
+      longitudeDelta: STREET_DELTA,
+    };
+  }
   let minLat = coords[0].latitude;
   let maxLat = coords[0].latitude;
   let minLng = coords[0].longitude;
@@ -209,8 +219,17 @@ function computeRegion(coords: { latitude: number; longitude: number }[]) {
 
   const midLat = (minLat + maxLat) / 2;
   const midLng = (minLng + maxLng) / 2;
-  const latDelta = Math.max((maxLat - minLat) * 1.5, 0.008);
-  const lngDelta = Math.max((maxLng - minLng) * 1.5, 0.008);
+  if (Math.abs(maxLat - minLat) < 0.002 && Math.abs(maxLng - minLng) < 0.002) {
+    return {
+      latitude: midLat,
+      longitude: midLng,
+      latitudeDelta: STREET_DELTA,
+      longitudeDelta: STREET_DELTA,
+    };
+  }
+
+  const latDelta = Math.max((maxLat - minLat) * 1.35, STREET_DELTA);
+  const lngDelta = Math.max((maxLng - minLng) * 1.35, STREET_DELTA);
 
   return {
     latitude: midLat,
@@ -242,6 +261,8 @@ export type A2BMapProps = {
   statusText?: string | null;
   initialZoom?: "city" | "street";
   mapMode?: "auto" | "dark" | "light";
+  recenterBottom?: number;
+  onRecenter?: () => void;
 };
 
 export function A2BMap({
@@ -257,10 +278,12 @@ export function A2BMap({
   loading = false,
   etaText,
   statusText,
-  initialZoom = "street",
+  initialZoom = "city",
   mapMode = "auto",
+  recenterBottom,
+  onRecenter,
 }: A2BMapProps) {
-  const IDLE_DELTA = initialZoom === "city" ? 0.11 : 0.004;
+  const IDLE_DELTA = initialZoom === "street" ? STREET_DELTA : CITY_DELTA;
   const mapRef = useRef<MapView>(null);
 
   const [isDay, setIsDay] = useState(isDaytimeNow);
@@ -275,8 +298,8 @@ export function A2BMap({
   const routeColor = isEffectiveDay ? "#111111" : "#FFFFFF";
   const edgeShade = isEffectiveDay ? "255,255,255" : "0,0,0";
 
-  // Use user's location for initialRegion if available, else Johannesburg
-  const center = pickupLocation || DEFAULT_REGION;
+  // Use user's or driver's location for initialRegion if available, else Johannesburg
+  const center = driverLocation || pickupLocation || DEFAULT_REGION;
   const initialRegionRef = useRef({
     latitude: center.lat,
     longitude: center.lng,
@@ -298,35 +321,90 @@ export function A2BMap({
     mapRef.current.animateToRegion(region, duration);
   }, []);
 
+  const [isMapMoved, setIsMapMoved] = useState(false);
+  const centeredRegionRef = useRef<{ lat: number; lng: number; delta: number }>({
+    lat: DEFAULT_REGION.lat,
+    lng: DEFAULT_REGION.lng,
+    delta: IDLE_DELTA,
+  });
+
   const fitMap = useCallback(() => {
     if (!mapRef.current) return;
-    if (followDriver && driverLocation) {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    } catch {}
+
+    setIsMapMoved(false);
+
+    const hasRoute = routeCoords.length > 0;
+    const hasTripPins = !!(pickupLocation && dropoffLocation);
+
+    if (hasRoute || hasTripPins) {
+      const allCoords = [
+        ...(driverLocation && isFinite(driverLocation.lat) && isFinite(driverLocation.lng) && driverLocation.lat !== 0
+          ? [{ latitude: driverLocation.lat, longitude: driverLocation.lng }]
+          : []),
+        ...(pickupLocation && isFinite(pickupLocation.lat) && isFinite(pickupLocation.lng) && pickupLocation.lat !== 0
+          ? [{ latitude: pickupLocation.lat, longitude: pickupLocation.lng }]
+          : []),
+        ...stopLocations
+          .filter((s) => isFinite(s.lat) && isFinite(s.lng) && s.lat !== 0)
+          .map((s) => ({ latitude: s.lat, longitude: s.lng })),
+        ...(dropoffLocation && isFinite(dropoffLocation.lat) && isFinite(dropoffLocation.lng) && dropoffLocation.lat !== 0
+          ? [{ latitude: dropoffLocation.lat, longitude: dropoffLocation.lng }]
+          : []),
+        ...routeCoords,
+      ];
+      if (allCoords.length > 0) {
+        zoomToCoords(allCoords, 500);
+        return;
+      }
+    }
+
+    if (driverLocation && isFinite(driverLocation.lat) && isFinite(driverLocation.lng) && driverLocation.lat !== 0) {
+      centeredRegionRef.current = { lat: driverLocation.lat, lng: driverLocation.lng, delta: IDLE_DELTA };
       mapRef.current.animateToRegion({
         latitude: driverLocation.lat,
         longitude: driverLocation.lng,
-        latitudeDelta: 0.005,
-        longitudeDelta: 0.005,
+        latitudeDelta: IDLE_DELTA,
+        longitudeDelta: IDLE_DELTA,
       }, 500);
-    } else if (routeCoords.length > 0) {
-      zoomToCoords(routeCoords, 500);
-    } else if (pickupLocation && dropoffLocation) {
-      zoomToCoords([
-        { latitude: pickupLocation.lat, longitude: pickupLocation.lng },
-        { latitude: dropoffLocation.lat, longitude: dropoffLocation.lng },
-      ], 500);
-    } else if (pickupLocation) {
+    } else if (pickupLocation && isFinite(pickupLocation.lat) && isFinite(pickupLocation.lng) && pickupLocation.lat !== 0) {
+      centeredRegionRef.current = { lat: pickupLocation.lat, lng: pickupLocation.lng, delta: IDLE_DELTA };
       mapRef.current.animateToRegion({
         latitude: pickupLocation.lat,
         longitude: pickupLocation.lng,
         latitudeDelta: IDLE_DELTA,
         longitudeDelta: IDLE_DELTA,
       }, 500);
+    } else {
+      centeredRegionRef.current = { lat: DEFAULT_REGION.lat, lng: DEFAULT_REGION.lng, delta: CITY_DELTA };
+      mapRef.current.animateToRegion({
+        latitude: DEFAULT_REGION.lat,
+        longitude: DEFAULT_REGION.lng,
+        latitudeDelta: CITY_DELTA,
+        longitudeDelta: CITY_DELTA,
+      }, 500);
     }
-  }, [followDriver, driverLocation, routeCoords, pickupLocation, dropoffLocation, zoomToCoords, IDLE_DELTA]);
+  }, [driverLocation, routeCoords, pickupLocation, dropoffLocation, stopLocations, zoomToCoords, IDLE_DELTA]);
 
   function handleMapReady() {
     fitMap();
   }
+
+  // Auto center once live driver or pickup location first becomes available
+  const hasCenteredInitialRef = useRef(false);
+  useEffect(() => {
+    if (hasCenteredInitialRef.current) return;
+    const loc = driverLocation || pickupLocation;
+    if (loc && (Math.abs(loc.lat - DEFAULT_REGION.lat) > 0.0001 || Math.abs(loc.lng - DEFAULT_REGION.lng) > 0.0001)) {
+      hasCenteredInitialRef.current = true;
+      const t = setTimeout(() => {
+        fitMap();
+      }, 300);
+      return () => clearTimeout(t);
+    }
+  }, [driverLocation?.lat, driverLocation?.lng, pickupLocation?.lat, pickupLocation?.lng, fitMap]);
 
   // Zoom to route when polyline arrives
   useEffect(() => {
@@ -341,16 +419,17 @@ export function A2BMap({
     if (routeCoords.length > 0) return;
     const coords = [
       { latitude: pickupLocation.lat, longitude: pickupLocation.lng },
+      ...stopLocations.map((s) => ({ latitude: s.lat, longitude: s.lng })),
       { latitude: dropoffLocation.lat, longitude: dropoffLocation.lng },
     ];
     const t = setTimeout(() => zoomToCoords(coords, 700), 200);
     return () => clearTimeout(t);
-  }, [pickupLocation?.lat, pickupLocation?.lng, dropoffLocation?.lat, dropoffLocation?.lng, routeCoords.length, zoomToCoords]);
+  }, [pickupLocation?.lat, pickupLocation?.lng, dropoffLocation?.lat, dropoffLocation?.lng, stopLocations, routeCoords.length, zoomToCoords]);
 
   return (
     <View style={[styles.container, { backgroundColor: mapBackground }]}>
-      {loading && !pickupLocation && (
-        <View style={styles.locatingOverlay}>
+      {loading && !pickupLocation && !driverLocation && (
+        <View style={styles.locatingOverlay} pointerEvents="none">
           <ActivityIndicator size="small" color={Colors.white} />
           <Text style={styles.locatingText}>Locating you...</Text>
         </View>
@@ -372,6 +451,19 @@ export function A2BMap({
         pitchEnabled={false}
         rotateEnabled={false}
         toolbarEnabled={false}
+        onRegionChangeComplete={(region, details) => {
+          if (details?.isGesture) {
+            setIsMapMoved(true);
+            return;
+          }
+          const target = centeredRegionRef.current;
+          const latDiff = Math.abs(region.latitude - target.lat);
+          const lngDiff = Math.abs(region.longitude - target.lng);
+          const deltaDiff = Math.abs(region.latitudeDelta - target.delta);
+          if (latDiff > 0.008 || lngDiff > 0.008 || deltaDiff > 0.02) {
+            setIsMapMoved(true);
+          }
+        }}
       >
         {pickupLocation && !(showDriver && driverLocation && Math.abs(pickupLocation.lat - driverLocation.lat) < 0.0003 && Math.abs(pickupLocation.lng - driverLocation.lng) < 0.0003) && (
           <Marker
@@ -451,16 +543,26 @@ export function A2BMap({
         )}
       </MapView>
 
-      <Pressable
-        style={styles.recenterBtn}
-        onPress={fitMap}
-        accessibilityLabel="Recenter Map"
-      >
-        <Ionicons name="locate" size={24} color="#000000" />
-      </Pressable>
+      {isMapMoved && (
+        <Pressable
+          style={[
+            styles.recenterBtn,
+            recenterBottom != null && { bottom: recenterBottom },
+          ]}
+          onPress={() => {
+            fitMap();
+            onRecenter?.();
+          }}
+          accessibilityLabel="Recenter Map"
+          accessibilityRole="button"
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <Ionicons name="locate" size={24} color="#000000" />
+        </Pressable>
+      )}
 
-      <View style={[styles.gradientTop, { backgroundColor: `rgba(${edgeShade},0.3)` }]} />
-      <View style={[styles.gradientBottom, { backgroundColor: `rgba(${edgeShade},0.5)` }]} />
+      <View pointerEvents="none" style={[styles.gradientTop, { backgroundColor: `rgba(${edgeShade},0.3)` }]} />
+      <View pointerEvents="none" style={[styles.gradientBottom, { backgroundColor: `rgba(${edgeShade},0.5)` }]} />
     </View>
   );
 }
@@ -499,7 +601,9 @@ function areMapPropsEqual(prev: A2BMapProps, next: A2BMapProps) {
     prev.loading === next.loading &&
     prev.etaText === next.etaText &&
     prev.statusText === next.statusText &&
-    prev.initialZoom === next.initialZoom
+    prev.initialZoom === next.initialZoom &&
+    prev.mapMode === next.mapMode &&
+    prev.recenterBottom === next.recenterBottom
   );
 }
 

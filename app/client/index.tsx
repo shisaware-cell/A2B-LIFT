@@ -68,7 +68,7 @@ function getRideVehicle(vehicleType: unknown) {
 type RideStatus = "idle" | "selecting" | "confirming" | "requested" | "assigned" | "arriving" | "in_trip" | "completed" | "no_drivers";
 
 type NearbyDriverState = { id: string; lat: number; lng: number; heading?: number };
-type LocationPickerTarget = "pickup" | "dropoff" | number;
+type LocationPickerTarget = "pickup" | "dropoff" | "active_dropoff" | number;
 
 function getActiveRideTarget(ride: any) {
   const rideStops = normalizeRideStops(ride?.stops);
@@ -1293,8 +1293,8 @@ export default function ClientHomeScreen() {
   function openLocationPicker(target: LocationPickerTarget) {
     const current = target === "pickup"
       ? pickupAddress
-      : target === "dropoff"
-        ? dropoffAddress
+      : target === "dropoff" || target === "active_dropoff"
+        ? (currentRide?.dropoffAddress || dropoffAddress)
         : stops[target]?.address || "";
     setLocationPickerTarget(target);
     setLocationPickerQuery(current === CURRENT_LOCATION_LABEL ? "" : current);
@@ -1303,6 +1303,11 @@ export default function ClientHomeScreen() {
     latestAutocompleteQueryRef.current = "";
     autocompleteRequestIdRef.current += 1;
     setLocationPickerVisible(true);
+  }
+
+  function openActiveDestinationEditor() {
+    if (!currentRide) return;
+    openLocationPicker("active_dropoff");
   }
 
   function addStop() {
@@ -1676,6 +1681,29 @@ export default function ClientHomeScreen() {
             }
           }).catch(() => {});
         }
+      } else if (locationPickerTarget === "active_dropoff") {
+        if (currentRide) {
+          try {
+            const res = await apiRequest("PUT", `/api/rides/${currentRide.id}/destination`, {
+              dropoffAddress: address,
+              dropoffLat: coords.lat,
+              dropoffLng: coords.lng,
+              clientId: user?.id || currentRide.clientId,
+            });
+            const updatedRide = await res.json();
+            setCurrentRide((previous: any) => ({ ...previous, ...updatedRide }));
+            setDropoffAddress(address);
+            setDropoffCoords(coords);
+            setEstimatedPrice(Number(updatedRide.price || estimatedPrice || 0));
+            setEstimatedDistance(Number(updatedRide.distanceKm || estimatedDistance || 0));
+            Alert.alert(
+              "Destination Changed",
+              `Destination updated to:\n${address}\n\nUpdated Fare: R ${Number(updatedRide.price || 0).toFixed(0)}`,
+            );
+          } catch (e: any) {
+            Alert.alert("Update Failed", e?.message || "Could not change destination.");
+          }
+        }
       } else {
         const stopIndex = locationPickerTarget;
         setStops((current) => current.map((stop, index) =>
@@ -1759,12 +1787,108 @@ export default function ClientHomeScreen() {
     } catch {}
   }
 
+  const reRequestCancelledRide = useCallback(async (cancelledRide: any) => {
+    try {
+      setRideRequestLoading(true);
+      setRideStatus("requested");
+      setChauffeurDetails(null);
+      setDriverLocation(null);
+      setLiveEtaMin(null);
+      setInitialEtaMin(null);
+      setEtaText(null);
+
+      const pickupCoords = {
+        lat: Number(cancelledRide.pickupLat || location?.lat),
+        lng: Number(cancelledRide.pickupLng || location?.lng),
+      };
+      const dropoffCoordsTarget = {
+        lat: Number(cancelledRide.dropoffLat || dropoffCoords?.lat),
+        lng: Number(cancelledRide.dropoffLng || dropoffCoords?.lng),
+      };
+      const activeVehicleType = cancelledRide.vehicleType || selectedVehicle.id || "budget";
+      const vehicleObj = getRideVehicle(activeVehicleType);
+      if (vehicleObj) setSelectedVehicle(vehicleObj);
+
+      const paymentMethod = cancelledRide.paymentMethod || "cash";
+
+      const res = await apiRequest("POST", "/api/rides", {
+        clientId: user?.id,
+        pickupLat: pickupCoords.lat,
+        pickupLng: pickupCoords.lng,
+        pickupAddress: cancelledRide.pickupAddress || pickupAddress,
+        dropoffLat: dropoffCoordsTarget.lat,
+        dropoffLng: dropoffCoordsTarget.lng,
+        dropoffAddress: cancelledRide.dropoffAddress || dropoffAddress,
+        vehicleType: activeVehicleType,
+        distanceKm: Number(cancelledRide.distanceKm || estimatedDistance || 10),
+        paymentMethod,
+        paymentStatus: paymentMethod === "cash" ? "unpaid" : "pending",
+        durationMin: Number(cancelledRide.durationMin || tripDurationMin || 15),
+        stops: normalizeRideStops(cancelledRide.stops),
+        isLateNight: new Date().getHours() >= 22 || new Date().getHours() < 5,
+      });
+
+      const payload = await res.json();
+      const newRide = payload.ride ?? payload;
+      if (newRide?.id) {
+        if (paymentMethod === "wallet") {
+          await apiRequest("POST", "/api/payments/pay-wallet", { rideId: newRide.id }).catch(() => {});
+        } else if (paymentMethod === "pay_later") {
+          await apiRequest("POST", "/api/pay-later/charge", {
+            rideId: newRide.id,
+            amount: Number(newRide.price || 0),
+          }).catch(() => {});
+        }
+        setCurrentRide(newRide);
+        currentRideRef.current = newRide;
+        setRideStatus("requested");
+        AsyncStorage.setItem("a2b_client_active_ride", JSON.stringify(newRide)).catch(() => {});
+        queryClient.invalidateQueries({ queryKey: ["/api/rides/client", user?.id] });
+      }
+    } catch (err: any) {
+      console.error("auto-re-request-failed:", err);
+      setCurrentRide(null);
+      setRideStatus("idle");
+      Alert.alert(
+        "Could Not Re-request Ride",
+        "We were unable to automatically request another driver. Please tap Request Ride to try again.",
+      );
+    } finally {
+      setRideRequestLoading(false);
+    }
+  }, [user?.id, location, dropoffCoords, pickupAddress, dropoffAddress, selectedVehicle, estimatedDistance, tripDurationMin, queryClient]);
+
   // Apply a ride status update received from socket or polling
   const applyRideUpdate = useCallback((ride: any) => {
     if (ride.status === "cancelled") {
       const wasCancelledHere = clientCancellationRideIdRef.current === ride.id;
       if (wasCancelledHere) clientCancellationRideIdRef.current = null;
       AsyncStorage.removeItem("a2b_client_active_ride").catch(() => {});
+
+      const cancelledBy = String(ride.cancelledBy || "driver");
+      const isDriverCancellation = !wasCancelledHere && (cancelledBy === "driver" || !ride.cancelledBy);
+
+      if (isDriverCancellation) {
+        setRoutePolyline(null);
+        setDriverLocation(null);
+        setEtaText(null);
+        setLiveEtaMin(null);
+        setInitialEtaMin(null);
+        setChauffeurDetails(null);
+
+        Alert.alert(
+          "Driver Cancelled",
+          "Your driver had to cancel this trip. We are automatically searching for another nearby driver for you now.",
+          [{ text: "OK" }],
+        );
+        if (Platform.OS !== "web") {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        }
+
+        reRequestCancelledRide(ride);
+        return;
+      }
+
       setCurrentRide(null);
       setRideStatus("idle");
       setRoutePolyline(null);
@@ -1774,12 +1898,9 @@ export default function ClientHomeScreen() {
       setInitialEtaMin(null);
       setChauffeurDetails(null);
       if (!wasCancelledHere) {
-        const cancelledBy = String(ride.cancelledBy || "driver");
         Alert.alert(
           "Ride Cancelled",
-          cancelledBy === "driver"
-            ? "Your driver cancelled the ride. You can request another vehicle now."
-            : "Your ride was cancelled. You can request another vehicle now.",
+          "Your ride was cancelled. You can request another vehicle now.",
           [{ text: "OK" }],
         );
       }
@@ -1923,10 +2044,12 @@ export default function ClientHomeScreen() {
 
     on("ride:statusUpdate", handleStatusUpdate);
     on("ride:accepted", handleStatusUpdate);
+    on("ride:cancelled", handleStatusUpdate);
 
     return () => {
       off("ride:statusUpdate", handleStatusUpdate);
       off("ride:accepted", handleStatusUpdate);
+      off("ride:cancelled", handleStatusUpdate);
     };
   }, []); // register once — uses ref internally
 
@@ -3516,6 +3639,30 @@ export default function ClientHomeScreen() {
               </View>
             )}
 
+            {/* ─── Active Trip Destination & Change Location ─── */}
+            <View style={styles.activeDestinationCard}>
+              <View style={styles.activeDestinationRow}>
+                <View style={styles.activeDestIconBox}>
+                  <Ionicons name="location" size={16} color={Colors.error} />
+                </View>
+                <View style={styles.activeDestInfo}>
+                  <Text style={styles.activeDestLabel}>Destination</Text>
+                  <Text style={styles.activeDestAddress} numberOfLines={2}>
+                    {currentRide?.dropoffAddress || dropoffAddress || "Dropoff address"}
+                  </Text>
+                </View>
+                <Pressable
+                  style={styles.changeDestBtn}
+                  onPress={openActiveDestinationEditor}
+                  hitSlop={8}
+                  accessibilityLabel="Change destination"
+                >
+                  <Ionicons name="create-outline" size={14} color={Colors.white} />
+                  <Text style={styles.changeDestBtnText}>Change</Text>
+                </Pressable>
+              </View>
+            </View>
+
             {currentRide?.price && (
               <View style={styles.tripPriceRow}>
                 <Text style={styles.tripPriceLabel}>Ride Price</Text>
@@ -4293,9 +4440,11 @@ export default function ClientHomeScreen() {
             <Text style={styles.locationPickerTitle}>
               {locationPickerTarget === "pickup"
                 ? "Set Pickup"
-                : locationPickerTarget === "dropoff"
-                  ? "Set Destination"
-                  : `Set Stop ${locationPickerTarget + 1}`}
+                : locationPickerTarget === "active_dropoff"
+                  ? "Change Destination"
+                  : locationPickerTarget === "dropoff"
+                    ? "Set Destination"
+                    : `Set Stop ${Number(locationPickerTarget) + 1}`}
             </Text>
             {__DEV__ ? (
               <Pressable onPress={() => setShowDebugLogModal(true)} hitSlop={12}>
@@ -4308,10 +4457,10 @@ export default function ClientHomeScreen() {
 
           {/* Search input */}
           <View style={styles.locationPickerInputRow}>
-            <View style={locationPickerTarget === "pickup" ? styles.dotGreen : locationPickerTarget === "dropoff" ? styles.dotRed : styles.dotStop} />
+            <View style={locationPickerTarget === "pickup" ? styles.dotGreen : locationPickerTarget === "dropoff" || locationPickerTarget === "active_dropoff" ? styles.dotRed : styles.dotStop} />
             <TextInput
               style={styles.locationPickerInput}
-              placeholder={locationPickerTarget === "pickup" ? "Search pickup location..." : locationPickerTarget === "dropoff" ? "Search destination..." : "Search stop location..."}
+              placeholder={locationPickerTarget === "pickup" ? "Search pickup location..." : locationPickerTarget === "active_dropoff" ? "Search new destination..." : locationPickerTarget === "dropoff" ? "Search destination..." : "Search stop location..."}
               placeholderTextColor={Colors.textMuted}
               value={locationPickerQuery}
               onChangeText={onLocationQueryChange}
@@ -6435,6 +6584,56 @@ const styles = StyleSheet.create({
   tripPriceValue: {
     fontSize: 18,
     fontFamily: "Inter_700Bold",
+    color: Colors.white,
+  },
+  activeDestinationCard: {
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  activeDestinationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  activeDestIconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(239,68,68,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  activeDestInfo: {
+    flex: 1,
+  },
+  activeDestLabel: {
+    fontSize: 10,
+    fontFamily: "Inter_500Medium",
+    color: "#8E8E93",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  activeDestAddress: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.white,
+    marginTop: 2,
+  },
+  changeDestBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: Colors.accent,
+  },
+  changeDestBtnText: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
     color: Colors.white,
   },
   activeStopsCard: {

@@ -37,46 +37,36 @@ export async function uploadDocument(
     return uploadProfileSelfie(localUri, userId);
   }
 
-  // ── 1. Read the file bytes ──────────────────────────────────────────────
-  const blob = await readUriAsBlob(localUri);
-  const mimeType = normalizeMimeType(options.mimeType, blob.type);
-  const extension = inferFileExtension(mimeType, options.fileName, localUri);
-  const fileName = `${sanitizePathSegment(userId)}/${sanitizePathSegment(docType)}_${Date.now()}.${extension}`;
-
-  // ── 2. Direct Supabase Storage upload ───────────────────────────────────
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+  // ── 1. Optimize image if applicable & extract base64 directly ─────────
+  let uploadUri = localUri;
+  let base64Data = "";
+  const isProbableImage = !options.mimeType || options.mimeType.startsWith("image/");
+  if (isProbableImage && !localUri.endsWith(".pdf")) {
     try {
-      const uploadRes = await fetch(
-        `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${fileName}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-            apikey: SUPABASE_ANON_KEY,
-            "Content-Type": mimeType,
-            "x-upsert": "true",
-          },
-          body: blob,
-          signal: controller.signal,
-        }
+      const optimized = await manipulateAsync(
+        localUri,
+        [{ resize: { width: 1400 } }],
+        { compress: 0.8, format: SaveFormat.JPEG, base64: true },
       );
-      if (uploadRes.ok) {
-        return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${fileName}`;
+      uploadUri = optimized.uri;
+      if (optimized.base64) {
+        base64Data = optimized.base64;
       }
-      const errText = await uploadRes.text();
-      console.warn("[supabase-storage] Direct upload failed:", errText);
-    } finally {
-      clearTimeout(timer);
+    } catch {
+      // Use original URI if optimization fails (e.g. on web or pdf)
     }
-  } catch (e: any) {
-    console.warn("[supabase-storage] Direct upload error:", e?.message);
   }
 
-  // ── 3. Fallback: server proxy ────────────────────────────────────────────
-  console.log("[supabase-storage] Falling back to server proxy...");
-  const base64Data = await blobToBase64(blob);
+  // ── 2. Read bytes as blob & base64 if not extracted yet ─────────────────
+  let mimeType = options.mimeType || "image/jpeg";
+  if (!base64Data) {
+    const blob = await readUriAsBlob(uploadUri);
+    mimeType = normalizeMimeType(options.mimeType, blob.type);
+    base64Data = await blobToBase64(blob);
+  }
+  const extension = inferFileExtension(mimeType, options.fileName, localUri);
+
+  // ── 3. Upload directly via backend media proxy ──────────────────────────
   const apiUrl = getApiUrl().replace(/\/$/, "");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
@@ -89,7 +79,7 @@ export async function uploadDocument(
     });
     if (!res.ok) {
       const err = await res.text();
-      throw new Error(`Server proxy upload failed: ${err}`);
+      throw new Error(`Upload failed: ${err}`);
     }
     const data = await res.json();
     const finalUrl = String(data?.url || "");
@@ -101,19 +91,25 @@ export async function uploadDocument(
 
 async function uploadProfileSelfie(localUri: string, userId: string): Promise<string> {
   let optimizedUri = localUri;
+  let base64Data = "";
   try {
     const optimized = await manipulateAsync(
       localUri,
       [{ resize: { width: 720 } }],
-      { compress: 0.72, format: SaveFormat.JPEG },
+      { compress: 0.72, format: SaveFormat.JPEG, base64: true },
     );
     optimizedUri = optimized.uri;
+    if (optimized.base64) {
+      base64Data = optimized.base64;
+    }
   } catch (error: any) {
     console.warn("[selfie-upload] Image optimization failed; using captured image:", error?.message);
   }
 
-  const blob = await readUriAsBlob(optimizedUri);
-  const base64Data = await blobToBase64(blob);
+  if (!base64Data) {
+    const blob = await readUriAsBlob(optimizedUri);
+    base64Data = await blobToBase64(blob);
+  }
   const response = await apiRequest("POST", `/api/users/${encodeURIComponent(userId)}/selfie-upload`, {
     base64Data,
     mimeType: "image/jpeg",

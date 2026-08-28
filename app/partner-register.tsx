@@ -102,16 +102,20 @@ export default function PartnerRegisterScreen() {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
-  async function pickDocument(type: string) {
+  async function pickDocument(type: string, camera = false) {
     try {
       if (Platform.OS !== "web") {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        const { status } = camera
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== "granted") {
-          Alert.alert("Permission needed", "Please allow photo access.");
+          Alert.alert("Permission needed", `Please allow ${camera ? "camera" : "photo"} access.`);
           return;
         }
       }
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.65 });
+      const result = camera && Platform.OS !== "web"
+        ? await ImagePicker.launchCameraAsync({ quality: 0.75, allowsEditing: false })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.75 });
       if (!result.canceled && result.assets?.[0]) {
         const asset = result.assets[0];
         const file = { uri: asset.uri, name: asset.fileName || `${type}.jpg` };
@@ -119,8 +123,24 @@ export default function PartnerRegisterScreen() {
         void autosaveDocumentUpload(type, file);
       }
     } catch {
-      Alert.alert("Error", "Could not open image picker.");
+      Alert.alert("Error", "Could not open camera or image picker.");
     }
+  }
+
+  function promptDocumentChoice(type: string, label: string) {
+    if (Platform.OS === "web") {
+      void pickDocument(type, false);
+      return;
+    }
+    Alert.alert(
+      label,
+      "Choose how you want to upload this document:",
+      [
+        { text: "Take Photo (Camera)", onPress: () => void pickDocument(type, true) },
+        { text: "Photo Library (Gallery)", onPress: () => void pickDocument(type, false) },
+        { text: "Cancel", style: "cancel" },
+      ]
+    );
   }
 
   async function autosaveDocumentUpload(type: string, file: DraftFile) {
@@ -164,10 +184,7 @@ export default function PartnerRegisterScreen() {
         const file = documents[doc.id];
         if (!file) continue;
         if (!file.uploadedUrl) {
-          let url = file.uri;
-          try {
-            url = await uploadDocument(file.uri, user.id, doc.id.replace("partner:", "partner_"));
-          } catch {}
+          const url = await uploadDocument(file.uri, user.id, doc.id.replace("partner:", "partner_"));
           await apiRequest("POST", "/api/operator-profile/documents", { type: doc.id, url });
         }
       }
@@ -207,18 +224,40 @@ export default function PartnerRegisterScreen() {
             ["bankName", "Bank Name"],
             ["accountHolder", "Account Holder"],
             ["accountNumber", "Account Number"],
-          ] as const).map(([field, label]) => (
-            <View key={field} style={styles.inputGroup}>
-              <Text style={styles.label}>{label}{["companyName", "registrationNumber"].includes(field) ? " (optional)" : " *"}</Text>
-              <TextInput
-                style={styles.input}
-                value={form[field]}
-                onChangeText={(value) => update(field, value)}
-                placeholderTextColor={Colors.textMuted}
-                keyboardType={field.includes("Phone") ? "phone-pad" : field.includes("Email") ? "email-address" : "default"}
-              />
-            </View>
-          ))}
+          ] as const).map(([field, label]) => {
+            if (field === "contactPhone") {
+              return (
+                <View key={field} style={styles.inputGroup}>
+                  <Text style={styles.label}>{label} *</Text>
+                  <View style={styles.phoneInputRow}>
+                    <View style={styles.phonePrefixBadge}>
+                      <Text style={styles.phonePrefixText}>+27</Text>
+                    </View>
+                    <TextInput
+                      style={styles.phoneInput}
+                      value={formatPhoneLocalDisplay(form.contactPhone)}
+                      onChangeText={(value) => update("contactPhone", normalizeSouthAfricanPhone(value))}
+                      placeholder="82 123 4567"
+                      placeholderTextColor={Colors.textMuted}
+                      keyboardType="phone-pad"
+                    />
+                  </View>
+                </View>
+              );
+            }
+            return (
+              <View key={field} style={styles.inputGroup}>
+                <Text style={styles.label}>{label}{["companyName", "registrationNumber"].includes(field) ? " (optional)" : " *"}</Text>
+                <TextInput
+                  style={styles.input}
+                  value={form[field]}
+                  onChangeText={(value) => update(field, value)}
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType={field.includes("Email") ? "email-address" : "default"}
+                />
+              </View>
+            );
+          })}
         </View>
 
         <Text style={styles.sectionTitle}>Partner Documents</Text>
@@ -226,12 +265,22 @@ export default function PartnerRegisterScreen() {
           {PARTNER_DOCS.map((doc) => {
             const file = documents[doc.id];
             return (
-              <Pressable key={doc.id} style={[styles.docRow, file && styles.docRowUploaded]} onPress={() => pickDocument(doc.id)}>
-                <Ionicons name={file ? "checkmark-circle" : "cloud-upload-outline"} size={22} color={file ? Colors.success : Colors.textMuted} />
+              <Pressable key={doc.id} style={[styles.docRow, file && styles.docRowUploaded]} onPress={() => promptDocumentChoice(doc.id, doc.label)}>
+                <Ionicons name={file ? "checkmark-circle" : "document-text-outline"} size={22} color={file ? Colors.success : Colors.textMuted} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.docTitle}>{doc.label}{doc.optional ? " (optional)" : ""}</Text>
-                  <Text style={styles.docMeta}>{uploadingDocs[doc.id] ? "Saving upload..." : file ? file.name : "Tap to upload"}</Text>
+                  <Text style={styles.docMeta}>{uploadingDocs[doc.id] ? "Saving upload..." : file ? file.name : "Tap to take photo or choose file"}</Text>
                 </View>
+                {Platform.OS !== "web" && (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Pressable style={styles.docMiniBtn} onPress={() => void pickDocument(doc.id, true)} hitSlop={6}>
+                      <Ionicons name="camera-outline" size={17} color={Colors.white} />
+                    </Pressable>
+                    <Pressable style={styles.docMiniBtn} onPress={() => void pickDocument(doc.id, false)} hitSlop={6}>
+                      <Ionicons name="images-outline" size={17} color={Colors.white} />
+                    </Pressable>
+                  </View>
+                )}
               </Pressable>
             );
           })}
@@ -255,10 +304,35 @@ const styles = StyleSheet.create({
   form: { gap: 12, marginBottom: 18 },
   inputGroup: { gap: 8 },
   label: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: Colors.white },
+  phoneInputRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  phonePrefixBadge: {
+    minHeight: 48,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  phonePrefixText: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.white },
+  phoneInput: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    color: Colors.white,
+    fontFamily: "Inter_400Regular",
+    fontSize: 15,
+  },
   input: { minHeight: 48, borderRadius: 12, paddingHorizontal: 14, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, color: Colors.white, fontFamily: "Inter_400Regular" },
   sectionTitle: { fontSize: 13, fontFamily: "Inter_700Bold", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 10 },
   docRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.card },
   docRowUploaded: { borderColor: "rgba(76,175,80,0.35)" },
+  docMiniBtn: { width: 34, height: 34, borderRadius: 8, backgroundColor: Colors.surface, alignItems: "center", justifyContent: "center" },
   docTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.white },
   docMeta: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textMuted, marginTop: 2 },
   errorBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(255,77,77,0.1)", padding: 12, borderRadius: 10, marginBottom: 12 },

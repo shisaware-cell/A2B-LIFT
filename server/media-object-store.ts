@@ -14,12 +14,14 @@ export async function ensureMediaObjectStore() {
     ensureTablePromise = pool.query(`
       CREATE TABLE IF NOT EXISTS app_media_objects (
         id varchar PRIMARY KEY,
-        owner_user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        owner_user_id varchar,
         purpose text NOT NULL,
         mime_type text NOT NULL,
         data bytea NOT NULL,
         created_at timestamp NOT NULL DEFAULT now()
-      )
+      );
+      ALTER TABLE app_media_objects ALTER COLUMN owner_user_id DROP NOT NULL;
+      ALTER TABLE app_media_objects DROP CONSTRAINT IF EXISTS app_media_objects_owner_user_id_fkey;
     `).then(() => undefined).catch((error) => {
       ensureTablePromise = null;
       throw error;
@@ -29,7 +31,7 @@ export async function ensureMediaObjectStore() {
 }
 
 export async function storeMediaObject(input: {
-  ownerUserId: string;
+  ownerUserId?: string | null;
   purpose: string;
   mimeType: string;
   data: Buffer;
@@ -39,7 +41,7 @@ export async function storeMediaObject(input: {
   await pool.query(
     `INSERT INTO app_media_objects (id, owner_user_id, purpose, mime_type, data)
      VALUES ($1, $2, $3, $4, $5)`,
-    [id, input.ownerUserId, input.purpose, input.mimeType, input.data],
+    [id, input.ownerUserId || null, input.purpose, input.mimeType, input.data],
   );
   return id;
 }

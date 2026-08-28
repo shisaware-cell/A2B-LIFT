@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth-context";
 import { apiRequest, queryClient } from "@/lib/query-client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
+import * as ImagePicker from "expo-image-picker";
 import { uploadDocument } from "@/lib/supabase-storage";
 import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
@@ -220,24 +221,68 @@ export default function ChauffeurSettingsScreen() {
     );
   }
 
-  async function pickAndUploadDocument(type: string) {
+  async function pickAndUploadDocument(
+    type: string,
+    source: "camera" | "gallery" | "file" = "file",
+  ) {
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: "*/*",
-        copyToCacheDirectory: true,
-        multiple: false,
-      });
+      let fileUri: string | null = null;
+      let fileName: string | undefined;
+      let mimeType: string | undefined;
 
-      if (result.canceled || !result.assets?.[0]) return;
+      if (source === "camera") {
+        if (Platform.OS !== "web") {
+          const perm = await ImagePicker.requestCameraPermissionsAsync();
+          if (perm.status !== "granted") {
+            Alert.alert("Permission Needed", "Please allow camera access to take document photos.");
+            return;
+          }
+        }
+        const result = await ImagePicker.launchCameraAsync({
+          quality: 0.75,
+          allowsEditing: false,
+        });
+        if (result.canceled || !result.assets?.[0]) return;
+        fileUri = result.assets[0].uri;
+        fileName = result.assets[0].fileName || `${type}.jpg`;
+        mimeType = result.assets[0].mimeType || "image/jpeg";
+      } else if (source === "gallery") {
+        if (Platform.OS !== "web") {
+          const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (perm.status !== "granted") {
+            Alert.alert("Permission Needed", "Please allow photo access.");
+            return;
+          }
+        }
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          quality: 0.75,
+          allowsEditing: false,
+        });
+        if (result.canceled || !result.assets?.[0]) return;
+        fileUri = result.assets[0].uri;
+        fileName = result.assets[0].fileName || `${type}.jpg`;
+        mimeType = result.assets[0].mimeType || "image/jpeg";
+      } else {
+        const result = await DocumentPicker.getDocumentAsync({
+          type: "*/*",
+          copyToCacheDirectory: true,
+          multiple: false,
+        });
+        if (result.canceled || !result.assets?.[0]) return;
+        fileUri = result.assets[0].uri;
+        fileName = result.assets[0].name;
+        mimeType = result.assets[0].mimeType;
+      }
 
+      if (!fileUri) return;
       setUploadingDoc(type);
-      const asset = result.assets[0];
 
       let publicUrl: string;
       try {
-        publicUrl = await uploadDocument(asset.uri, user!.id, type, {
-          fileName: asset.name,
-          mimeType: asset.mimeType,
+        publicUrl = await uploadDocument(fileUri, user!.id, type, {
+          fileName,
+          mimeType,
         });
       } catch (uploadErr: any) {
         Alert.alert("Upload Failed", "Could not upload to cloud storage. Please try again.");
@@ -254,7 +299,7 @@ export default function ChauffeurSettingsScreen() {
       });
 
       await docRes.json();
-      Alert.alert("Success", `${asset.name || type} uploaded successfully. Admin will review it.`);
+      Alert.alert("Success", `${fileName || type} uploaded successfully. Admin will review it.`);
       refetchDocuments();
       queryClient.invalidateQueries({ queryKey: ["/api/driver/documents"] });
     } catch (error: any) {
@@ -262,6 +307,23 @@ export default function ChauffeurSettingsScreen() {
     } finally {
       setUploadingDoc(null);
     }
+  }
+
+  function handleSettingsDocumentPress(type: string, typeName: string) {
+    if (Platform.OS === "web") {
+      void pickAndUploadDocument(type, "file");
+      return;
+    }
+    Alert.alert(
+      typeName,
+      "Choose how you want to upload this document:",
+      [
+        { text: "Take Photo (Camera)", onPress: () => void pickAndUploadDocument(type, "camera") },
+        { text: "Photo Library (Gallery)", onPress: () => void pickAndUploadDocument(type, "gallery") },
+        { text: "Browse Files / PDF", onPress: () => void pickAndUploadDocument(type, "file") },
+        { text: "Cancel", style: "cancel" },
+      ]
+    );
   }
 
   function getDocumentStatus(type: string): "pending" | "approved" | "rejected" | "missing" {
@@ -373,6 +435,20 @@ export default function ChauffeurSettingsScreen() {
       )}
 
       <View style={styles.menuGroup}>
+        <Pressable
+          style={[styles.menuItem, { borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" }]}
+          onPress={() => router.push("/chauffeur/navigation-settings" as never)}
+        >
+          <View style={styles.menuIconCircle}>
+            <Ionicons name="navigate-outline" size={20} color={Colors.white} />
+          </View>
+          <View style={styles.menuTextBlock}>
+            <Text style={styles.menuText}>Navigation</Text>
+            <Text style={styles.menuSubText}>App preference & turn-by-turn settings</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+        </Pressable>
+
         <View style={styles.menuItem}>
           <View style={styles.menuIconCircle}>
             <Ionicons name={navigationVoiceEnabled ? "volume-high-outline" : "volume-mute-outline"} size={20} color={Colors.white} />
@@ -605,7 +681,7 @@ export default function ChauffeurSettingsScreen() {
                   <View key={type} style={styles.docItem}>
                     <Pressable
                       style={[styles.docItemInner, isUploading && { opacity: 0.6 }]}
-                      onPress={() => !isUploading && pickAndUploadDocument(type)}
+                      onPress={() => !isUploading && handleSettingsDocumentPress(type, typeName)}
                       disabled={isUploading}
                     >
                       <View style={styles.docIconCircle}>
@@ -613,8 +689,18 @@ export default function ChauffeurSettingsScreen() {
                       </View>
                       <View style={styles.docInfo}>
                         <Text style={styles.docName}>{typeName}</Text>
-                        <Text style={styles.docStatus}>{status === "missing" ? "Tap to upload" : "Tap to re-upload"}</Text>
+                        <Text style={styles.docStatus}>{status === "missing" ? "Tap to upload (Camera/Files)" : "Tap to re-upload"}</Text>
                       </View>
+                      {Platform.OS !== "web" && !isUploading && (
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginRight: 6 }}>
+                          <Pressable style={styles.docQuickBtn} onPress={() => void pickAndUploadDocument(type, "camera")} hitSlop={6}>
+                            <Ionicons name="camera-outline" size={16} color={Colors.white} />
+                          </Pressable>
+                          <Pressable style={styles.docQuickBtn} onPress={() => void pickAndUploadDocument(type, "gallery")} hitSlop={6}>
+                            <Ionicons name="images-outline" size={16} color={Colors.white} />
+                          </Pressable>
+                        </View>
+                      )}
                       {isUploading ? (
                         <ActivityIndicator size="small" color={Colors.white} />
                       ) : (
@@ -622,7 +708,7 @@ export default function ChauffeurSettingsScreen() {
                           <Text style={styles.docBadgeText}>{badge.text}</Text>
                         </View>
                       )}
-                      {status === "missing" && (
+                      {status === "missing" && Platform.OS === "web" && (
                         <Ionicons name="cloud-upload-outline" size={18} color={Colors.textMuted} style={{ marginLeft: 8 }} />
                       )}
                     </Pressable>
@@ -884,6 +970,7 @@ const styles = StyleSheet.create({
   noDataText: { fontSize: 14, fontFamily: "Inter_400Regular", color: Colors.textMuted, textAlign: "center", padding: 20 },
   docItem: { backgroundColor: Colors.surface, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, marginBottom: 8, overflow: "hidden" as const },
   docItemInner: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
+  docQuickBtn: { width: 32, height: 32, borderRadius: 6, backgroundColor: Colors.accent, alignItems: "center", justifyContent: "center" },
   docPreview: { paddingHorizontal: 14, paddingBottom: 12 },
   docPreviewImage: { width: "100%", height: 120, borderRadius: 8, backgroundColor: Colors.accent },
   docIconCircle: { width: 40, height: 40, borderRadius: 10, backgroundColor: Colors.accent, alignItems: "center", justifyContent: "center" },

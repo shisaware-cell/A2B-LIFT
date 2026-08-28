@@ -21,28 +21,48 @@ export function isDriverOverlayAvailable() {
 }
 
 export async function hasDriverOverlayPermission() {
-  return nativeModule ? nativeModule.hasPermission() : false;
+  try {
+    return nativeModule ? await nativeModule.hasPermission() : false;
+  } catch {
+    return false;
+  }
 }
 
 export async function requestDriverOverlayPermission() {
-  return nativeModule ? nativeModule.requestPermission() : false;
+  try {
+    return nativeModule ? await nativeModule.requestPermission() : false;
+  } catch {
+    return false;
+  }
 }
 
 export async function startDriverOverlay(eventCount = 0, tripActive = false, tripLabel = "") {
-  if (!nativeModule) return false;
-  const started = await nativeModule.start(Math.max(0, eventCount));
-  if (started && (tripActive || tripLabel)) {
-    await updateDriverOverlayState({ eventCount, tripActive, tripLabel });
+  try {
+    if (!nativeModule) return false;
+    const started = await nativeModule.start(Math.max(0, eventCount));
+    if (started && (tripActive || tripLabel)) {
+      await updateDriverOverlayState({ eventCount, tripActive, tripLabel });
+    }
+    return started;
+  } catch {
+    return false;
   }
-  return started;
 }
 
 export async function stopDriverOverlay() {
-  return nativeModule ? nativeModule.stop() : false;
+  try {
+    return nativeModule ? await nativeModule.stop() : false;
+  } catch {
+    return false;
+  }
 }
 
 export async function setDriverOverlayEventCount(eventCount: number) {
-  return nativeModule ? nativeModule.setEventCount(Math.max(0, eventCount)) : false;
+  try {
+    return nativeModule ? await nativeModule.setEventCount(Math.max(0, eventCount)) : false;
+  } catch {
+    return false;
+  }
 }
 
 export async function updateDriverOverlayState({
@@ -54,9 +74,13 @@ export async function updateDriverOverlayState({
   tripActive?: boolean;
   tripLabel?: string;
 }) {
-  if (!nativeModule) return false;
-  if (typeof nativeModule.setOverlayState === "function") {
-    return nativeModule.setOverlayState(Math.max(0, eventCount), tripActive, tripLabel);
+  try {
+    if (!nativeModule) return false;
+    if (typeof nativeModule.setOverlayState === "function") {
+      return await nativeModule.setOverlayState(Math.max(0, eventCount), tripActive, tripLabel);
+    }
+    return await nativeModule.setEventCount(Math.max(0, eventCount));
+  } catch {
+    return false;
   }
-  return nativeModule.setEventCount(Math.max(0, eventCount));
 }

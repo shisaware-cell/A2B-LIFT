@@ -57,3 +57,31 @@ export function buildGoogleMapsWebNavigationUrl(
     : "";
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}${waypointParam}&travelmode=driving`;
 }
+
+export function buildWazeNavigationUrl(
+  coordinate: NavigationCoordinate,
+  address?: string,
+  nativeOnly = false,
+) {
+  if (!isValidCoordinate(coordinate)) return null;
+  const lat = formatCoordinate(coordinate.lat);
+  const lng = formatCoordinate(coordinate.lng);
+  const queryParam = address ? `&q=${encodeURIComponent(address)}` : "";
+
+  if (nativeOnly) {
+    return `waze://?ll=${lat},${lng}&navigate=yes${queryParam}`;
+  }
+  return `https://www.waze.com/ul?ll=${lat},${lng}&navigate=yes${queryParam}`;
+}
+
+export function buildAppleMapsNavigationUrl(
+  coordinate: NavigationCoordinate,
+  address?: string,
+) {
+  if (!isValidCoordinate(coordinate)) return null;
+  const lat = formatCoordinate(coordinate.lat);
+  const lng = formatCoordinate(coordinate.lng);
+  const queryParam = address ? `&q=${encodeURIComponent(address)}` : "";
+  return `maps://?daddr=${lat},${lng}&dirflg=d${queryParam}`;
+}
+

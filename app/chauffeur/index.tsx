@@ -39,6 +39,8 @@ import { useSocket } from "@/lib/socket-context";
 import {
   buildGoogleMapsNavigationUrl,
   buildGoogleMapsWebNavigationUrl,
+  buildWazeNavigationUrl,
+  buildAppleMapsNavigationUrl,
 } from "@/lib/google-navigation";
 import Colors from "@/constants/colors";
 import A2BMap from "@/components/A2BMap";
@@ -57,6 +59,10 @@ import {
   setNavigationVoiceEnabled as persistNavigationVoiceEnabled,
   subscribeNavigationVoiceEnabled,
 } from "@/lib/navigation-voice";
+import {
+  getNavigationPreferences,
+  subscribeNavigationPreferences,
+} from "@/lib/navigation-preferences";
 import { getVehicleCategoryTitle } from "@shared/fare-policy";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -341,8 +347,52 @@ export default function ChauffeurDashboard() {
     const coordinate = currentRide.status === "trip_started"
       ? { lat: activeTripTarget.lat, lng: activeTripTarget.lng }
       : { lat: Number(currentRide.pickupLat), lng: Number(currentRide.pickupLng) };
+    const activeAddress = currentRide.status === "trip_started"
+      ? (activeTripTarget.address || currentRide.dropoffAddress || "Destination")
+      : (currentRide.pickupAddress || "Pickup");
     const platform = Platform.OS === "android" ? "android" : Platform.OS === "ios" ? "ios" : "web";
     const waypoints: { lat: number; lng: number }[] = [];
+
+    const prefs = await getNavigationPreferences();
+
+    if (prefs.navigationApp === "a2b") {
+      setShowNavModal(true);
+      return;
+    }
+
+    if (prefs.navigationApp === "waze") {
+      const nativeWazeUrl = buildWazeNavigationUrl(coordinate, activeAddress, true);
+      const webWazeUrl = buildWazeNavigationUrl(coordinate, activeAddress, false);
+
+      if (nativeWazeUrl) {
+        try {
+          if (await Linking.canOpenURL(nativeWazeUrl)) {
+            await Linking.openURL(nativeWazeUrl);
+            return;
+          }
+        } catch {}
+      }
+
+      if (webWazeUrl) {
+        try {
+          await Linking.openURL(webWazeUrl);
+          return;
+        } catch {}
+      }
+    }
+
+    if (prefs.navigationApp === "apple" && platform === "ios") {
+      const appleUrl = buildAppleMapsNavigationUrl(coordinate, activeAddress);
+      if (appleUrl) {
+        try {
+          if (await Linking.canOpenURL(appleUrl)) {
+            await Linking.openURL(appleUrl);
+            return;
+          }
+        } catch {}
+      }
+    }
+
     const appUrl = buildGoogleMapsNavigationUrl(coordinate, platform, waypoints);
     const webUrl = buildGoogleMapsWebNavigationUrl(coordinate, waypoints);
 
@@ -362,6 +412,28 @@ export default function ChauffeurDashboard() {
       Alert.alert("Could not open Maps", "Please check that Google Maps or Waze is installed and try again.");
     }
   }
+
+  const autoNavigatedRideRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentRide) {
+      autoNavigatedRideRef.current = null;
+      return;
+    }
+    const navKey = `${currentRide.id}-${currentRide.status}`;
+    if (autoNavigatedRideRef.current === navKey) return;
+
+    if (currentRide.status === "chauffeur_assigned" || currentRide.status === "chauffeur_arriving" || currentRide.status === "trip_started") {
+      getNavigationPreferences().then((prefs) => {
+        if (prefs.autoNavigate) {
+          autoNavigatedRideRef.current = navKey;
+          const timer = setTimeout(() => {
+            openAcceptedRideNavigation();
+          }, 1800);
+          return () => clearTimeout(timer);
+        }
+      });
+    }
+  }, [currentRide?.id, currentRide?.status]);
 
   function getClientFirstName(name?: string | null, fallback = "Client") {
     const cleaned = String(name || "").trim();
@@ -913,15 +985,43 @@ export default function ChauffeurDashboard() {
       );
     };
 
+    const handleDestinationUpdated = (data: any) => {
+      if (!data?.id) return;
+      const activeRide = currentRideRef.current;
+      if (!activeRide || activeRide.id !== data.id) return;
+      const updatedRide = {
+        ...activeRide,
+        ...data,
+        clientFirstName: data.clientFirstName || activeRide.clientFirstName,
+        clientName: data.clientName || activeRide.clientName,
+        clientPhone: data.clientPhone || activeRide.clientPhone,
+      };
+      routeContextRef.current = null;
+      lastRouteFetchRef.current = null;
+      setCurrentRide(updatedRide);
+      destinationArrivalPromptedRideIdRef.current = null;
+      Alert.alert(
+        "Destination Changed",
+        `The rider changed the destination to:\n${data.dropoffAddress || "New location"}\n\nThe route and fare have been updated.`,
+      );
+      if (Platform.OS !== "web") {
+        try {
+          Speech.speak(`The destination has been changed to ${data.dropoffAddress || "a new address"}.`, { language: "en-ZA" });
+        } catch {}
+      }
+    };
+
     on("ride:statusUpdate", handleRideUpdate);
     on("ride:cancelled", handleRideUpdate);
     on("ride:accepted", handleRideAccepted);
     on("ride:stopsUpdated", handleStopsUpdated);
+    on("ride:destinationUpdated", handleDestinationUpdated);
     return () => {
       off("ride:statusUpdate", handleRideUpdate);
       off("ride:cancelled", handleRideUpdate);
       off("ride:accepted", handleRideAccepted);
       off("ride:stopsUpdated", handleStopsUpdated);
+      off("ride:destinationUpdated", handleDestinationUpdated);
     };
   }, [chauffeur?.id]);
 
@@ -2437,7 +2537,8 @@ export default function ChauffeurDashboard() {
           showDriver={true}
           followDriver={!!currentRide}
           loading={!myLocation && isOnline}
-          initialZoom={currentRide ? "street" : "city"}
+          initialZoom="city"
+          recenterBottom={isOnline && !currentRide ? (availableTrips.length > 0 ? 215 : 165) : currentRide ? 260 : 120}
         />
       </View>
 
@@ -2478,19 +2579,31 @@ export default function ChauffeurDashboard() {
         <Text style={styles.pillText}>{isOnline ? "Online" : "Offline"}</Text>
       </Pressable>
 
-      <Pressable
-        style={[styles.activeVehiclePill, { top: insets.top + 66 }]}
-        onPress={() => router.push("/chauffeur/vehicles" as never)}
-      >
-        <Ionicons name={chauffeur.activeVehicleId ? "car-sport-outline" : "alert-circle-outline"} size={15} color={chauffeur.activeVehicleId ? Colors.success : Colors.warning} />
-        <Text style={styles.activeVehicleText} numberOfLines={1}>
-          {activeVehicle
-            ? `${activeVehicle.carMake} ${activeVehicle.vehicleModel} · ${activeVehicle.plateNumber}`
-            : chauffeur.activeVehicleId
-              ? "Selected vehicle"
-              : "Select vehicle before going online"}
-        </Text>
-      </Pressable>
+      {/* ─── Bottom-Left Green Vehicle Button ─── */}
+      {!currentRide && (
+        <Pressable
+          style={[
+            styles.greenVehicleBtn,
+            { bottom: insets.bottom + (isOnline ? 100 : 24) },
+            !chauffeur.activeVehicleId && styles.greenVehicleBtnWarning,
+          ]}
+          onPress={() => router.push("/chauffeur/vehicles" as never)}
+          accessibilityLabel="Vehicle selection"
+          accessibilityRole="button"
+          hitSlop={8}
+        >
+          <Ionicons name="car-sport" size={26} color="#FFFFFF" />
+          {chauffeur.activeVehicleId ? (
+            <View style={styles.greenVehicleCheckBadge}>
+              <Ionicons name="checkmark" size={10} color="#FFFFFF" />
+            </View>
+          ) : (
+            <View style={styles.greenVehicleWarningBadge}>
+              <Ionicons name="alert" size={10} color="#FFFFFF" />
+            </View>
+          )}
+        </Pressable>
+      )}
 
       {/* ─── Today's earnings (top-right, taps to wallet) ─── */}
       <Pressable style={[styles.floatEarnings, { top: insets.top + 16 }]} onPress={() => router.push("/chauffeur/wallet")}>
@@ -3138,8 +3251,53 @@ const styles = StyleSheet.create({
   onlinePillOff: { backgroundColor: GLASS, borderColor: GLASS_BORDER },
   pillDot: { width: 8, height: 8, borderRadius: 4 },
   pillText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.white },
-  activeVehiclePill: { position: "absolute", left: 16, right: 120, flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14, backgroundColor: GLASS, borderWidth: 1, borderColor: GLASS_BORDER, zIndex: 5 },
-  activeVehicleText: { flex: 1, fontSize: 12, fontFamily: "Inter_600SemiBold", color: Colors.white },
+  greenVehicleBtn: {
+    position: "absolute",
+    left: 16,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#16A34A",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 8,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.2)",
+    zIndex: 20,
+  },
+  greenVehicleBtnWarning: {
+    backgroundColor: "#EAB308",
+  },
+  greenVehicleCheckBadge: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#22C55E",
+    borderWidth: 1.5,
+    borderColor: "#000000",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  greenVehicleWarningBadge: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#EF4444",
+    borderWidth: 1.5,
+    borderColor: "#000000",
+    alignItems: "center",
+    justifyContent: "center",
+  },
 
   floatBell: { position: "absolute", right: 76, width: 44, height: 44, borderRadius: 22, backgroundColor: GLASS, borderWidth: 1, borderColor: GLASS_BORDER, alignItems: "center", justifyContent: "center", zIndex: 5 },
   bellBadge: { position: "absolute", top: -2, right: -2, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: Colors.error, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 },

@@ -152,6 +152,8 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
         "android.permission.ACCESS_BACKGROUND_LOCATION",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+        "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",

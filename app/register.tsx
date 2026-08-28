@@ -23,6 +23,19 @@ function isAuthCallback(url: string) {
   return Linking.parse(url).path === "auth";
 }
 
+function formatPhoneLocalDisplay(raw: string): string {
+  let cleaned = raw.replace(/[^\d+]/g, "");
+  if (cleaned.startsWith("+27")) cleaned = cleaned.slice(3);
+  else if (cleaned.startsWith("27")) cleaned = cleaned.slice(2);
+  if (cleaned.startsWith("0")) cleaned = cleaned.slice(1);
+  return cleaned;
+}
+
+function normalizeSouthAfricanPhone(raw: string): string {
+  const local = formatPhoneLocalDisplay(raw);
+  return local ? `+27${local}` : "";
+}
+
 export default function RegisterScreen() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ ref?: string }>();
@@ -30,8 +43,9 @@ export default function RegisterScreen() {
   const appVariant = getAppVariant();
   const shouldShowRoleSelect = usesRoleSelect(appVariant);
   const postRegistrationRoute = appVariant === "driver" ? "/chauffeur-onboarding" : getAuthenticatedHomeRoute(appVariant);
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [phoneLocal, setPhoneLocal] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [referralCode, setReferralCode] = useState("");
@@ -108,11 +122,13 @@ export default function RegisterScreen() {
   }
 
   async function handleRegister() {
-    if (!name.trim()) { setError("Full name is required"); return; }
+    if (!firstName.trim()) { setError("Name is required"); return; }
+    if (!lastName.trim()) { setError("Surname is required"); return; }
     if (!email.trim()) { setError("Email is required"); return; }
     const emailValidation = validateEmailAddress(email);
     if (!emailValidation.valid) { setError(emailValidation.message || "Please enter a valid email address"); return; }
-    if (!phone.trim()) { setError("Phone number is required"); return; }
+    const normalizedPhone = normalizeSouthAfricanPhone(phoneLocal);
+    if (!normalizedPhone || normalizedPhone.length < 11) { setError("Please enter a valid South African phone number"); return; }
     if (!password.trim()) { setError("Password is required"); return; }
     if (password.length < 4) { setError("Password must be at least 4 characters"); return; }
     setLoading(true); setError("");
@@ -130,8 +146,8 @@ export default function RegisterScreen() {
       await register({
         username: emailValidation.normalized,
         password,
-        name: name.trim(),
-        phone: phone.trim(),
+        name: `${firstName.trim()} ${lastName.trim()}`,
+        phone: normalizedPhone,
         referralCode: referralCode.trim() || undefined,
       });
       await setPendingReferralCode(null);
@@ -180,8 +196,50 @@ export default function RegisterScreen() {
             <Text style={styles.label}>Full Name <Text style={styles.required}>*</Text></Text>
             <View style={styles.inputWrapper}>
               <Ionicons name="person-outline" size={18} color={Colors.textMuted} />
-              <TextInput style={styles.input} placeholder="Enter your full name" placeholderTextColor={Colors.textMuted}
-                value={name} onChangeText={setName} autoCorrect={false} />
+              <TextInput
+                style={styles.input}
+                placeholder="First and middle names"
+                placeholderTextColor={Colors.textMuted}
+                value={firstName}
+                onChangeText={setFirstName}
+                autoCorrect={false}
+              />
+            </View>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Surname <Text style={styles.required}>*</Text></Text>
+            <View style={styles.inputWrapper}>
+              <Ionicons name="person-outline" size={18} color={Colors.textMuted} />
+              <TextInput
+                style={styles.input}
+                placeholder="Surname"
+                placeholderTextColor={Colors.textMuted}
+                value={lastName}
+                onChangeText={setLastName}
+                autoCorrect={false}
+              />
+            </View>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Phone Number <Text style={styles.required}>*</Text></Text>
+            <View style={styles.phoneInputRow}>
+              <View style={styles.phonePrefixBadge}>
+                <Text style={styles.phonePrefixText}>+27</Text>
+              </View>
+              <View style={[styles.inputWrapper, { flex: 1 }]}>
+                <Ionicons name="call-outline" size={18} color={Colors.textMuted} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="82 123 4567"
+                  placeholderTextColor={Colors.textMuted}
+                  value={phoneLocal}
+                  onChangeText={(text) => setPhoneLocal(formatPhoneLocalDisplay(text))}
+                  keyboardType="phone-pad"
+                  maxLength={12}
+                />
+              </View>
             </View>
           </View>
 
@@ -189,28 +247,45 @@ export default function RegisterScreen() {
             <Text style={styles.label}>Email <Text style={styles.required}>*</Text></Text>
             <View style={styles.inputWrapper}>
               <Ionicons name="mail-outline" size={18} color={Colors.textMuted} />
-              <TextInput style={styles.input} placeholder="Enter your email address" placeholderTextColor={Colors.textMuted}
-                value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false}
-                keyboardType="email-address" textContentType="emailAddress" />
+              <TextInput
+                style={styles.input}
+                placeholder="Enter your email address"
+                placeholderTextColor={Colors.textMuted}
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                textContentType="emailAddress"
+              />
             </View>
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Phone Number <Text style={styles.required}>*</Text></Text>
+            <Text style={styles.label}>Password <Text style={styles.required}>*</Text></Text>
             <View style={styles.inputWrapper}>
-              <Ionicons name="call-outline" size={18} color={Colors.textMuted} />
-              <TextInput style={styles.input} placeholder="Enter your phone number" placeholderTextColor={Colors.textMuted}
-                value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+              <Ionicons name="lock-closed-outline" size={18} color={Colors.textMuted} />
+              <TextInput
+                style={styles.input}
+                placeholder="Create a password"
+                placeholderTextColor={Colors.textMuted}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+              />
+              <Pressable onPress={() => setShowPassword(!showPassword)} hitSlop={8}>
+                <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={18} color={Colors.textMuted} />
+              </Pressable>
             </View>
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Reward Code</Text>
+            <Text style={styles.label}>Reward Code (Optional)</Text>
             <View style={styles.inputWrapper}>
               <Ionicons name="gift-outline" size={18} color={Colors.textMuted} />
               <TextInput
                 style={styles.input}
-                placeholder="Optional"
+                placeholder="Referral code (optional)"
                 placeholderTextColor={Colors.textMuted}
                 value={referralCode}
                 onChangeText={(value) => setReferralCode(value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
@@ -218,18 +293,6 @@ export default function RegisterScreen() {
                 autoCorrect={false}
                 maxLength={20}
               />
-            </View>
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
-            <View style={styles.inputWrapper}>
-              <Ionicons name="lock-closed-outline" size={18} color={Colors.textMuted} />
-              <TextInput style={styles.input} placeholder="Create a password" placeholderTextColor={Colors.textMuted}
-                value={password} onChangeText={setPassword} secureTextEntry={!showPassword} />
-              <Pressable onPress={() => setShowPassword(!showPassword)} hitSlop={8}>
-                <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={18} color={Colors.textMuted} />
-              </Pressable>
             </View>
           </View>
 
@@ -305,11 +368,24 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, fontFamily: "Inter_700Bold", color: Colors.white, marginBottom: 8 },
   subtitle: { fontSize: 15, fontFamily: "Inter_400Regular", color: Colors.textSecondary },
   form: { gap: 16 },
+  nameRow: { flexDirection: "row", gap: 12 },
   errorBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(255,77,77,0.1)", padding: 12, borderRadius: 10, borderWidth: 1, borderColor: "rgba(255,77,77,0.2)" },
   errorText: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.error },
   inputGroup: { gap: 8 },
   label: { fontSize: 12, fontFamily: "Inter_500Medium", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 1 },
   required: { color: Colors.error, fontSize: 12 },
+  phoneInputRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  phonePrefixBadge: {
+    paddingHorizontal: 14,
+    paddingVertical: 15,
+    borderRadius: 12,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  phonePrefixText: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.white },
   inputWrapper: { flexDirection: "row", alignItems: "center", backgroundColor: Colors.card, borderRadius: 12, paddingHorizontal: 16, gap: 12, borderWidth: 1, borderColor: Colors.border },
   input: { flex: 1, paddingVertical: 15, fontSize: 15, fontFamily: "Inter_400Regular", color: Colors.white },
   registerBtn: { backgroundColor: Colors.white, paddingVertical: 15, borderRadius: 14, alignItems: "center", marginTop: 4 },

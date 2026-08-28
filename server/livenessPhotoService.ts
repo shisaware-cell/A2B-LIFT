@@ -10,6 +10,7 @@
 import { db } from "./db";
 import { livenessSessions, rides } from "../shared/schema";
 import { eq } from "drizzle-orm";
+import { storeMediaObject } from "./media-object-store";
 
 export type PhotoType = "liveness" | "cash_selfie";
 
@@ -34,7 +35,7 @@ const SUPABASE_URL =
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
 /**
- * Upload a photo to the appropriate Supabase bucket and update the DB record.
+ * Upload a photo to the appropriate bucket / media store and update the DB record.
  */
 export async function uploadLivenessPhoto(
   params: UploadPhotoParams
@@ -64,36 +65,59 @@ export async function uploadLivenessPhoto(
       ? `rides/${rideId ?? safeSession}/${safeUser}_cash_selfie_${timestamp}.${ext}`
       : `sessions/${safeSession}/${safeUser}_liveness_${timestamp}.${ext}`;
 
-  // ── Upload to Supabase Storage ─────────────────────────────────────────────
-  const uploadRes = await fetch(
-    `${SUPABASE_URL}/storage/v1/object/${bucket}/${storagePath}`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-        apikey: SUPABASE_SERVICE_KEY,
-        "Content-Type": mimeType,
-        "x-upsert": "false",
-      },
-      body: buffer,
-    }
-  );
+  let publicUrl = "";
 
-  if (!uploadRes.ok) {
-    const errText = await uploadRes.text().catch(() => uploadRes.statusText);
-    console.error("[livenessPhotoService] upload error:", uploadRes.status, errText);
-    return { success: false, error: errText };
+  // ── 1. Attempt upload to Supabase Storage ──────────────────────────────────
+  try {
+    const uploadRes = await fetch(
+      `${SUPABASE_URL}/storage/v1/object/${bucket}/${storagePath}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+          apikey: SUPABASE_SERVICE_KEY,
+          "Content-Type": mimeType,
+          "x-upsert": "false",
+        },
+        body: buffer,
+      }
+    );
+
+    if (uploadRes.ok) {
+      publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${storagePath}`;
+    } else {
+      const errText = await uploadRes.text().catch(() => uploadRes.statusText);
+      console.warn("[livenessPhotoService] Supabase upload failed, falling back to local media store:", errText);
+    }
+  } catch (e: any) {
+    console.warn("[livenessPhotoService] Supabase upload error, falling back to local media store:", e.message);
   }
 
-  const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${storagePath}`;
+  // ── 2. Fallback to PostgreSQL Media Object Store ───────────────────────────
+  let finalStorageRef = storagePath;
+  if (!publicUrl) {
+    try {
+      const mediaId = await storeMediaObject({
+        ownerUserId: safeUser,
+        purpose: photoType,
+        mimeType,
+        data: buffer,
+      });
+      publicUrl = `https://a2blift.com/api/media/${mediaId}`;
+      finalStorageRef = publicUrl;
+    } catch (fallbackErr: any) {
+      console.error("[livenessPhotoService] Media store fallback error:", fallbackErr.message);
+      return { success: false, error: fallbackErr.message };
+    }
+  }
 
-  // ── Update DB record ───────────────────────────────────────────────────────
+  // ── 3. Update DB record ───────────────────────────────────────────────────
   try {
     if (photoType === "liveness") {
       await db
         .update(livenessSessions)
         .set({
-          verifiedPhotoUrl: storagePath,
+          verifiedPhotoUrl: finalStorageRef,
           rideId: rideId ?? null,
           updatedAt: new Date(),
         })
@@ -101,15 +125,14 @@ export async function uploadLivenessPhoto(
     } else {
       await db
         .update(rides)
-        .set({ cashSelfieUrl: storagePath })
+        .set({ cashSelfieUrl: finalStorageRef })
         .where(eq(rides.id, rideId ?? sessionId));
     }
   } catch (dbErr: any) {
     console.warn("[livenessPhotoService] DB update error:", dbErr.message);
-    // Not fatal — photo is stored, admin can still view it
   }
 
-  return { success: true, storagePath, publicUrl };
+  return { success: true, storagePath: finalStorageRef, publicUrl };
 }
 
 /**

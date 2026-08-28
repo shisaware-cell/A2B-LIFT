@@ -1,5 +1,6 @@
-import React, { useRef, useEffect, useMemo } from "react";
-import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
+import React, { useRef, useEffect, useMemo, useCallback } from "react";
+import { View, Text, StyleSheet, ActivityIndicator, Pressable } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import Colors from "@/constants/colors";
 
@@ -8,6 +9,8 @@ const GOOGLE_MAPS_API_KEY =
   process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY ||
   Constants.expoConfig?.extra?.googleMapsApiKey ||
   "";
+
+const DEFAULT_REGION = { lat: -26.2041, lng: 28.0473 };
 
 const DARK_MAP_STYLES = `&style=element:geometry%7Ccolor:0x1d1d1d&style=element:labels.icon%7Cvisibility:off&style=element:labels.text.fill%7Ccolor:0x757575&style=element:labels.text.stroke%7Ccolor:0x212121&style=feature:road%7Celement:geometry.fill%7Ccolor:0x2c2c2c&style=feature:road.highway%7Celement:geometry%7Ccolor:0x3c3c3c&style=feature:water%7Celement:geometry%7Ccolor:0x0e0e0e`;
 
@@ -79,6 +82,8 @@ interface A2BMapProps {
   statusText?: string;
   initialZoom?: "street" | "city";
   mapMode?: "auto" | "dark" | "light";
+  recenterBottom?: number;
+  onRecenter?: () => void;
 }
 
 export default function A2BMap({
@@ -94,9 +99,12 @@ export default function A2BMap({
   loading = false,
   etaText,
   statusText,
-  initialZoom = "street",
+  initialZoom = "city",
   mapMode = "auto",
+  recenterBottom,
+  onRecenter,
 }: A2BMapProps & { followDriver?: boolean }) {
+  const idleZoom = initialZoom === "street" ? 17 : 13;
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
@@ -109,8 +117,65 @@ export default function A2BMap({
     return decodePolyline(routePolyline);
   }, [routePolyline]);
 
+  const activeCenter = pickupLocation || driverLocation || DEFAULT_REGION;
+
+  const [isMapMoved, setIsMapMoved] = useState(false);
+
+  const fitMap = useCallback(() => {
+    if (!mapInstanceRef.current) return;
+    const google = (window as any).google;
+    if (!google?.maps) return;
+
+    setIsMapMoved(false);
+
+    const hasRoute = routeCoords.length > 0;
+    const hasTripPins = !!(pickupLocation && dropoffLocation);
+
+    if (hasRoute || hasTripPins) {
+      const bounds = new google.maps.LatLngBounds();
+      let count = 0;
+      if (driverLocation && isFinite(driverLocation.lat) && isFinite(driverLocation.lng) && driverLocation.lat !== 0) {
+        bounds.extend({ lat: driverLocation.lat, lng: driverLocation.lng });
+        count++;
+      }
+      if (pickupLocation && isFinite(pickupLocation.lat) && isFinite(pickupLocation.lng) && pickupLocation.lat !== 0) {
+        bounds.extend({ lat: pickupLocation.lat, lng: pickupLocation.lng });
+        count++;
+      }
+      if (dropoffLocation && isFinite(dropoffLocation.lat) && isFinite(dropoffLocation.lng) && dropoffLocation.lat !== 0) {
+        bounds.extend({ lat: dropoffLocation.lat, lng: dropoffLocation.lng });
+        count++;
+      }
+      stopLocations.forEach((s) => {
+        if (isFinite(s.lat) && isFinite(s.lng) && s.lat !== 0) {
+          bounds.extend({ lat: s.lat, lng: s.lng });
+          count++;
+        }
+      });
+      routeCoords.forEach((c) => {
+        bounds.extend(c);
+        count++;
+      });
+      if (count > 0) {
+        mapInstanceRef.current.fitBounds(bounds, { top: 60, right: 40, bottom: 160, left: 40 });
+        return;
+      }
+    }
+
+    if (driverLocation && isFinite(driverLocation.lat) && isFinite(driverLocation.lng) && driverLocation.lat !== 0) {
+      mapInstanceRef.current.panTo({ lat: driverLocation.lat, lng: driverLocation.lng });
+      mapInstanceRef.current.setZoom(idleZoom);
+    } else if (pickupLocation && isFinite(pickupLocation.lat) && isFinite(pickupLocation.lng) && pickupLocation.lat !== 0) {
+      mapInstanceRef.current.panTo({ lat: pickupLocation.lat, lng: pickupLocation.lng });
+      mapInstanceRef.current.setZoom(idleZoom);
+    } else {
+      mapInstanceRef.current.panTo({ lat: DEFAULT_REGION.lat, lng: DEFAULT_REGION.lng });
+      mapInstanceRef.current.setZoom(13);
+    }
+  }, [driverLocation, routeCoords, pickupLocation, dropoffLocation, stopLocations, idleZoom]);
+
   useEffect(() => {
-    if (!GOOGLE_MAPS_API_KEY || !pickupLocation) return;
+    if (!GOOGLE_MAPS_API_KEY || (!pickupLocation && !driverLocation && loading)) return;
     if (scriptLoadedRef.current) {
       initMap();
       return;
@@ -137,10 +202,10 @@ export default function A2BMap({
       initMap();
     };
     document.head.appendChild(script);
-  }, [pickupLocation]);
+  }, [pickupLocation?.lat, pickupLocation?.lng, driverLocation?.lat, driverLocation?.lng, loading]);
 
   useEffect(() => {
-    if (!mapInstanceRef.current || !pickupLocation) return;
+    if (!mapInstanceRef.current || (!pickupLocation && !driverLocation)) return;
     // Small delay so Google Maps finishes rendering before we fit bounds
     const t = setTimeout(() => updateMarkers(), 200);
     return () => clearTimeout(t);
@@ -152,7 +217,7 @@ export default function A2BMap({
   }, [routeCoords]);
 
   function initMap() {
-    if (!mapContainerRef.current || !pickupLocation) return;
+    if (!mapContainerRef.current || (!pickupLocation && !driverLocation && loading)) return;
     const google = (window as any).google;
     if (!google?.maps) return;
 
@@ -171,13 +236,16 @@ export default function A2BMap({
 
     const isEffectiveDay = mapMode === "dark" ? false : mapMode === "light" ? true : isDaytimeNow();
     const map = new google.maps.Map(mapContainerRef.current, {
-      center: { lat: pickupLocation.lat, lng: pickupLocation.lng },
-      zoom: initialZoom === "city" ? 12 : 17,
+      center: { lat: activeCenter.lat, lng: activeCenter.lng },
+      zoom: initialZoom === "city" ? 13 : 17,
       styles: isEffectiveDay ? LIGHT_MAP_JS_STYLE : darkStyle,
       disableDefaultUI: true,
       gestureHandling: "greedy",
       backgroundColor: isEffectiveDay ? "#E9ECEF" : "#1d1d1d",
     });
+
+    map.addListener("dragend", () => setIsMapMoved(true));
+    map.addListener("zoom_changed", () => setIsMapMoved(true));
 
     mapInstanceRef.current = map;
     updateMarkers();
@@ -329,7 +397,7 @@ export default function A2BMap({
     );
   }
 
-  if (loading || !pickupLocation) {
+  if (loading || (!pickupLocation && !driverLocation)) {
     return (
       <View style={styles.fallback}>
         <ActivityIndicator size="large" color={Colors.white} />
@@ -345,13 +413,32 @@ export default function A2BMap({
         style={{ width: "100%", height: "100%", backgroundColor: "#1d1d1d" }}
       />
       {statusText && (
-        <View style={styles.statusOverlay}>
+        <View style={styles.statusOverlay} pointerEvents="none">
           <Text style={styles.statusOverlayText}>{statusText}</Text>
           {etaText && <Text style={styles.etaOverlayText}>{etaText}</Text>}
         </View>
       )}
-      <View style={styles.gradientTop} />
-      <View style={styles.gradientBottom} />
+
+      {isMapMoved && (
+        <Pressable
+          style={[
+            styles.recenterBtn,
+            recenterBottom != null && { bottom: recenterBottom },
+          ]}
+          onPress={() => {
+            fitMap();
+            onRecenter?.();
+          }}
+          accessibilityLabel="Recenter Map"
+          accessibilityRole="button"
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <Ionicons name="locate" size={24} color="#000000" />
+        </Pressable>
+      )}
+
+      <View pointerEvents="none" style={styles.gradientTop} />
+      <View pointerEvents="none" style={styles.gradientBottom} />
     </View>
   );
 }
@@ -394,6 +481,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Inter_400Regular",
     color: Colors.textSecondary,
+  },
+  recenterBtn: {
+    position: "absolute",
+    right: 18,
+    bottom: 220,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+    zIndex: 20,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
   },
   gradientTop: {
     position: "absolute",

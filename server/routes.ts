@@ -32,6 +32,15 @@ import { authOptional, requireAuth, requireRole, type AuthedRequest } from "./au
 import { signAccessToken, type UserRole } from "./auth";
 import { externalApiService } from "./external-api-service";
 import { sendEmail, sendSms, renderBrandedEmail, emailEnabled, smsEnabled } from "./notification-service";
+import {
+  sendDriverSignupReceivedEmail,
+  sendDriverApprovedEmail,
+  sendDriverRejectedEmail,
+  sendVehicleApprovedEmail,
+  sendVehicleRejectedEmail,
+  sendDocumentApprovedEmail,
+  sendDocumentRejectedEmail,
+} from "./email-templates";
 import { sendTripInvoiceEmail } from "./trip-invoice";
 import { normalizeRideStops } from "../shared/ride-stops";
 import {
@@ -4563,7 +4572,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const VEHICLE_REQUIRED_DOCS = new Set([
     "vehicle:double_license_disk",
     "vehicle:passenger_liability_insurance",
+  ]);
+  const ALLOWED_VEHICLE_DOCS = new Set([
+    "vehicle:double_license_disk",
+    "vehicle:passenger_liability_insurance",
+    "vehicle:insurance",
+    "vehicle:inspection_photos",
+    "vehicle:photo_front",
+    "vehicle:photo_back",
+    "vehicle:photo_left",
+    "vehicle:photo_right",
+    "vehicle:photo_inside",
     "vehicle:dekra_report",
+    "double_license_disk",
+    "passenger_liability_insurance",
+    "insurance",
+    "inspection_photos",
+    "photo_front",
+    "photo_back",
+    "photo_left",
+    "photo_right",
+    "photo_inside",
+    "dekra_report",
   ]);
 
   function requireStringField(body: any, field: string) {
@@ -4707,6 +4737,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const type = requireStringField(req.body, "type");
       const url = requireStringField(req.body, "url");
+      if (url.startsWith("file:") || url.startsWith("content:")) {
+        return res.status(400).json({ message: "Invalid document URL. Documents must be uploaded via /api/upload-document." });
+      }
       if (!type.startsWith("driver:") && !type.startsWith("partner:")) {
         return res.status(400).json({ message: "Document type must start with driver: or partner:" });
       }
@@ -4794,6 +4827,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           submittedAt: new Date(),
         });
       }
+
+      try {
+        const user = await storage.getUser(req.auth!.sub);
+        if (user?.email) {
+          await sendDriverSignupReceivedEmail({
+            to: user.email,
+            name: user.name,
+          }).catch((err) => console.warn("[email] sendDriverSignupReceivedEmail error:", err?.message || err));
+        }
+      } catch {}
 
       return res.status(201).json({ profile, chauffeur, application });
     } catch (error: any) {
@@ -4997,10 +5040,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (vehicle.ownerOperatorProfileId !== profile.id && req.auth!.role !== "admin") {
         return res.status(403).json({ message: "Forbidden" });
       }
-      const type = requireStringField(req.body, "type");
+      let type = requireStringField(req.body, "type");
       const url = requireStringField(req.body, "url");
-      if (!VEHICLE_REQUIRED_DOCS.has(type)) {
+      if (url.startsWith("file:") || url.startsWith("content:")) {
+        return res.status(400).json({ message: "Invalid document URL. Documents must be uploaded via /api/upload-document." });
+      }
+      if (!ALLOWED_VEHICLE_DOCS.has(type) && !ALLOWED_VEHICLE_DOCS.has(`vehicle:${type}`)) {
         return res.status(400).json({ message: "Invalid vehicle document type" });
+      }
+      if (!type.startsWith("vehicle:")) {
+        type = `vehicle:${type}`;
       }
       const doc = await storage.createDocument({
         userId: req.auth!.sub,
@@ -5028,10 +5077,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const docs = await storage.getDocumentsByVehicle(vehicle.id);
       const uploadedTypes = new Set(docs.map((doc) => doc.type));
+      const hasPhotos = uploadedTypes.has("vehicle:inspection_photos") ||
+        (uploadedTypes.has("vehicle:photo_front") &&
+         uploadedTypes.has("vehicle:photo_back") &&
+         uploadedTypes.has("vehicle:photo_left") &&
+         uploadedTypes.has("vehicle:photo_right") &&
+         uploadedTypes.has("vehicle:photo_inside")) ||
+        uploadedTypes.has("vehicle:dekra_report");
+
       const missingDocs = [...VEHICLE_REQUIRED_DOCS].filter((type) => !uploadedTypes.has(type));
+      if (!hasPhotos) {
+        missingDocs.push("vehicle:inspection_photos");
+      }
       if (missingDocs.length > 0) {
         return res.status(400).json({
-          message: `Please upload all required vehicle documents: ${missingDocs.map((type) => type.replace("vehicle:", "")).join(", ")}`,
+          message: `Please upload all required vehicle documents: ${missingDocs.map((type) => type.replace("vehicle:", "").replace(/_/g, " ")).join(", ")}`,
         });
       }
       const updated = await storage.updateVehicle(vehicle.id, { status: "pending", submittedAt: new Date(), rejectionReason: null });
@@ -7352,6 +7412,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }).catch((error: any) => {
         console.warn("[admin/vehicles] notification skipped:", error?.message || error);
       });
+
+      try {
+        const ownerUser = await storage.getUser(ownerProfile.userId);
+        if (ownerUser?.email) {
+          if (status === "approved") {
+            await sendVehicleApprovedEmail({
+              to: ownerUser.email,
+              name: ownerUser.name,
+              carMake: vehicle.carMake,
+              vehicleModel: vehicle.vehicleModel,
+              plateNumber: vehicle.plateNumber,
+            }).catch((e) => console.warn("[email] sendVehicleApprovedEmail error:", e?.message || e));
+          } else if (status === "rejected" || status === "suspended") {
+            await sendVehicleRejectedEmail({
+              to: ownerUser.email,
+              name: ownerUser.name,
+              carMake: vehicle.carMake,
+              vehicleModel: vehicle.vehicleModel,
+              plateNumber: vehicle.plateNumber,
+              reason: reason || null,
+            }).catch((e) => console.warn("[email] sendVehicleRejectedEmail error:", e?.message || e));
+          }
+        }
+      } catch {}
+
       return res.json(await serializeVehicle(updated));
     } catch (error: any) {
       return res.status(400).json({ message: error.message });
@@ -7362,6 +7447,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const vehicle = await storage.getVehicle(req.params.id);
       if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
+      const previousStatus = vehicle.status;
       const update: any = {};
       for (const field of ["carMake", "vehicleModel", "plateNumber", "vehicleType", "carColor", "status", "rejectionReason"] as const) {
         if (req.body[field] !== undefined) update[field] = String(req.body[field]).trim();
@@ -7370,6 +7456,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (req.body.passengerCapacity !== undefined) update.passengerCapacity = Number.parseInt(String(req.body.passengerCapacity), 10) || 4;
       if (req.body.luggageCapacity !== undefined) update.luggageCapacity = Number.parseInt(String(req.body.luggageCapacity), 10) || 2;
       const updated = await storage.updateVehicle(vehicle.id, update);
+
+      if (update.status && update.status !== previousStatus) {
+        try {
+          const ownerProfile = await storage.getOperatorProfile(vehicle.ownerOperatorProfileId);
+          if (ownerProfile) {
+            const ownerUser = await storage.getUser(ownerProfile.userId);
+            if (ownerUser?.email) {
+              if (update.status === "approved") {
+                await sendVehicleApprovedEmail({
+                  to: ownerUser.email,
+                  name: ownerUser.name,
+                  carMake: update.carMake || vehicle.carMake,
+                  vehicleModel: update.vehicleModel || vehicle.vehicleModel,
+                  plateNumber: update.plateNumber || vehicle.plateNumber,
+                }).catch(() => undefined);
+              } else if (update.status === "rejected" || update.status === "suspended") {
+                await sendVehicleRejectedEmail({
+                  to: ownerUser.email,
+                  name: ownerUser.name,
+                  carMake: update.carMake || vehicle.carMake,
+                  vehicleModel: update.vehicleModel || vehicle.vehicleModel,
+                  plateNumber: update.plateNumber || vehicle.plateNumber,
+                  reason: update.rejectionReason || null,
+                }).catch(() => undefined);
+              }
+            }
+          }
+        } catch {}
+      }
+
       return res.json(await serializeVehicle(updated));
     } catch (error: any) {
       return res.status(400).json({ message: error.message });
@@ -7438,6 +7554,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
             : `Your driver application was not approved.${notes ? ` Reason: ${String(notes).trim()}.` : ""}`,
           data: { driverApplicationId: updated.id, operatorProfileId: profile?.id },
         });
+
+        try {
+          const driverUser = await storage.getUser(updated.userId);
+          if (driverUser?.email) {
+            if (status === "approved") {
+              await sendDriverApprovedEmail({
+                to: driverUser.email,
+                name: driverUser.name,
+              }).catch((e) => console.warn("[email] sendDriverApprovedEmail error:", e?.message || e));
+            } else if (status === "rejected" || status === "waitlisted") {
+              await sendDriverRejectedEmail({
+                to: driverUser.email,
+                name: driverUser.name,
+                reason: notes ? String(notes).trim() : null,
+              }).catch((e) => console.warn("[email] sendDriverRejectedEmail error:", e?.message || e));
+            }
+          }
+        } catch {}
       }
 
       return res.json(updated);
@@ -7470,34 +7604,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (base64Data.length > 7_000_000) {
         return res.status(400).json({ message: "Image too large. Maximum 5 MB." });
       }
-      const SUPABASE_URL = process.env.SUPABASE_URL || "https://zzwkieiktbhptvgsqerd.supabase.co";
-      const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-      const BUCKET = "driver-documents";
+      const normalizedBase64 = String(base64Data).replace(/^data:[^;]+;base64,/, "").replace(/\s/g, "");
+      const buffer = Buffer.from(normalizedBase64, "base64");
       const safeId = chauffeurId.replace(/[^a-zA-Z0-9_-]/g, "");
-      const fileName = `${safeId}/profile_${Date.now()}.jpg`;
-      const buffer = Buffer.from(base64Data, "base64");
-      const uploadRes = await fetch(
-        `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${fileName}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-            apikey: SUPABASE_SERVICE_KEY,
-            "Content-Type": "image/jpeg",
-            "x-upsert": "true",
-          },
-          body: buffer,
-        },
-      );
-      if (!uploadRes.ok) {
-        const errText = await uploadRes.text().catch(() => uploadRes.statusText);
-        console.error("[upload/profile-photo] Supabase error:", uploadRes.status, errText);
-        if (uploadRes.status === 401 || uploadRes.status === 403) {
-          return res.status(500).json({ message: "Photo upload failed: Supabase service key not configured. Please add SUPABASE_SERVICE_ROLE_KEY to environment secrets." });
-        }
-        return res.status(500).json({ message: `Photo upload failed (${uploadRes.status}): ${errText}` });
-      }
-      const url = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${fileName}`;
+
+      const storedMediaId = await storeMediaObject({
+        ownerUserId: safeId,
+        purpose: "profile_photo",
+        mimeType: "image/jpeg",
+        data: buffer,
+      });
+
+      const url = `https://a2blift.com/api/media/${storedMediaId}`;
       // Persist the photo URL in the chauffeur profile immediately
       try {
         await storage.updateChauffeur(chauffeurId, { profilePhoto: url });
@@ -7509,79 +7627,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── Document upload proxy (server → Supabase, bypasses client CORS/RLS) ──
+  // ── Document upload proxy (stored reliably in Postgres media object store) ──
   app.post("/api/upload-document", authOptional, async (req: AuthedRequest, res: Response) => {
     try {
-      const { base64Data, userId, docType, mimeType, fileExtension } = req.body;
+      const { base64Data, userId, docType, mimeType } = req.body;
       if (!base64Data || !userId || !docType) {
         return res.status(400).json({ message: "base64Data, userId, and docType are required" });
       }
 
-      const SUPABASE_URL = process.env.SUPABASE_URL || "https://zzwkieiktbhptvgsqerd.supabase.co";
-      const SUPABASE_ANON_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-      const BUCKET = "driver-documents";
+      const normalizedBase64 = String(base64Data).replace(/^data:[^;]+;base64,/, "").replace(/\s/g, "");
+      const buffer = Buffer.from(normalizedBase64, "base64");
+      if (buffer.length === 0) {
+        return res.status(400).json({ message: "Invalid document data" });
+      }
 
       const contentType =
         typeof mimeType === "string" && mimeType.includes("/") ? mimeType : "image/jpeg";
-      const extension =
-        typeof fileExtension === "string" && /^[a-zA-Z0-9]{1,10}$/.test(fileExtension)
-          ? fileExtension.toLowerCase()
-          : contentType === "application/pdf"
-            ? "pdf"
-            : "jpg";
-      const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, "_") || "user";
       const safeDocType = String(docType).replace(/[^a-zA-Z0-9_-]/g, "_") || "document";
-      const fileName = `${safeUserId}/${safeDocType}_${Date.now()}.${extension}`;
-      const buffer = Buffer.from(base64Data, "base64");
+      const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, "_") || "user";
 
-      const uploadRes = await fetch(
-        `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${fileName}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-            apikey: SUPABASE_ANON_KEY,
-            "Content-Type": contentType,
-            "x-upsert": "true",
-          },
-          body: buffer,
-        },
-      );
+      const storedMediaId = await storeMediaObject({
+        ownerUserId: safeUserId,
+        purpose: safeDocType,
+        mimeType: contentType,
+        data: buffer,
+      });
 
-      if (!uploadRes.ok) {
-        const err = await uploadRes.text();
-        console.warn("[upload-document] Supabase upload failed, falling back to local media store:", err);
-        const storedMediaId = await storeMediaObject({
-          ownerUserId: safeUserId,
-          purpose: safeDocType,
-          mimeType: contentType,
-          data: buffer,
-        });
-        return res.json({ url: `/api/media/${storedMediaId}` });
-      }
-
-      const url = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${fileName}`;
-      return res.json({ url });
+      const url = `https://a2blift.com/api/media/${storedMediaId}`;
+      return res.json({ url, mediaId: storedMediaId });
     } catch (error: any) {
-      console.warn("[upload-document] Error during upload, attempting local media store fallback:", error.message);
-      try {
-        const { base64Data, userId, docType, mimeType } = req.body;
-        if (base64Data && userId && docType) {
-          const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, "_") || "user";
-          const safeDocType = String(docType).replace(/[^a-zA-Z0-9_-]/g, "_") || "document";
-          const contentType = typeof mimeType === "string" && mimeType.includes("/") ? mimeType : "image/jpeg";
-          const buffer = Buffer.from(base64Data, "base64");
-          const storedMediaId = await storeMediaObject({
-            ownerUserId: safeUserId,
-            purpose: safeDocType,
-            mimeType: contentType,
-            data: buffer,
-          });
-          return res.json({ url: `/api/media/${storedMediaId}` });
-        }
-      } catch (fallbackError: any) {
-        console.error("[upload-document] Fallback media store failed:", fallbackError.message);
-      }
+      console.error("[upload-document] Upload error:", error.message);
       return res.status(500).json({ message: error.message || "Failed to upload document" });
     }
   });
@@ -7590,6 +7665,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const { applicationId, chauffeurId, type, url, userId: bodyUserId } = req.body;
     const userId = req.auth?.sub || bodyUserId;
     if (!type || !url) return res.status(400).json({ message: "type and url are required" });
+    if (typeof url === "string" && (url.startsWith("file:") || url.startsWith("content:"))) {
+      return res.status(400).json({ message: "Invalid document URL. Documents must be uploaded via /api/upload-document." });
+    }
     if (!userId) return res.status(400).json({ message: "userId required" });
     const doc = await storage.createDocument({
       userId,
@@ -7634,13 +7712,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireAuth,
     requireRole(["admin"]),
     async (req: AuthedRequest, res: Response) => {
-      const { status } = req.body;
+      const { status, reviewReason } = req.body;
       const doc = await storage.updateDocument(req.params.id, {
         status,
+        reviewReason: status === "rejected" ? (reviewReason ? String(reviewReason).trim() : null) : null,
         reviewedAt: new Date(),
         reviewerAdminId: req.auth!.sub,
       });
       if (!doc) return res.status(404).json({ message: "Document not found" });
+
+      try {
+        const user = await storage.getUser(doc.userId);
+        if (user?.email) {
+          if (status === "approved") {
+            await sendDocumentApprovedEmail({
+              to: user.email,
+              name: user.name,
+              docType: doc.type,
+            }).catch(() => undefined);
+          } else if (status === "rejected") {
+            await sendDocumentRejectedEmail({
+              to: user.email,
+              name: user.name,
+              docType: doc.type,
+              reason: reviewReason ? String(reviewReason).trim() : null,
+            }).catch(() => undefined);
+          }
+        }
+      } catch {}
+
       return res.json(doc);
     },
   );
@@ -8510,6 +8610,130 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  const handleUpdateRideDestination = async (req: AuthedRequest, res: Response) => {
+    try {
+      const existingRide = await storage.getRide(req.params.id);
+      if (!existingRide) return res.status(404).json({ message: "Ride not found" });
+      const callerUserId = req.auth?.sub || req.body?.clientId;
+      const isAdmin = req.auth?.role === "admin";
+      if (callerUserId && existingRide.clientId && existingRide.clientId !== callerUserId && !isAdmin) {
+        return res.status(403).json({ message: "Only the rider can update the destination." });
+      }
+      if (["trip_completed", "cancelled"].includes(existingRide.status)) {
+        return res.status(409).json({ message: "Destination cannot be changed after the trip has ended." });
+      }
+
+      const dropoffAddress = String(req.body?.dropoffAddress || "").trim();
+      const dropoffLat = Number(req.body?.dropoffLat);
+      const dropoffLng = Number(req.body?.dropoffLng);
+
+      if (!dropoffAddress || !Number.isFinite(dropoffLat) || !Number.isFinite(dropoffLng)) {
+        return res.status(400).json({ message: "A valid destination address and coordinates are required." });
+      }
+
+      const currentStops = normalizeRideStops(existingRide.stops);
+      const pickup = {
+        lat: Number(existingRide.pickupLat),
+        lng: Number(existingRide.pickupLng),
+      };
+      const newDestination = {
+        lat: dropoffLat,
+        lng: dropoffLng,
+      };
+
+      const [verifiedRoute] = await fetchVerifiedDirections(
+        pickup,
+        newDestination,
+        currentStops,
+      );
+
+      const priceEstimate = calculatePrice(
+        verifiedRoute.distanceKm,
+        existingRide.vehicleType || "budget",
+        {
+          isLateNight: isSouthAfricaLateNight(),
+          surgeMultiplier: Number(
+            (existingRide as any).demandMultiplier ||
+              existingRide.surgeMultiplier ||
+              1,
+          ),
+          surgeReason: existingRide.surgeReason || undefined,
+          estimatedDurationMin: verifiedRoute.durationMin,
+        },
+      );
+
+      const paymentMethod = existingRide.paymentMethod || "cash";
+      const paymentAlreadyCaptured =
+        paymentMethod !== "cash" && existingRide.paymentStatus === "paid";
+      if (
+        paymentAlreadyCaptured &&
+        Math.abs(Number(existingRide.price || 0) - priceEstimate.totalPrice) > 0.01
+      ) {
+        return res.status(409).json({
+          message: "Destination cannot be repriced after card or wallet payment has already been captured.",
+        });
+      }
+
+      const updatedRide = await storage.updateRide(existingRide.id, {
+        dropoffAddress,
+        dropoffLat: String(dropoffLat),
+        dropoffLng: String(dropoffLng),
+        distanceKm: verifiedRoute.distanceKm,
+        durationMin: verifiedRoute.durationMin,
+        estimatedDurationMin: verifiedRoute.durationMin,
+        price: priceEstimate.totalPrice,
+        quotedFare: priceEstimate.totalPrice,
+        actualFare: priceEstimate.totalPrice,
+        finalFare: priceEstimate.totalPrice,
+        pricePerKm: priceEstimate.pricePerKm,
+        baseFare: priceEstimate.baseFare,
+      } as any);
+
+      if (!updatedRide) return res.status(404).json({ message: "Ride not found" });
+
+      const payload = {
+        ...updatedRide,
+        destinationUpdatedAt: new Date().toISOString(),
+      };
+
+      io.emit("ride:destinationUpdated", payload);
+      io.emit("ride:statusUpdate", payload);
+
+      if (updatedRide.chauffeurId) {
+        try {
+          const chauffeur = await storage.getChauffeur(updatedRide.chauffeurId);
+          if (chauffeur?.userId) {
+            await storage.createNotification({
+              userId: chauffeur.userId,
+              title: "Destination Changed",
+              body: `The rider changed the destination to: ${dropoffAddress}. The route and fare (R ${Number(priceEstimate.totalPrice).toFixed(0)}) have been updated.`,
+              type: "ride",
+            });
+          }
+          if (chauffeur?.pushToken) {
+            sendExpoPushNotification(
+              [chauffeur.pushToken],
+              "Destination Changed",
+              `The rider changed the destination to: ${dropoffAddress}.`,
+              { rideId: updatedRide.id, type: "ride:destination-updated" },
+            );
+          }
+        } catch (notificationError: any) {
+          console.error("destination update notification failed (non-fatal):", notificationError.message);
+        }
+      }
+
+      return res.json(payload);
+    } catch (error: any) {
+      return res.status(500).json({
+        message: error.message || "Failed to update trip destination.",
+      });
+    }
+  };
+
+  app.put("/api/rides/:id/destination", authOptional, handleUpdateRideDestination);
+  app.post("/api/rides/:id/destination", authOptional, handleUpdateRideDestination);
+
   app.put("/api/rides/:id/accept", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
       const { chauffeurId } = req.body;
@@ -8815,12 +9039,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         } else if (cancelledBy === "driver") {
           const rider = await storage.getUser(rideBeforeUpdate.clientId).catch(() => undefined);
+          await storage.createNotification({
+            userId: rideBeforeUpdate.clientId,
+            title: "Driver Cancelled",
+            body: "Your driver cancelled the trip. We are automatically searching for another driver for you now.",
+            type: "ride",
+          }).catch(() => {});
           if ((rider as any)?.pushToken) {
             sendExpoPushNotification(
               [(rider as any).pushToken],
-              "Driver Cancelled Ride",
-              "Your driver cancelled the ride. You can request another vehicle now.",
-              { rideId: ride.id, type: "ride:cancelled", cancelledBy },
+              "Driver Cancelled Trip",
+              "Your driver had to cancel. We are automatically searching for another nearby driver for you now.",
+              { rideId: ride.id, type: "ride:cancelled", cancelledBy, autoReRequest: true },
               { urgent: true, channelId: "client-alerts" },
             );
           }

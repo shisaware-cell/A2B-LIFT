@@ -101,6 +101,7 @@ tbody tr:hover { background:#fafaf8; }
 .b-approved::before,.b-yes::before,.b-online::before,.b-completed::before,.b-paid::before { background:var(--green); }
 .b-rejected,.b-no,.b-cancelled,.b-failed { background:var(--red-bg); color:var(--red); }
 .b-rejected::before,.b-no::before,.b-cancelled::before,.b-failed::before { background:var(--red); }
+.b-waitlisted { background:#fff1d6; color:#9a5b00; } .b-waitlisted::before { background:#d48100; }
 .b-offline { background:#f5f5f0; color:var(--muted); } .b-offline::before { background:var(--muted-light); }
 .b-card { background:var(--blue-bg); color:var(--blue); } .b-card::before { background:var(--blue); }
 .b-wallet { background:var(--green-bg); color:var(--green); } .b-wallet::before { background:var(--green); }
@@ -113,6 +114,9 @@ tbody tr:hover { background:#fafaf8; }
 .b-admin { background:var(--blue-bg); color:var(--blue); } .b-admin::before { background:var(--blue); }
 .b-driver { background:var(--yellow-bg); color:var(--yellow); } .b-driver::before { background:var(--yellow); }
 .b-client { background:#f5f5f0; color:var(--muted); } .b-client::before { background:var(--muted-light); }
+.b-liftclub { background:#fff7cc; color:#7a5200; } .b-liftclub::before { background:#f7c948; }
+.b-registered { background:var(--blue-bg); color:var(--blue); } .b-registered::before { background:var(--blue); }
+.b-rewarded { background:var(--green-bg); color:var(--green); } .b-rewarded::before { background:var(--green); }
 
 /* BUTTONS */
 .btn-sm { padding:5px 12px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.15s; border:1px solid; font-family:var(--font); }
@@ -123,7 +127,27 @@ tbody tr:hover { background:#fafaf8; }
 .btn-detail { background:var(--bg); color:var(--text); border-color:var(--border); }
 .btn-detail:hover { background:#ececea; }
 .btn-paid { background:var(--blue-bg); color:var(--blue); border-color:#b8d0f0; }
+.btn-delete { background:var(--red-bg); color:var(--red); border-color:#f0c0b8; }
+.btn-delete:hover { background:#fce0dc; }
 .action-cell { display:flex; gap:6px; flex-wrap:wrap; }
+.trip-toolbar { display:grid; grid-template-columns:minmax(220px,1fr) 180px 150px 150px auto; gap:10px; align-items:end; margin-bottom:14px; }
+.trip-toolbar .field { margin:0; }
+.trip-pagination { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-top:1px solid var(--border); background:var(--surface); }
+.trip-page-actions { display:flex; align-items:center; gap:8px; }
+.trip-detail-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
+.trip-detail-title { font-size:20px; font-weight:700; }
+.trip-detail-id { color:var(--muted); font:11px var(--mono); margin-top:5px; overflow-wrap:anywhere; }
+.trip-detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.trip-panel { background:var(--white); border:1px solid var(--border); border-radius:var(--radius); padding:18px; }
+.trip-panel-wide { grid-column:1 / -1; }
+.trip-panel-title { font-size:13px; font-weight:700; margin-bottom:14px; }
+.trip-kv { display:grid; grid-template-columns:minmax(110px,0.7fr) minmax(0,1.3fr); gap:12px; padding:8px 0; border-bottom:1px solid var(--border); }
+.trip-kv:last-child { border-bottom:none; }
+.trip-kv-label { color:var(--muted); font-size:11px; font-weight:600; }
+.trip-kv-value { font-size:13px; overflow-wrap:anywhere; }
+.trip-timeline { display:grid; gap:10px; }
+.trip-timeline-row { display:grid; grid-template-columns:150px minmax(0,1fr); gap:12px; font-size:13px; }
+.trip-timeline-row span:first-child { color:var(--muted); }
 
 /* EMPTY / LOADING */
 .empty { padding:56px 24px; text-align:center; color:var(--muted); }
@@ -221,6 +245,9 @@ tbody tr:hover { background:#fafaf8; }
   .action-cell { flex-wrap:nowrap; gap:4px; }
   .btn-sm { padding:4px 8px; font-size:11px; }
   .sec-head { flex-direction:column; align-items:flex-start; gap:10px; }
+  .trip-toolbar { grid-template-columns:1fr 1fr; }
+  .trip-detail-grid { grid-template-columns:1fr; }
+  .trip-panel-wide { grid-column:auto; }
 }
 
 @media (max-width: 480px) {
@@ -254,13 +281,40 @@ tbody tr:hover { background:#fafaf8; }
       <span class="nav-icon">🚗</span> Chauffeurs
       <span class="nav-badge" id="nb-pending" style="display:none">0</span>
     </div>
+    <div class="nav-item" onclick="go('applications',this);closeSidebar()">
+      <span class="nav-icon">📋</span> Driver Applications
+      <span class="nav-badge" id="nb-apps" style="display:none">0</span>
+    </div>
+    <div class="nav-item" onclick="go('partners',this);closeSidebar()">
+      <span class="nav-icon">🏢</span> Partner Applications
+      <span class="nav-badge" id="nb-partners" style="display:none">0</span>
+    </div>
 
     <div class="nav-section">Operations</div>
+    <div class="nav-item" onclick="go('vehicles',this);closeSidebar()">
+      <span class="nav-icon">🚘</span> Vehicle Approvals
+      <span class="nav-badge" id="nb-vehicles" style="display:none">0</span>
+    </div>
+    <div class="nav-item" onclick="go('documents',this);closeSidebar()">
+      <span class="nav-icon">📂</span> Documents
+      <span class="nav-badge" id="nb-documents" style="display:none">0</span>
+    </div>
     <div class="nav-item" onclick="go('rides',this);closeSidebar()">
       <span class="nav-icon">🗺</span> Rides
     </div>
     <div class="nav-item" onclick="go('payments',this);closeSidebar()">
       <span class="nav-icon">💳</span> Payments
+    </div>
+    <div class="nav-item" onclick="go('liftClubApplications',this);closeSidebar()">
+      <span class="nav-icon">🎟️</span> Lift Club
+      <span class="nav-badge" id="nb-liftclub" style="display:none">0</span>
+    </div>
+    <div class="nav-item" onclick="go('payLater',this);closeSidebar()">
+      <span class="nav-icon">◷</span> Pay Later
+      <span class="nav-badge" id="nb-paylater" style="display:none">0</span>
+    </div>
+    <div class="nav-item" onclick="go('selfies',this);closeSidebar()">
+      <span class="nav-icon">📸</span> Liveness Selfies
     </div>
     <div class="nav-item" onclick="go('withdrawals',this);closeSidebar()">
       <span class="nav-icon">🏦</span> Withdrawals
@@ -274,6 +328,9 @@ tbody tr:hover { background:#fafaf8; }
     <div class="nav-section">Accounts</div>
     <div class="nav-item" onclick="go('users',this);closeSidebar()">
       <span class="nav-icon">👤</span> All Users
+    </div>
+    <div class="nav-item" onclick="go('referrals',this);closeSidebar()">
+      <span class="nav-icon">↗</span> Referrals
     </div>
   </nav>
   <div class="sidebar-foot">
@@ -293,7 +350,7 @@ tbody tr:hover { background:#fafaf8; }
     <div class="topbar-right">
       <div class="search-wrap">
         <span class="search-icon">🔍</span>
-        <input class="search-input" placeholder="Search…" id="srch" oninput="doSearch(this.value)"/>
+        <input class="search-input" placeholder="Search name, email or phone…" id="srch" oninput="doSearch(this.value)"/>
       </div>
       <span class="timestamp" id="last-updated"></span>
       <button class="btn-refresh" onclick="loadView()">↻ Refresh</button>
@@ -308,6 +365,15 @@ tbody tr:hover { background:#fafaf8; }
       <div class="stats-row" id="stats-row">
         <div class="stat-card"><div class="loading">Loading…</div></div>
       </div>
+      <div class="sec-head"><div class="sec-title">Test SMS (BulkSMS)</div></div>
+      <div class="table-card" style="padding:16px;">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+          <input class="f-input" id="test-sms-to" placeholder="Phone e.g. 0714120915" style="max-width:220px;" />
+          <input class="f-input" id="test-sms-msg" placeholder="Message (optional — default includes app link)" style="flex:1;min-width:220px;" />
+          <button class="btn-sm btn-approve" onclick="sendTestSms()">Send test SMS</button>
+        </div>
+        <div id="test-sms-result" style="font-size:13px;color:var(--muted);margin-top:10px;"></div>
+      </div>
       <div class="sec-head"><div class="sec-title">Pending Chauffeur Approvals</div></div>
       <div class="table-card" id="pending-table"><div class="loading">Loading…</div></div>
     </div>
@@ -319,30 +385,145 @@ tbody tr:hover { background:#fafaf8; }
         <div class="filter-group">
           <button class="ftab active" onclick="fChauf('all',this)">All</button>
           <button class="ftab" onclick="fChauf('online',this)">Online</button>
-          <button class="ftab" onclick="fChauf('approved',this)">Approved</button>
+          <button class="ftab" onclick="fChauf('approved',this)">Whitelisted</button>
+          <button class="ftab" onclick="fChauf('waitlisted',this)">Waitlisted</button>
           <button class="ftab" onclick="fChauf('pending',this)">Pending Approval</button>
         </div>
       </div>
       <div class="table-card" id="chauf-table"><div class="loading">Loading…</div></div>
     </div>
 
+    <!-- DRIVER APPLICATIONS -->
+    <div class="view" id="view-applications">
+      <div class="sec-head">
+        <div class="sec-title">Driver Applications</div>
+        <div class="filter-group">
+          <button class="ftab active" onclick="fApps('all',this)">All</button>
+          <button class="ftab" onclick="fApps('pending',this)">Pending</button>
+          <button class="ftab" onclick="fApps('approved',this)">Approved</button>
+          <button class="ftab" onclick="fApps('waitlisted',this)">Waitlisted</button>
+          <button class="ftab" onclick="fApps('rejected',this)">Rejected</button>
+        </div>
+      </div>
+      <div class="table-card" id="apps-table"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- PARTNER APPLICATIONS -->
+    <div class="view" id="view-partners">
+      <div class="sec-head">
+        <div class="sec-title">Partner Applications</div>
+        <div class="filter-group">
+          <button class="ftab active" onclick="fPartners('all',this)">All</button>
+          <button class="ftab" onclick="fPartners('pending',this)">Pending</button>
+          <button class="ftab" onclick="fPartners('approved',this)">Approved</button>
+          <button class="ftab" onclick="fPartners('rejected',this)">Rejected</button>
+        </div>
+      </div>
+      <div class="table-card" id="partners-table"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- VEHICLE APPROVALS -->
+    <div class="view" id="view-vehicles">
+      <div class="sec-head">
+        <div class="sec-title">Vehicle Approvals</div>
+        <div class="filter-group">
+          <button class="ftab active" onclick="fVehicles('all',this)">All</button>
+          <button class="ftab" onclick="fVehicles('pending',this)">Pending</button>
+          <button class="ftab" onclick="fVehicles('approved',this)">Approved</button>
+          <button class="ftab" onclick="fVehicles('waitlisted',this)">Waitlisted</button>
+          <button class="ftab" onclick="fVehicles('rejected',this)">Rejected</button>
+        </div>
+      </div>
+      <div class="table-card" id="vehicles-table"><div class="loading">Loading…</div></div>
+    </div>
+
+    <div class="view" id="view-documents">
+      <div class="sec-head">
+        <div class="sec-title">Document Review</div>
+        <div class="filter-group">
+          <button class="ftab active" onclick="fDocuments('all',this)">All</button>
+          <button class="ftab" onclick="fDocuments('driver',this)">Drivers</button>
+          <button class="ftab" onclick="fDocuments('partner',this)">Partners</button>
+          <button class="ftab" onclick="fDocuments('vehicle',this)">Vehicles</button>
+          <button class="ftab" onclick="fDocuments('pending',this)">Pending</button>
+        </div>
+      </div>
+      <div class="table-card" id="documents-table"><div class="loading">Loading…</div></div>
+    </div>
+
     <!-- RIDES -->
     <div class="view" id="view-rides">
-      <div class="sec-head"><div class="sec-title">All Rides</div></div>
+      <div class="sec-head"><div><div class="sec-title">Trip history</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Results load in pages to keep the dashboard responsive as history grows.</div></div></div>
+      <div class="trip-toolbar">
+        <label class="field"><span class="f-label">Search trips</span><input class="f-input" id="trip-search" placeholder="Trip ID, rider, driver or location" oninput="queueTripSearch()" /></label>
+        <label class="field"><span class="f-label">Status</span><select class="f-input" id="trip-status" onchange="applyTripFilters()"><option value="all">All statuses</option><option value="requested">Requested</option><option value="searching">Searching</option><option value="chauffeur_assigned">Driver assigned</option><option value="chauffeur_arriving">Driver arriving</option><option value="chauffeur_arrived">Driver arrived</option><option value="trip_started">In progress</option><option value="trip_completed">Completed</option><option value="cancelled">Cancelled</option><option value="reserved">Reserved</option></select></label>
+        <label class="field"><span class="f-label">From</span><input class="f-input" id="trip-from" type="date" onchange="applyTripFilters()" /></label>
+        <label class="field"><span class="f-label">To</span><input class="f-input" id="trip-to" type="date" onchange="applyTripFilters()" /></label>
+        <button class="btn-lg btn-outline" onclick="clearTripFilters()">Clear filters</button>
+      </div>
       <div class="table-card" id="rides-table"><div class="loading">Loading…</div></div>
+    </div>
+
+    <div class="view" id="view-tripDetail">
+      <div class="trip-detail-head">
+        <div><button class="btn-sm btn-detail" onclick="backToTrips()">Back to trips</button><div class="trip-detail-title" id="trip-detail-title" style="margin-top:14px">Trip details</div><div class="trip-detail-id" id="trip-detail-id"></div></div>
+        <div id="trip-detail-status"></div>
+      </div>
+      <div id="trip-detail-content"><div class="loading">Loading…</div></div>
     </div>
 
     <!-- PAYMENTS -->
     <div class="view" id="view-payments">
-      <div id="pay-summary" class="stats-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px"></div>
+      <div id="pay-summary" class="stats-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:20px"></div>
       <div class="sec-head"><div class="sec-title">Rider Payments</div></div>
       <div class="table-card" id="pay-table"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- LIFT CLUB APPLICATIONS -->
+    <div class="view" id="view-liftClubApplications">
+      <div class="notice">🎟️ <span>Lift Club members pay a once-off R200 manual fee, upload proof, then wait for admin approval before they can book weekly or monthly Lift Club seats.</span></div>
+      <div class="sec-head">
+        <div class="sec-title">Lift Club Members</div>
+        <div class="filter-group">
+          <div class="filter-group liftclub-member-filters">
+            <button class="ftab active" onclick="fLiftClub('all',this)">All</button>
+            <button class="ftab" onclick="fLiftClub('pending_review',this)">Pending Review</button>
+            <button class="ftab" onclick="fLiftClub('pending_payment',this)">Pending Payment</button>
+            <button class="ftab" onclick="fLiftClub('approved',this)">Approved</button>
+            <button class="ftab" onclick="fLiftClub('rejected',this)">Rejected</button>
+          </div>
+          <button class="btn-sm btn-detail" onclick="openLiftClubUserPickerModal()">+ Convert existing user</button>
+        </div>
+      </div>
+      <div class="table-card" id="liftclub-table"><div class="loading">Loading…</div></div>
+      <div class="sec-head" style="margin-top:24px">
+        <div class="sec-title">Lift Club Cars & Routes</div>
+        <div class="filter-group liftclub-route-filters">
+          <button class="ftab active" onclick="fLiftClubRoutes('all',this)">All</button>
+          <button class="ftab" onclick="fLiftClubRoutes('active',this)">Active</button>
+          <button class="ftab" onclick="fLiftClubRoutes('inactive',this)">Inactive</button>
+        </div>
+      </div>
+      <div class="table-card" id="liftclub-routes-table"><div class="loading">Loading…</div></div>
+    </div>
+
+    <div class="view" id="view-payLater">
+      <div class="notice"><span>Review rider documents, approve Pay Later access, and allocate credit. This balance is separate from the user's wallet.</span></div>
+      <div class="sec-head"><div class="sec-title">Pay Later applications</div></div>
+      <div class="table-card" id="paylater-table"><div class="loading">Loading...</div></div>
+    </div>
+
+    <!-- LIVENESS SELFIES -->
+    <div class="view" id="view-selfies">
+      <div class="notice">📸 <span>Cash-trip liveness selfies are stored here for review. Admins can open the image full-size and download it for audit purposes.</span></div>
+      <div class="sec-head"><div class="sec-title">Uploaded Liveness Selfies</div></div>
+      <div class="table-card" id="selfies-table"><div class="loading">Loading…</div></div>
     </div>
 
     <!-- WITHDRAWALS -->
     <div class="view" id="view-withdrawals">
       <div class="sec-head">
-        <div class="sec-title">Driver Withdrawal Requests</div>
+        <div class="sec-title">Withdrawal Requests (Drivers &amp; Riders)</div>
         <div class="filter-group">
           <button class="ftab active" onclick="fWd('all',this)">All</button>
           <button class="ftab" onclick="fWd('pending',this)">Pending</button>
@@ -371,6 +552,24 @@ tbody tr:hover { background:#fafaf8; }
       <div class="notice">⚠️ <span>Users with <strong>role: driver</strong> have started chauffeur registration. Users with <strong>role: client</strong> are riders.</span></div>
       <div class="sec-head"><div class="sec-title">All Users</div></div>
       <div class="table-card" id="users-table"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- REFERRALS -->
+    <div class="view" id="view-referrals">
+      <div class="stats-row" id="referral-stats">
+        <div class="stat-card"><div class="loading">Loading…</div></div>
+      </div>
+      <div class="sec-head">
+        <div class="sec-title">Who Referred Who</div>
+        <div class="filter-group">
+          <input class="f-input" id="referral-search" placeholder="Search name, email, phone or code" oninput="renderFilteredReferrals()" style="width:260px;padding:6px 10px" />
+          <button class="ftab active" onclick="filterReferrals('all',this)">All</button>
+          <button class="ftab" onclick="filterReferrals('client',this)">Riders</button>
+          <button class="ftab" onclick="filterReferrals('driver',this)">Drivers</button>
+          <button class="ftab" onclick="filterReferrals('rewarded',this)">Rewarded</button>
+        </div>
+      </div>
+      <div class="table-card" id="referrals-table"><div class="loading">Loading…</div></div>
     </div>
 
   </div>
@@ -403,14 +602,27 @@ tbody tr:hover { background:#fafaf8; }
     </div>
     <div class="login-err" id="l-err"></div>
     <button class="btn-login" onclick="doLogin()">Sign in</button>
+    <button type="button" onclick="requestAdminPasswordReset()" style="margin-top:12px;width:100%;border:0;background:transparent;color:var(--muted);font-size:12px;font-weight:700;cursor:pointer;">Forgot password?</button>
   </div>
 </div>
 
 <div class="toast" id="toast"></div>
 
 <script>
-const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-  ? '' : 'https://api-production-0783.up.railway.app';
+// Use same-origin when the admin is served by the production API host.
+// Static/legacy admin deployments may still override this in localStorage.
+const PROD_API = 'https://a2b-lift-backend-production-4fea.up.railway.app';
+const API = (() => {
+  const host = window.location.hostname || '';
+  if (host === 'a2blift.com' || host === 'www.a2blift.com') {
+    localStorage.removeItem('a2b_admin_api_base');
+    return '';
+  }
+  if (!host || host === 'localhost' || host === '127.0.0.1' || host.endsWith('.up.railway.app')) {
+    return '';
+  }
+  return localStorage.getItem('a2b_admin_api_base') || PROD_API;
+})();
 const TOKEN_KEY = 'a2b_admin_token';
 
 function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
@@ -420,6 +632,58 @@ function dropToken() { localStorage.removeItem(TOKEN_KEY); }
 function authHeaders() {
   const t = getToken();
   return t ? { 'Authorization': 'Bearer ' + t } : {};
+}
+
+function resolveDocUrl(url) {
+  if (!url) return '';
+  const trimmed = String(url).trim();
+  if (trimmed.startsWith('file:') || trimmed.startsWith('content:')) {
+    return '';
+  }
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return trimmed;
+  if (trimmed.startsWith('/api/')) {
+    return (API || '') + trimmed;
+  }
+  if (trimmed.startsWith('/')) {
+    return (API || '') + trimmed;
+  }
+  if (trimmed.includes('/api/media/')) {
+    const mediaId = trimmed.split('/api/media/')[1];
+    return (API || PROD_API || '') + '/api/media/' + mediaId;
+  }
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    if (trimmed.includes('a2blift.com/api/')) {
+      const path = trimmed.split('a2blift.com')[1];
+      return (API || PROD_API || '') + path;
+    }
+    return trimmed;
+  }
+  return '';
+}
+
+async function downloadDoc(url, filename) {
+  const resolved = resolveDocUrl(url);
+  if (!resolved) {
+    toast('⚠️ Document was saved as a local device path. Driver must re-upload this document.', 'err');
+    return;
+  }
+  try {
+    toast('⬇️ Downloading document…', 'ok');
+    const res = await fetch(resolved, { headers: authHeaders() });
+    if (!res.ok) throw new Error('Status: ' + res.status);
+    const blob = await res.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    const ext = blob.type === 'application/pdf' ? '.pdf' : blob.type === 'image/png' ? '.png' : '.jpg';
+    a.download = (filename || 'document-' + Date.now()) + (filename && filename.includes('.') ? '' : ext);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => window.URL.revokeObjectURL(blobUrl), 10000);
+  } catch (err) {
+    window.open(resolved, '_blank', 'noopener,noreferrer');
+  }
 }
 
 async function apiFetch(path, opts = {}) {
@@ -439,26 +703,64 @@ async function doLogin() {
   const u = document.getElementById('l-user').value.trim();
   const p = document.getElementById('l-pass').value;
   const errEl = document.getElementById('l-err');
+  const btn = document.querySelector('.btn-login');
   errEl.textContent = '';
+  errEl.style.color = '';
   if (!u || !p) { errEl.textContent = 'Enter username and password.'; return; }
+  btn.textContent = 'Signing in…';
+  btn.disabled = true;
   try {
+    console.log('[Admin] Logging in as:', u, '| API base:', API || '(same origin)');
     const res = await fetch(API + '/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: u, password: p }),
     });
-    if (!res.ok) { errEl.textContent = 'Login failed — check credentials.'; return; }
+    console.log('[Admin] Login response status:', res.status);
+    if (!res.ok) {
+      const body = await res.text();
+      console.error('[Admin] Login failed:', body);
+      errEl.textContent = 'Login failed — check credentials. (' + res.status + ')';
+      return;
+    }
     const data = await res.json();
+    console.log('[Admin] Login data:', data?.user?.role);
     if (!data?.user || data.user.role !== 'admin') {
       errEl.textContent = 'This account does not have admin access.';
       return;
     }
     if (data.accessToken) saveToken(data.accessToken);
     showLogin(false);
-    document.getElementById('live-status').textContent = 'Connected · Railway';
+    document.getElementById('live-status').textContent = 'Connected · Live';
     loadAll();
   } catch(e) {
-    errEl.textContent = 'Network error — is the backend running?';
+    console.error('[Admin] Login error:', e);
+    errEl.textContent = 'Error: ' + (e.message || 'Network error — check console.');
+  } finally {
+    btn.textContent = 'Sign in';
+    btn.disabled = false;
+  }
+}
+
+async function requestAdminPasswordReset() {
+  const u = document.getElementById('l-user').value.trim();
+  const errEl = document.getElementById('l-err');
+  errEl.textContent = '';
+  if (!u) { errEl.textContent = 'Enter your email first, then click Forgot password.'; return; }
+  errEl.style.color = '#b7791f';
+  errEl.textContent = 'Sending reset link...';
+  try {
+    const response = await fetch(API + '/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: u }),
+    });
+    const data = await response.json();
+    errEl.style.color = '#2f855a';
+    errEl.textContent = data.message || 'Check your email for a password reset link.';
+  } catch(e) {
+    errEl.style.color = '#c53030';
+    errEl.textContent = 'Unable to request a reset link. Please try again.';
   }
 }
 
@@ -470,8 +772,9 @@ async function doLogout() {
 
 // ── NAV ──
 let curView = 'overview';
-let allChauf = [], allWd = [], allSafe = [], chaufFilter = 'all', wdFilter = 'all', safeFilter = 'all';
-const VIEW_TITLES = { overview:'Dashboard', chauffeurs:'Chauffeurs', rides:'Rides', payments:'Payments', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users' };
+let tripPage = 1, tripPageSize = 25, tripTotalPages = 1, tripSearchTimer = null, selectedTripId = null;
+let allChauf = [], allWd = [], allSafe = [], allApps = [], allPartners = [], allVehicles = [], allDocuments = [], allSelfies = [], allUsers = [], allReferrals = [], allLiftClubMemberships = [], allLiftClubRoutes = [], allPayLater = [], chaufFilter = 'all', wdFilter = 'all', safeFilter = 'all', appsFilter = 'all', partnersFilter = 'all', vehiclesFilter = 'all', documentsFilter = 'all', referralFilter = 'all', liftClubFilter = 'all', liftClubRouteFilter = 'all';
+const VIEW_TITLES = { overview:'Dashboard', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', documents:'Document Review', rides:'Trips', tripDetail:'Trip Details', payments:'Payments', liftClubApplications:'Lift Club', payLater:'Pay Later', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users', referrals:'Referral Summary' };
 
 function go(view, el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -485,17 +788,25 @@ function go(view, el) {
 }
 
 function loadView() {
-  ({ overview:loadOverview, chauffeurs:loadChauf, rides:loadRides, payments:loadPay, withdrawals:loadWd, safety:loadSafe, users:loadUsers })[curView]?.();
+  ({ overview:loadOverview, chauffeurs:loadChauf, applications:loadApps, partners:loadPartners, vehicles:loadVehicles, documents:loadDocuments, rides:loadRides, payments:loadPay, liftClubApplications:loadLiftClubApplications, payLater:loadPayLater, selfies:loadSelfies, withdrawals:loadWd, safety:loadSafe, users:loadUsers, referrals:loadReferrals })[curView]?.();
 }
 
 function loadAll() {
   loadOverview();
   loadChauf();
+  loadApps();
+  loadPartners();
+  loadVehicles();
+  loadDocuments();
   loadRides();
   loadPay();
+  loadLiftClubApplications();
+  loadPayLater();
+  loadSelfies();
   loadWd();
   loadSafe();
   loadUsers();
+  loadReferrals();
 }
 
 // ── SIDEBAR TOGGLE (mobile) ──
@@ -544,14 +855,24 @@ async function loadOverview() {
         <div class="stat-foot">${s.completedRides} completed · ${s.activeRides} active</div>
       </div>
       <div class="stat-card">
-        <div class="stat-top"><div class="stat-label">Revenue</div><div class="stat-icon si-green">💰</div></div>
+        <div class="stat-top"><div class="stat-label">Total Revenue</div><div class="stat-icon si-green">💰</div></div>
         <div class="stat-value" style="color:var(--green)">R ${s.totalRevenue}</div>
-        <div class="stat-foot">From completed rides</div>
+        <div class="stat-foot">From ${s.completedRides} completed rides</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-top"><div class="stat-label">Platform Commission</div><div class="stat-icon si-green">📊</div></div>
+        <div class="stat-value" style="color:var(--green)">R ${s.totalPlatformCommission || 0}</div>
+        <div class="stat-foot">${s.commissionRate || 15}% of ride fares</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-top"><div class="stat-label">Driver Earnings</div><div class="stat-icon si-blue">👨‍✈️</div></div>
+        <div class="stat-value">R ${s.totalDriverEarnings || 0}</div>
+        <div class="stat-foot">Paid to chauffeurs</div>
       </div>
       <div class="stat-card">
         <div class="stat-top"><div class="stat-label">Chauffeurs</div><div class="stat-icon si-blue">🚗</div></div>
         <div class="stat-value">${s.totalChauffeurs}</div>
-        <div class="stat-foot">${s.onlineChauffeurs} online now</div>
+        <div class="stat-foot">${s.onlineChauffeurs || 0} online · ${s.offlineChauffeurs || 0} offline</div>
       </div>
       <div class="stat-card">
         <div class="stat-top"><div class="stat-label">Pending Approvals</div><div class="stat-icon si-red">⏳</div></div>
@@ -597,20 +918,38 @@ function renderFilteredChauf() {
   let list = allChauf;
   if (chaufFilter === 'online') list = allChauf.filter(c => c.isOnline);
   if (chaufFilter === 'approved') list = allChauf.filter(c => c.isApproved);
-  if (chaufFilter === 'pending') list = allChauf.filter(c => !c.isApproved);
+  if (chaufFilter === 'waitlisted') list = allChauf.filter(c => c.applicationStatus === 'waitlisted');
+  if (chaufFilter === 'pending') list = allChauf.filter(c => !c.isApproved && c.applicationStatus !== 'waitlisted');
   renderChauffeurTable('chauf-table', list, true);
+}
+
+function chaufStatus(c) {
+  const status = c.applicationStatus || (c.isApproved ? 'approved' : 'pending');
+  if (status === 'waitlisted') return { label: 'Waitlisted', cls: 'b-waitlisted' };
+  if (c.isApproved || status === 'approved') return { label: 'Whitelisted', cls: 'b-approved' };
+  if (status === 'rejected') return { label: 'Rejected', cls: 'b-rejected' };
+  return { label: 'Pending', cls: 'b-pending' };
 }
 
 function renderChauffeurTable(tableId, data, showActions) {
   const w = document.getElementById(tableId);
   if (!data.length) { w.innerHTML = emptyState('🚗', 'No chauffeurs', 'Drivers who complete registration appear here'); return; }
   w.innerHTML = `<table>
-    <thead><tr><th>Driver</th><th>Vehicle</th><th>Plate</th><th>Type</th><th>Capacity</th><th>Online</th><th>Approved</th><th>Actions</th></tr></thead>
-    <tbody>${data.map(c => `<tr>
+    <thead><tr><th>Driver</th><th>Vehicle</th><th>Plate</th><th>Type</th><th>Capacity</th><th>Online</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody>${data.map(c => { const st = chaufStatus(c); return `<tr>
       <td>
-        <div style="font-weight:600">${c.userName || '—'}</div>
-        <div style="font-size:11px;color:var(--muted)">${c.userEmail || ''}</div>
-        <div style="font-size:11px;color:var(--muted)">${c.phone || c.userPhone || ''}</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          ${c.profilePhoto
+            ? `<img src="${c.profilePhoto}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;border:1px solid var(--border);flex-shrink:0" onerror="this.style.display='none'" />`
+            : `<div style="width:34px;height:34px;border-radius:50%;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0">🧑‍✈️</div>`}
+          <div>
+            <div style="font-weight:600">${c.userName || '—'}</div>
+            <div style="font-size:11px;color:var(--muted)">${c.userEmail || ''}</div>
+            <div style="font-size:11px;color:var(--muted)">${c.phone || c.userPhone || ''}</div>
+          </div>
+        </div>
+        ${!c.profilePhoto ? `<div style="font-size:11px;color:#9a5b00;margin-top:4px;font-weight:600">⚠ No photo — riders see a blank avatar. Click Edit to add one.</div>` : ''}
+        ${c.applicationStatus === 'waitlisted' && c.waitlistReason ? `<div style="font-size:11px;color:#9a5b00;margin-top:4px">Reason: ${escapeHtml(c.waitlistReason)}</div>` : ''}
       </td>
       <td>
         <div style="font-weight:600">${[c.carMake, c.vehicleModel].filter(Boolean).join(' ') || '—'}</div>
@@ -620,27 +959,990 @@ function renderChauffeurTable(tableId, data, showActions) {
       <td style="font-size:13px">${c.vehicleType || '—'}</td>
       <td style="font-size:12px">👥 ${c.passengerCapacity || 4} · 🧳 ${c.luggageCapacity || 2}</td>
       <td><span class="badge ${c.isOnline ? 'b-online' : 'b-offline'}">${c.isOnline ? 'Online' : 'Offline'}</span></td>
-      <td><span class="badge ${c.isApproved ? 'b-approved' : 'b-pending'}">${c.isApproved ? 'Yes' : 'No'}</span></td>
+      <td><span class="badge ${st.cls}">${st.label}</span></td>
       <td><div class="action-cell">
-        ${!c.isApproved ? `<button class="btn-sm btn-approve" onclick="approveChauf('${c.id}')">✓ Approve</button>` : ''}
+        ${c.applicationStatus === 'waitlisted' ? `<button class="btn-sm btn-approve" onclick="reactivateChauf('${c.id}')">✓ Whitelist again</button>` : ''}
+        ${!c.isApproved && c.applicationStatus !== 'waitlisted' ? `<button class="btn-sm btn-approve" onclick="approveChauf('${c.id}')">✓ Whitelist</button>` : ''}
+        ${c.applicationStatus !== 'waitlisted' ? `<button class="btn-sm btn-detail" onclick="waitlistChauf('${c.id}')">⏸ Remove whitelist</button>` : ''}
+        ${!c.isApproved && c.applicationStatus !== 'waitlisted' ? `<button class="btn-sm btn-reject" onclick="rejectChauf('${c.id}')">✕ Reject</button>` : ''}
         <button class="btn-sm btn-detail" onclick="chaufDetail('${c.id}')">Details</button>
+        <button class="btn-sm btn-detail" onclick="editChauf('${c.id}')">✏ Edit</button>
         <button class="btn-sm btn-detail" onclick="viewDocs('${c.id}','${(c.userName||'Driver').replace(/'/g,"\\'")}')">📄 Docs</button>
+        <button class="btn-sm btn-reject" onclick="deleteChauf('${c.id}','${(c.userName||'Driver').replace(/'/g,"\\'")}')">🗑 Delete</button>
+      </div></td>
+    </tr>`; }).join('')}
+    </tbody></table>`;
+}
+
+function approveChauf(id) { showChauffeurConfirm(id, 'approve'); }
+function rejectChauf(id) { showChauffeurConfirm(id, 'reject'); }
+function waitlistChauf(id) { showChauffeurConfirm(id, 'waitlist'); }
+function reactivateChauf(id) { showChauffeurConfirm(id, 'reactivate'); }
+
+function showChauffeurConfirm(id, action) {
+  const c = allChauf.find(x => x.id === id); if (!c) return;
+  const isApprove = action === 'approve';
+  const isReject = action === 'reject';
+  const isWaitlist = action === 'waitlist';
+  const isReactivate = action === 'reactivate';
+  document.getElementById('m-title').textContent = isApprove
+    ? '✓ Whitelist Driver'
+    : isWaitlist
+      ? '⏸ Remove Driver From Whitelist'
+      : isReactivate
+        ? '✓ Whitelist Driver Again'
+        : '✕ Reject Driver';
+  document.getElementById('m-sub').textContent = isApprove
+    ? 'Review all details before whitelisting. Whitelisted drivers are allowed to receive trip requests.'
+    : isWaitlist
+      ? 'Removing a driver from the whitelist forces them offline and blocks trip requests until they are whitelisted again.'
+      : isReactivate
+        ? 'The driver will be restored to whitelisted status but remains offline until they go online.'
+        : 'Review details and provide a rejection reason. The driver will be notified immediately.';
+  document.getElementById('m-body').innerHTML = `
+    <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
+      ${c.profilePhoto ? `<img src="${c.profilePhoto}" style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid var(--border);flex-shrink:0" onerror="this.style.display='none'" />` : `<div style="width:64px;height:64px;border-radius:50%;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0">🧑‍✈️</div>`}
+      <div>
+        <div style="font-weight:700;font-size:16px">${c.userName || '—'}</div>
+        <div style="color:var(--muted);font-size:13px;margin-top:2px">${c.userEmail || '—'}</div>
+        <div style="color:var(--muted);font-size:13px">${c.phone || c.userPhone || '—'}</div>
+      </div>
+    </div>
+    <div class="info-grid">
+      <div class="info-row"><div class="info-label">Vehicle</div><div class="info-val">${[c.carMake, c.vehicleModel].filter(Boolean).join(' ') || '—'}</div></div>
+      <div class="info-row"><div class="info-label">Plate</div><div class="info-val"><span style="font-family:var(--mono);font-weight:600">${c.plateNumber || '—'}</span></div></div>
+      <div class="info-row"><div class="info-label">Color</div><div class="info-val">${c.carColor || '—'}</div></div>
+      <div class="info-row"><div class="info-label">Category</div><div class="info-val" style="text-transform:capitalize">${c.vehicleType || '—'}</div></div>
+      <div class="info-row"><div class="info-label">Capacity</div><div class="info-val">${c.passengerCapacity || 4} passengers · ${c.luggageCapacity || 2} bags</div></div>
+      <div class="info-row"><div class="info-label">Registered</div><div class="info-val">${fmt(c.createdAt)}</div></div>
+      ${isReject ? `<div style="margin-top:8px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Rejection Reason <span style="color:var(--red)">*</span></label><textarea id="chauf-reject-reason" class="f-input" style="width:100%;min-height:80px;resize:vertical;box-sizing:border-box" placeholder="Explain why this application was not approved…"></textarea></div>` : ''}
+      ${isWaitlist ? `<div style="margin-top:8px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Reason For Removing Whitelist <span style="color:var(--red)">*</span></label><textarea id="chauf-waitlist-reason" class="f-input" style="width:100%;min-height:110px;resize:vertical;box-sizing:border-box" placeholder="Example: Rating below required level, inactivity, retraining required, document issue, safety concern, or policy review."></textarea></div>` : ''}
+    </div>`;
+  document.getElementById('m-foot').innerHTML = isApprove
+    ? `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+       <button class="btn-lg btn-green" onclick="doApproveChauf('${id}')">✓ Confirm Whitelist</button>`
+    : isWaitlist
+      ? `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+         <button class="btn-lg" style="background:#9a5b00;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer" onclick="doWaitlistChauf('${id}')">⏸ Confirm Removal</button>`
+      : isReactivate
+        ? `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+           <button class="btn-lg btn-green" onclick="doReactivateChauf('${id}')">✓ Confirm Whitelist</button>`
+        : `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+           <button class="btn-lg" style="background:var(--red);color:#fff;border:none;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer" onclick="doRejectChauf('${id}')">✕ Confirm Rejection</button>`;
+  openModal();
+}
+
+async function doApproveChauf(id) {
+  closeModal();
+  try {
+    const res = await apiFetch('/api/chauffeurs/' + id + '/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    if (!res.ok) throw new Error(await res.text());
+    toast('✅ Driver whitelisted and allowed to receive trips.', 'ok');
+    loadChauf();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function doRejectChauf(id) {
+  const reason = document.getElementById('chauf-reject-reason')?.value.trim();
+  if (!reason) {
+    const el = document.getElementById('chauf-reject-reason');
+    if (el) { el.style.borderColor = 'var(--red)'; el.focus(); }
+    return;
+  }
+  closeModal();
+  try {
+    const res = await apiFetch('/api/chauffeurs/' + id + '/reject', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast('🚫 Driver rejected. Notification sent.', 'err');
+    loadChauf();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function doWaitlistChauf(id) {
+  const reason = document.getElementById('chauf-waitlist-reason')?.value.trim();
+  if (!reason) {
+    const el = document.getElementById('chauf-waitlist-reason');
+    if (el) { el.style.borderColor = 'var(--red)'; el.focus(); }
+    return;
+  }
+  closeModal();
+  try {
+    const res = await apiFetch('/api/chauffeurs/' + id + '/waitlist', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast('⏸ Driver removed from whitelist and taken offline.', 'ok');
+    loadChauf(); loadApps();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function doReactivateChauf(id) {
+  closeModal();
+  try {
+    const res = await apiFetch('/api/chauffeurs/' + id + '/reactivate', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    if (!res.ok) throw new Error(await res.text());
+    toast('✅ Driver whitelisted again.', 'ok');
+    loadChauf(); loadApps();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function handlePhotoUpload(input, chauffeurId) {
+  const file = input.files[0]; if (!file) return;
+  const label = document.getElementById('edit-photo-upload-label');
+  label.textContent = 'Uploading…';
+  try {
+    const base64Data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const res = await apiFetch('/api/upload/profile-photo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base64Data, chauffeurId }),
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.message || 'Upload failed (status ' + res.status + ')');
+    }
+    const { url } = await res.json();
+    document.getElementById('edit-profilePhoto').value = url;
+    const img = document.getElementById('edit-photo-preview');
+    const fb = document.getElementById('edit-photo-fallback');
+    img.src = url; img.style.display = ''; fb.style.display = 'none';
+    label.textContent = '✅ Photo uploaded';
+    toast('✅ Photo uploaded successfully', 'ok');
+  } catch(e) { label.textContent = 'Choose Photo'; toast('❌ ' + (e.message || 'Photo upload failed'), 'err'); }
+}
+
+function editChauf(id) {
+  const c = allChauf.find(x => x.id === id); if (!c) return;
+  document.getElementById('m-title').textContent = 'Edit Driver: ' + (c.userName || 'Chauffeur');
+  document.getElementById('m-sub').textContent = 'Update driver profile and vehicle information';
+  document.getElementById('m-body').innerHTML = `
+    <!-- Profile photo preview + URL -->
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">
+      <div style="position:relative;flex-shrink:0">
+        <img id="edit-photo-preview" src="${c.profilePhoto||''}" onerror="this.style.display='none';document.getElementById('edit-photo-fallback').style.display='flex'" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:2px solid var(--border);${c.profilePhoto?'':'display:none'}" />
+        <div id="edit-photo-fallback" style="width:72px;height:72px;border-radius:50%;background:var(--bg2);display:${c.profilePhoto?'none':'flex'};align-items:center;justify-content:center;font-size:30px;border:2px solid var(--border)">🧑‍✈️</div>
+      </div>
+      <div style="flex:1">
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Profile Photo</label>
+        <input type="hidden" id="edit-profilePhoto" value="${(c.profilePhoto||'').replace(/"/g,'&quot;')}" />
+        <label id="edit-photo-upload-btn" style="display:inline-flex;align-items:center;gap:8px;padding:8px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:13px;color:var(--fg)">
+          <span>📷</span> <span id="edit-photo-upload-label">Choose Photo</span>
+          <input type="file" accept="image/*" style="display:none" onchange="handlePhotoUpload(this,'${c.id}')" />
+        </label>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">Upload a JPEG or PNG photo. It will appear on the rider's app when a trip is accepted.</div>
+      </div>
+    </div>
+    <div class="info-grid" style="gap:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Full Name</label>
+          <input id="edit-name" class="f-input" value="${(c.userName||'').replace(/"/g,'&quot;')}" placeholder="Driver full name" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Phone Number</label>
+          <input id="edit-phone" class="f-input" value="${(c.phone||c.userPhone||'').replace(/"/g,'&quot;')}" placeholder="+27…" /></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Car Make</label>
+          <input id="edit-carMake" class="f-input" value="${(c.carMake||'').replace(/"/g,'&quot;')}" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Vehicle Model</label>
+          <input id="edit-vehicleModel" class="f-input" value="${(c.vehicleModel||'').replace(/"/g,'&quot;')}" /></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Plate Number</label>
+          <input id="edit-plateNumber" class="f-input" value="${(c.plateNumber||'').replace(/"/g,'&quot;')}" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Car Color</label>
+          <input id="edit-carColor" class="f-input" value="${(c.carColor||'').replace(/"/g,'&quot;')}" /></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Vehicle Type</label>
+          <select id="edit-vehicleType" class="f-input">
+            <option value="budget" ${c.vehicleType==='budget'?'selected':''}>budget</option>
+            <option value="luxury" ${c.vehicleType==='luxury'?'selected':''}>luxury</option>
+            <option value="business" ${c.vehicleType==='business'?'selected':''}>business</option>
+            <option value="van" ${c.vehicleType==='van'?'selected':''}>van</option>
+            <option value="luxury_van" ${c.vehicleType==='luxury_van'?'selected':''}>luxury_van</option>
+            <option value="executive" ${c.vehicleType==='executive'?'selected':''}>executive (business + luxury + V-Class)</option>
+          </select></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Passengers</label>
+          <input id="edit-passengerCapacity" class="f-input" type="number" value="${c.passengerCapacity||4}" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Luggage</label>
+          <input id="edit-luggageCapacity" class="f-input" type="number" value="${c.luggageCapacity||2}" /></div>
+      </div>
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-green" onclick="saveChaufEdit('${c.id}')">💾 Save Changes</button>
+  `;
+  openModal();
+}
+
+async function saveChaufEdit(id) {
+  const nameVal = document.getElementById('edit-name').value.trim();
+  const updates = {
+    name: nameVal,
+    phone: document.getElementById('edit-phone').value.trim(),
+    profilePhoto: document.getElementById('edit-profilePhoto').value.trim(),
+    carMake: document.getElementById('edit-carMake').value.trim(),
+    vehicleModel: document.getElementById('edit-vehicleModel').value.trim(),
+    plateNumber: document.getElementById('edit-plateNumber').value.trim(),
+    carColor: document.getElementById('edit-carColor').value.trim(),
+    vehicleType: document.getElementById('edit-vehicleType').value,
+    passengerCapacity: parseInt(document.getElementById('edit-passengerCapacity').value) || 4,
+    luggageCapacity: parseInt(document.getElementById('edit-luggageCapacity').value) || 2,
+  };
+  try {
+    const res = await apiFetch('/api/chauffeurs/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast('✅ Driver info updated!', 'ok');
+    closeModal();
+    loadChauf();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function deleteChauf(id, name) {
+  showDeleteConfirm({
+    title: 'Delete Driver',
+    subtitle: 'This permanently removes the driver and linked application.',
+    message: `Are you sure you want to permanently delete "${name || 'this driver'}"? This action cannot be undone.`,
+    confirmLabel: 'Confirm Delete',
+    onConfirm: async () => {
+      try {
+        const res = await apiFetch('/api/chauffeurs/' + id, { method: 'DELETE' });
+        if (!res.ok) throw new Error(await res.text());
+        toast('🗑 Driver deleted successfully.', 'ok');
+        loadChauf();
+      } catch(e) { toast('❌ ' + e.message, 'err'); }
+    },
+  });
+}
+
+// ── DRIVER APPLICATIONS ──
+async function loadApps() {
+  try {
+    const res = await apiFetch('/api/admin/driver-applications');
+    if (!res.ok) throw new Error(res.status);
+    allApps = await res.json();
+    if (!Array.isArray(allApps)) allApps = [];
+    const pending = allApps.filter(a => a.status === 'pending').length;
+    const badge = document.getElementById('nb-apps');
+    if (pending > 0) { badge.textContent = pending; badge.style.display = ''; }
+    else { badge.style.display = 'none'; }
+    renderFilteredApps();
+  } catch(e) {
+    document.getElementById('apps-table').innerHTML = emptyState('❌', 'Failed to load', e.message);
+  }
+}
+
+function fApps(f, el) {
+  document.querySelectorAll('#view-applications .ftab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active'); appsFilter = f; renderFilteredApps();
+}
+
+function renderFilteredApps() {
+  let list = allApps;
+  if (appsFilter !== 'all') list = allApps.filter(a => a.status === appsFilter);
+  renderAppsTable('apps-table', list);
+}
+
+function renderAppsTable(tableId, data) {
+  const w = document.getElementById(tableId);
+  if (!data.length) { w.innerHTML = emptyState('📋', 'No applications', 'Driver applications will appear here'); return; }
+  w.innerHTML = `<table>
+    <thead><tr><th>User ID</th><th>Chauffeur ID</th><th>Status</th><th>Submitted</th><th>Reviewed</th><th>Notes</th><th>Actions</th></tr></thead>
+    <tbody>${data.map(a => `<tr>
+      <td style="font-size:12px;font-family:var(--mono)">${(a.userId||'').slice(0,12)}…</td>
+      <td style="font-size:12px;font-family:var(--mono)">${a.chauffeurId ? (a.chauffeurId.slice(0,12)+'…') : '—'}</td>
+      <td><span class="badge ${a.status==='approved'?'b-approved':a.status==='rejected'?'b-rejected':a.status==='waitlisted'?'b-waitlisted':'b-pending'}">${a.status||'pending'}</span></td>
+      <td style="font-size:12px">${fmt(a.submittedAt)}</td>
+      <td style="font-size:12px">${a.reviewedAt ? fmt(a.reviewedAt) : '—'}</td>
+      <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${a.notes||'—'}</td>
+      <td><div class="action-cell">
+        ${a.status==='pending' ? `<button class="btn-sm btn-approve" onclick="approveApp('${a.id}','${a.chauffeurId||''}')">✓ Approve</button>` : ''}
+        ${a.status==='pending' ? `<button class="btn-sm btn-reject" onclick="rejectApp('${a.id}')">✕ Reject</button>` : ''}
+        ${a.status!=='waitlisted' ? `<button class="btn-sm btn-detail" onclick="waitlistApp('${a.id}')">⏸ Waitlist</button>` : ''}
+        ${a.status==='waitlisted' ? `<button class="btn-sm btn-approve" onclick="approveApp('${a.id}','${a.chauffeurId||''}')">✓ Reactivate</button>` : ''}
+        <button class="btn-sm btn-detail" onclick="appDetail('${a.id}')">Details</button>
+        <button class="btn-sm btn-detail" onclick="editAppNotes('${a.id}')">✏ Edit</button>
+        <button class="btn-sm btn-reject" onclick="deleteApp('${a.id}')">🗑 Delete</button>
       </div></td>
     </tr>`).join('')}
     </tbody></table>`;
 }
 
-async function approveChauf(id) {
+function approveApp(id, chauffeurId) { showAppConfirm(id, chauffeurId, 'approve'); }
+function rejectApp(id, chauffeurId) { showAppConfirm(id, chauffeurId, 'reject'); }
+function waitlistApp(id) { showAppConfirm(id, '', 'waitlist'); }
+
+function appDetail(id) {
+  const a = allApps.find(x => x.id === id); if (!a) return;
+  const c = allChauf.find(x => x.id === a.chauffeurId);
+  document.getElementById('m-title').textContent = 'Driver Application';
+  document.getElementById('m-sub').textContent = a.userId || '';
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid">
+      <div class="info-row"><div class="info-label">Status</div><div class="info-val"><span class="badge ${a.status==='approved'?'b-approved':a.status==='rejected'?'b-rejected':a.status==='waitlisted'?'b-waitlisted':'b-pending'}">${a.status || 'pending'}</span></div></div>
+      <div class="info-row"><div class="info-label">Submitted</div><div class="info-val">${fmtFull(a.submittedAt)}</div></div>
+      <div class="info-row"><div class="info-label">Reviewed</div><div class="info-val">${a.reviewedAt ? fmtFull(a.reviewedAt) : '—'}</div></div>
+      <div class="info-row"><div class="info-label">Notes</div><div class="info-val">${escapeHtml(a.notes || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Driver</div><div class="info-val">${c ? escapeHtml(c.userName || c.userEmail || 'Driver') : '—'}</div></div>
+      <div class="info-row"><div class="info-label">Vehicle</div><div class="info-val">${c ? escapeHtml([c.carMake, c.vehicleModel, c.plateNumber].filter(Boolean).join(' · ')) : '—'}</div></div>
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Close</button>
+    ${c ? `<button class="btn-lg btn-outline" onclick="closeModal();chaufDetail('${c.id}')">Driver Details</button>` : ''}
+    <button class="btn-lg btn-outline" onclick="closeModal();editAppNotes('${a.id}')">✏ Edit Notes</button>
+    <button class="btn-lg btn-delete" onclick="closeModal();deleteApp('${a.id}')">🗑 Delete</button>`;
+  openModal();
+}
+
+function showAppConfirm(id, chauffeurId, action) {
+  const a = allApps.find(x => x.id === id); if (!a) return;
+  const c = allChauf.find(x => x.id === (chauffeurId || a.chauffeurId));
+  const isApprove = action === 'approve';
+  const isWaitlist = action === 'waitlist';
+  document.getElementById('m-title').textContent = isApprove ? '✓ Approve Application' : isWaitlist ? '⏸ Waitlist Application' : '✕ Reject Application';
+  document.getElementById('m-sub').textContent = isApprove
+    ? 'Review all driver details before approving. Driver will be notified immediately.'
+    : isWaitlist
+      ? 'Waitlisted drivers are taken offline and cannot receive trip requests until reactivated.'
+    : 'Review details and provide a rejection reason. Driver will be notified immediately.';
+  document.getElementById('m-body').innerHTML = `
+    ${c ? `<div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
+      ${c.profilePhoto ? `<img src="${c.profilePhoto}" style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid var(--border);flex-shrink:0" onerror="this.style.display='none'" />` : `<div style="width:64px;height:64px;border-radius:50%;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0">🧑‍✈️</div>`}
+      <div>
+        <div style="font-weight:700;font-size:16px">${c.userName || '—'}</div>
+        <div style="color:var(--muted);font-size:13px;margin-top:2px">${c.userEmail || '—'}</div>
+        <div style="color:var(--muted);font-size:13px">${c.phone || c.userPhone || '—'}</div>
+      </div>
+    </div>
+    <div class="info-grid">
+      <div class="info-row"><div class="info-label">Vehicle</div><div class="info-val">${[c.carMake, c.vehicleModel].filter(Boolean).join(' ') || '—'}</div></div>
+      <div class="info-row"><div class="info-label">Plate</div><div class="info-val"><span style="font-family:var(--mono);font-weight:600">${c.plateNumber || '—'}</span></div></div>
+      <div class="info-row"><div class="info-label">Color</div><div class="info-val">${c.carColor || '—'}</div></div>
+      <div class="info-row"><div class="info-label">Category</div><div class="info-val" style="text-transform:capitalize">${c.vehicleType || '—'}</div></div>
+      <div class="info-row"><div class="info-label">Capacity</div><div class="info-val">${c.passengerCapacity || 4} passengers · ${c.luggageCapacity || 2} bags</div></div>
+    </div>` : `<div class="info-grid"><div class="info-row"><div class="info-label">Application ID</div><div class="info-val" style="font-family:var(--mono);font-size:12px">${id}</div></div><div class="info-row"><div class="info-label">Submitted</div><div class="info-val">${fmt(a.submittedAt)}</div></div></div>`}
+    <div class="info-grid" style="margin-top:8px">
+      <div class="info-row"><div class="info-label">Status</div><div class="info-val"><span class="badge ${a.status==='approved'?'b-approved':a.status==='rejected'?'b-rejected':a.status==='waitlisted'?'b-waitlisted':'b-pending'}">${a.status||'pending'}</span></div></div>
+      <div class="info-row"><div class="info-label">Submitted</div><div class="info-val">${fmt(a.submittedAt)}</div></div>
+    </div>
+    ${!isApprove ? `<div style="margin-top:12px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">${isWaitlist ? 'Waitlist' : 'Rejection'} Reason <span style="color:var(--red)">*</span></label><textarea id="app-reject-reason" class="f-input" style="width:100%;min-height:90px;resize:vertical;box-sizing:border-box" placeholder="${isWaitlist ? 'Explain what the driver must fix before reactivation…' : 'Explain why this application was not approved…'}"></textarea></div>` : ''}
+  `;
+  document.getElementById('m-foot').innerHTML = isApprove
+    ? `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+       <button class="btn-lg btn-green" onclick="doApproveApp('${id}','${chauffeurId||''}')">✓ Confirm Approval</button>`
+    : `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+       <button class="btn-lg" style="background:${isWaitlist ? '#9a5b00' : 'var(--red)'};color:#fff;border:none;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer" onclick="${isWaitlist ? `doWaitlistApp('${id}')` : `doRejectApp('${id}')`}">${isWaitlist ? '⏸ Confirm Waitlist' : '✕ Confirm Rejection'}</button>`;
+  openModal();
+}
+
+async function doApproveApp(id, chauffeurId) {
+  closeModal();
   try {
-    const res = await apiFetch('/api/chauffeurs/' + id, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isApproved: true }),
+    const res = await apiFetch('/api/admin/driver-applications/' + id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'approved' }),
     });
     if (!res.ok) throw new Error(await res.text());
-    toast('✅ Chauffeur approved!', 'ok');
-    loadChauf();
+    // Also approve the linked chauffeur profile so they can go online
+    if (chauffeurId) {
+      await apiFetch('/api/chauffeurs/' + chauffeurId + '/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' } }).catch(() => {});
+    }
+    toast('✅ Application approved! Driver notified.', 'ok');
+    loadApps(); loadChauf();
   } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function doRejectApp(id) {
+  const notes = document.getElementById('app-reject-reason')?.value.trim();
+  if (!notes) {
+    const el = document.getElementById('app-reject-reason');
+    if (el) { el.style.borderColor = 'var(--red)'; el.focus(); }
+    return;
+  }
+  closeModal();
+  try {
+    const res = await apiFetch('/api/admin/driver-applications/' + id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'rejected', notes }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast('🚫 Application rejected. Driver notified.', 'err');
+    loadApps();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function doWaitlistApp(id) {
+  const notes = document.getElementById('app-reject-reason')?.value.trim();
+  if (!notes) {
+    const el = document.getElementById('app-reject-reason');
+    if (el) { el.style.borderColor = 'var(--red)'; el.focus(); }
+    return;
+  }
+  closeModal();
+  try {
+    const res = await apiFetch('/api/admin/driver-applications/' + id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'waitlisted', notes }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast('⏸ Application waitlisted. Driver taken offline.', 'ok');
+    loadApps(); loadChauf();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function editAppNotes(id) {
+  const a = allApps.find(x => x.id === id); if (!a) return;
+  document.getElementById('m-title').textContent = 'Edit Driver Application';
+  document.getElementById('m-sub').textContent = 'Update internal review notes';
+  document.getElementById('m-body').innerHTML = `
+    <div style="margin-top:4px">
+      <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Notes</label>
+      <textarea id="app-edit-notes" class="f-input" style="width:100%;min-height:110px;resize:vertical;box-sizing:border-box">${escapeHtml(a.notes || '')}</textarea>
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-green" onclick="saveAppNotes('${id}')">💾 Save Notes</button>`;
+  openModal();
+}
+
+async function saveAppNotes(id) {
+  const a = allApps.find(x => x.id === id); if (!a) return;
+  const notes = document.getElementById('app-edit-notes')?.value || '';
+  closeModal();
+  try {
+    const res = await apiFetch('/api/admin/driver-applications/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: a.status, notes: notes.trim() }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast('✅ Notes updated!', 'ok');
+    loadApps();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function deleteApp(id) {
+  showDeleteConfirm({
+    title: 'Delete Application',
+    subtitle: 'This permanently removes the application record.',
+    message: 'Are you sure you want to permanently delete this application? This action cannot be undone.',
+    confirmLabel: 'Confirm Delete',
+    onConfirm: async () => {
+      try {
+        const res = await apiFetch('/api/admin/driver-applications/' + id, { method: 'DELETE' });
+        if (!res.ok) throw new Error(await res.text());
+        toast('🗑 Application deleted.', 'ok');
+        loadApps();
+      } catch(e) { toast('❌ ' + e.message, 'err'); }
+    },
+  });
+}
+
+// ── PARTNER APPLICATIONS ──
+async function loadPartners() {
+  try {
+    const res = await apiFetch('/api/admin/operator-profiles?type=partner');
+    if (!res.ok) throw new Error(res.status);
+    allPartners = await res.json();
+    if (!Array.isArray(allPartners)) allPartners = [];
+    const pending = allPartners.filter(p => p.status === 'pending').length;
+    const badge = document.getElementById('nb-partners');
+    if (pending > 0) { badge.textContent = pending; badge.style.display = ''; }
+    else { badge.style.display = 'none'; }
+    renderFilteredPartners();
+  } catch(e) {
+    document.getElementById('partners-table').innerHTML = emptyState('❌', 'Failed to load', e.message);
+  }
+}
+
+function fPartners(f, el) {
+  document.querySelectorAll('#view-partners .ftab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active'); partnersFilter = f; renderFilteredPartners();
+}
+
+function renderFilteredPartners() {
+  let list = allPartners;
+  if (partnersFilter !== 'all') list = allPartners.filter(p => p.status === partnersFilter);
+  const w = document.getElementById('partners-table');
+  if (!list.length) { w.innerHTML = emptyState('🏢', 'No partner applications', 'Partner company applications will appear here'); return; }
+  w.innerHTML = `<table>
+    <thead><tr><th>Company</th><th>Contact</th><th>Status</th><th>Submitted</th><th>Actions</th></tr></thead>
+    <tbody>${list.map(p => {
+      const company = p.partnerProfile?.companyName || 'Partner';
+      const contact = p.partnerProfile?.contactPersonName || p.user?.name || '—';
+      return `<tr>
+        <td><strong>${company}</strong><div style="font-size:11px;color:var(--muted)">${p.partnerProfile?.registrationNumber || p.user?.username || '—'}</div></td>
+        <td>${contact}<div style="font-size:11px;color:var(--muted)">${p.partnerProfile?.contactPhone || p.user?.phone || '—'}</div></td>
+        <td><span class="badge ${p.status==='approved'?'b-approved':p.status==='rejected'?'b-rejected':'b-pending'}">${p.status || 'pending'}</span></td>
+        <td style="font-size:12px">${fmt(p.submittedAt || p.createdAt)}</td>
+        <td><div class="action-cell">
+          ${p.status==='pending' ? `<button class="btn-sm btn-approve" onclick="setOperatorStatus('${p.id}','approved')">✓ Approve</button>` : ''}
+          ${p.status==='pending' ? `<button class="btn-sm btn-reject" onclick="rejectOperator('${p.id}')">✕ Reject</button>` : ''}
+          <button class="btn-sm btn-detail" onclick="partnerDetail('${p.id}')">Details</button>
+          <button class="btn-sm btn-detail" onclick="editPartner('${p.id}')">✏ Edit</button>
+          <button class="btn-sm btn-detail" onclick="viewOperatorDocs('${p.userId}','${company.replace(/'/g,"\\'")}')">📂 Docs</button>
+          <button class="btn-sm btn-reject" onclick="deletePartner('${p.id}')">🗑 Delete</button>
+        </div></td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+function partnerDetail(id) {
+  const p = allPartners.find(x => x.id === id); if (!p) return;
+  const pp = p.partnerProfile || {};
+  const company = pp.companyName || 'Partner';
+  document.getElementById('m-title').textContent = company;
+  document.getElementById('m-sub').textContent = 'Partner application details';
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid">
+      <div class="info-row"><div class="info-label">Status</div><div class="info-val"><span class="badge ${p.status==='approved'?'b-approved':p.status==='rejected'?'b-rejected':'b-pending'}">${p.status || 'pending'}</span></div></div>
+      <div class="info-row"><div class="info-label">Company</div><div class="info-val">${escapeHtml(company)}</div></div>
+      <div class="info-row"><div class="info-label">Registration</div><div class="info-val">${escapeHtml(pp.registrationNumber || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Contact</div><div class="info-val">${escapeHtml(pp.contactPersonName || p.user?.name || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Phone</div><div class="info-val">${escapeHtml(pp.contactPhone || p.user?.phone || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Email</div><div class="info-val">${escapeHtml(pp.contactEmail || p.user?.username || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Bank</div><div class="info-val">${escapeHtml([pp.bankName, pp.accountHolder, pp.accountNumber].filter(Boolean).join(' · ') || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Submitted</div><div class="info-val">${fmtFull(p.submittedAt || p.createdAt)}</div></div>
+      ${p.rejectionReason ? `<div class="info-row"><div class="info-label">Reason</div><div class="info-val">${escapeHtml(p.rejectionReason)}</div></div>` : ''}
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Close</button>
+    <button class="btn-lg btn-outline" onclick="closeModal();editPartner('${id}')">✏ Edit</button>
+    <button class="btn-lg btn-outline" onclick="closeModal();viewOperatorDocs('${p.userId}','${company.replace(/'/g,"\\'")}')">📂 Docs</button>
+    <button class="btn-lg btn-delete" onclick="closeModal();deletePartner('${id}')">🗑 Delete</button>`;
+  openModal();
+}
+
+function editPartner(id) {
+  const p = allPartners.find(x => x.id === id); if (!p) return;
+  const pp = p.partnerProfile || {};
+  document.getElementById('m-title').textContent = 'Edit Partner';
+  document.getElementById('m-sub').textContent = pp.companyName || p.user?.name || 'Partner';
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid" style="gap:12px">
+      ${[
+        ['companyName','Company Name', pp.companyName],
+        ['registrationNumber','Registration Number', pp.registrationNumber],
+        ['contactPersonName','Contact Person', pp.contactPersonName],
+        ['contactPhone','Contact Phone', pp.contactPhone],
+        ['contactEmail','Contact Email', pp.contactEmail],
+        ['bankName','Bank Name', pp.bankName],
+        ['accountHolder','Account Holder', pp.accountHolder],
+        ['accountNumber','Account Number', pp.accountNumber],
+      ].map(([key,label,value]) => `<div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">${label}</label><input id="partner-${key}" class="f-input" value="${escapeHtml(value || '')}" /></div>`).join('')}
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-green" onclick="savePartnerEdit('${id}')">💾 Save Changes</button>`;
+  openModal();
+}
+
+async function savePartnerEdit(id) {
+  const body = {};
+  ['companyName','registrationNumber','contactPersonName','contactPhone','contactEmail','bankName','accountHolder','accountNumber'].forEach(key => {
+    body[key] = document.getElementById('partner-' + key)?.value.trim() || '';
+  });
+  closeModal();
+  try {
+    const res = await apiFetch('/api/admin/operator-profiles/' + id, {
+      method:'PUT',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast('✅ Partner updated.', 'ok');
+    loadPartners();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function setOperatorStatus(id, status, reason) {
+  try {
+    const res = await apiFetch('/api/admin/operator-profiles/' + id + '/status', {
+      method:'PUT',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ status, reason }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast(status === 'approved' ? '✅ Partner approved and notified.' : '🚫 Partner rejected and notified.', status === 'approved' ? 'ok' : 'err');
+    loadPartners();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+function rejectOperator(id) {
+  document.getElementById('m-title').textContent = 'Reject Partner Application';
+  document.getElementById('m-sub').textContent = 'The partner will be notified immediately.';
+  document.getElementById('m-body').innerHTML = `
+    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Rejection Reason</label>
+    <textarea id="partner-reject-reason" class="f-input" style="width:100%;min-height:90px;resize:vertical;box-sizing:border-box"></textarea>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-red" onclick="doRejectOperator('${id}')">✕ Confirm Rejection</button>`;
+  openModal();
+}
+
+function doRejectOperator(id) {
+  const reason = document.getElementById('partner-reject-reason')?.value.trim() || '';
+  closeModal();
+  setOperatorStatus(id, 'rejected', reason);
+}
+
+function deletePartner(id) {
+  const p = allPartners.find(x => x.id === id);
+  showDeleteConfirm({
+    title: 'Delete Partner Application',
+    subtitle: 'This removes the partner profile and linked fleet records.',
+    message: `Delete ${p?.partnerProfile?.companyName || 'this partner application'}?`,
+    confirmLabel: 'Confirm Delete',
+    onConfirm: async () => {
+      try {
+        const res = await apiFetch('/api/admin/operator-profiles/' + id, { method:'DELETE' });
+        if (!res.ok) throw new Error(await res.text());
+        toast('🗑 Partner application deleted.', 'ok');
+        loadPartners(); loadVehicles();
+      } catch(e) { toast('❌ ' + e.message, 'err'); }
+    },
+  });
+}
+
+function renderDocsModal(docs) {
+  const list = Array.isArray(docs) ? docs : [];
+  if (!list.length) {
+    document.getElementById('m-body').innerHTML = emptyState('📂', 'No documents uploaded', 'No documents are attached yet.');
+    return;
+  }
+  document.getElementById('m-body').innerHTML = `<div class="docs-grid">
+    ${list.map(d => {
+      const docUrl = resolveDocUrl(d.url);
+      const isImg = /\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(docUrl) || (docUrl.includes('supabase') && !docUrl.includes('.pdf')) || docUrl.includes('/api/media/');
+      return `<div class="doc-card">
+        <div class="doc-label">${escapeHtml(d.type || 'Document')}</div>
+        ${docUrl && isImg ? `<img src="${docUrl}" class="doc-img" onerror="this.style.display='none'"/>` : `<div style="font-size:36px;margin:12px 0">📄</div>`}
+        ${docUrl ? `
+          <div style="display:flex;gap:6px;justify-content:center;margin-top:8px">
+            <a href="${docUrl}" target="_blank" rel="noopener" class="btn-sm btn-detail" style="text-decoration:none">View ↗</a>
+            <button class="btn-sm btn-detail" onclick="downloadDoc('${docUrl}','${escapeHtml(d.type || 'document')}')">Download ⬇</button>
+          </div>
+        ` : '<div class="empty-sub">No file URL</div>'}
+        <div style="margin-top:8px"><span class="badge ${d.status==='approved'?'b-approved':d.status==='rejected'?'b-rejected':'b-pending'}">${d.status || 'pending'}</span></div>
+        ${d.reviewReason ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">${escapeHtml(d.reviewReason)}</div>` : ''}
+        <div class="action-cell" style="margin-top:8px">
+          ${d.status !== 'approved' && docUrl ? `<button class="btn-sm btn-approve" onclick="reviewDocument('${d.id}','approved')">✓ Activate</button>` : ''}
+          ${d.status !== 'rejected' ? `<button class="btn-sm btn-reject" onclick="reviewDocument('${d.id}','rejected', '${!docUrl ? 'Document photo was not received by cloud storage. Please re-upload.' : ''}')">${!docUrl ? 'Request Re-upload' : '✕ Reject'}</button>` : ''}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+async function reviewDocument(id, status, defaultReason = '') {
+  let reviewReason = '';
+  if (status === 'rejected') {
+    reviewReason = window.prompt('Document rejection / re-upload reason:', defaultReason || 'Please re-upload this document.');
+    if (!reviewReason || !reviewReason.trim()) return;
+  }
+  try {
+    const res = await apiFetch('/api/admin/documents/' + id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status, reviewReason: reviewReason.trim()}) });
+    if (!res.ok) throw new Error(await res.text());
+    toast(status === 'approved' ? '✅ Document activated.' : '🚫 Document rejected. Driver notified.', status === 'approved' ? 'ok' : 'err');
+    loadDocuments(); loadVehicles();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function loadDocuments() {
+  try {
+    const res = await apiFetch('/api/admin/documents');
+    if (!res.ok) throw new Error(await res.text());
+    allDocuments = await res.json();
+    const pending = allDocuments.filter(d => d.status === 'pending').length;
+    const badge = document.getElementById('nb-documents');
+    if (pending) { badge.textContent = pending; badge.style.display = ''; } else badge.style.display = 'none';
+    renderDocuments();
+  } catch(e) { document.getElementById('documents-table').innerHTML = emptyState('❌', 'Failed to load documents', e.message); }
+}
+
+function fDocuments(filter, el) {
+  document.querySelectorAll('#view-documents .ftab').forEach(tab => tab.classList.remove('active'));
+  el.classList.add('active'); documentsFilter = filter; renderDocuments();
+}
+
+function renderDocuments() {
+  let list = allDocuments;
+  if (documentsFilter === 'pending') list = list.filter(d => d.status === 'pending');
+  else if (documentsFilter !== 'all') list = list.filter(d => String(d.type || '').startsWith(documentsFilter + ':'));
+  const root = document.getElementById('documents-table');
+  if (!list.length) { root.innerHTML = emptyState('📂', 'No documents', 'Uploaded documents will appear here.'); return; }
+  root.innerHTML = `<table><thead><tr><th>Document</th><th>Type</th><th>Status</th><th>Uploaded</th><th>Actions</th></tr></thead><tbody>${list.map(d => {
+    const docUrl = resolveDocUrl(d.url);
+    const docActions = docUrl
+      ? `<div style="display:flex;gap:6px;align-items:center"><a href="${docUrl}" target="_blank" rel="noopener" class="doc-link">Open ↗</a> <button class="btn-sm btn-detail" style="padding:2px 8px;font-size:11px" onclick="downloadDoc('${docUrl}','${escapeHtml(String(d.type||'doc'))}')">⬇</button></div>`
+      : `<span class="badge b-rejected" style="font-size:11px" title="Document was saved as a local device path. Driver must re-upload.">⚠️ Re-upload needed</span>`;
+    return `<tr>
+    <td>${docActions}</td>
+    <td>${escapeHtml(String(d.type || '').replace(':', ' · '))}</td>
+    <td><span class="badge ${d.status==='approved'?'b-approved':d.status==='rejected'?'b-rejected':'b-pending'}">${d.status || 'pending'}</span>${d.reviewReason ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">${escapeHtml(d.reviewReason)}</div>` : ''}</td>
+    <td>${fmt(d.uploadedAt)}</td>
+    <td><div class="action-cell">${d.status !== 'approved' && docUrl ? `<button class="btn-sm btn-approve" onclick="reviewDocument('${d.id}','approved')">✓ Activate</button>` : ''}${d.status !== 'rejected' ? `<button class="btn-sm btn-reject" onclick="reviewDocument('${d.id}','rejected', '${!docUrl ? 'Document photo was not received by cloud storage. Please re-upload.' : ''}')">${!docUrl ? 'Request Re-upload' : '✕ Reject'}</button>` : ''}</div></td>
+  </tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+async function viewOperatorDocs(userId, name) {
+  document.getElementById('m-title').textContent = name || 'Documents';
+  document.getElementById('m-sub').textContent = 'Uploaded operator documents';
+  document.getElementById('m-body').innerHTML = '<div class="loading">Loading documents…</div>';
+  document.getElementById('m-foot').innerHTML = '<button class="btn-lg btn-outline" onclick="closeModal()">Close</button>';
+  openModal();
+  try {
+    const res = await apiFetch('/api/admin/documents/user/' + userId);
+    if (!res.ok) throw new Error(await res.text());
+    const docs = await res.json();
+    renderDocsModal(docs);
+  } catch(e) {
+    document.getElementById('m-body').innerHTML = `<div class="notice">❌ Failed to load documents: ${e.message}</div>`;
+  }
+}
+
+// ── VEHICLE APPROVALS ──
+async function loadVehicles() {
+  try {
+    const res = await apiFetch('/api/admin/vehicles');
+    if (!res.ok) throw new Error(res.status);
+    allVehicles = await res.json();
+    if (!Array.isArray(allVehicles)) allVehicles = [];
+    const pending = allVehicles.filter(v => v.status === 'pending').length;
+    const badge = document.getElementById('nb-vehicles');
+    if (pending > 0) { badge.textContent = pending; badge.style.display = ''; }
+    else { badge.style.display = 'none'; }
+    renderFilteredVehicles();
+  } catch(e) {
+    document.getElementById('vehicles-table').innerHTML = emptyState('❌', 'Failed to load', e.message);
+  }
+}
+
+function fVehicles(f, el) {
+  document.querySelectorAll('#view-vehicles .ftab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active'); vehiclesFilter = f; renderFilteredVehicles();
+}
+
+function renderFilteredVehicles() {
+  let list = allVehicles;
+  if (vehiclesFilter !== 'all') list = allVehicles.filter(v => v.status === vehiclesFilter);
+  const w = document.getElementById('vehicles-table');
+  if (!list.length) { w.innerHTML = emptyState('🚘', 'No vehicles', 'Submitted vehicles will appear here'); return; }
+  w.innerHTML = `<table>
+    <thead><tr><th>Vehicle</th><th>Owner</th><th>Status</th><th>Submitted</th><th>Docs</th><th>Actions</th></tr></thead>
+    <tbody>${list.map(v => `<tr>
+      <td><strong>${v.carMake || ''} ${v.vehicleModel || ''}</strong><div style="font-size:11px;color:var(--muted);font-family:var(--mono)">${v.plateNumber || '—'} · ${v.vehicleYear || '—'}</div></td>
+      <td>${v.owner?.partnerProfile?.companyName || v.owner?.user?.name || '—'}<div style="font-size:11px;color:var(--muted)">${v.owner?.type || 'owner'}</div></td>
+      <td><span class="badge ${v.status==='approved'?'b-approved':v.status==='rejected'?'b-rejected':'b-pending'}">${v.status || 'pending'}</span></td>
+      <td style="font-size:12px">${fmt(v.submittedAt || v.createdAt)}</td>
+      <td style="font-size:12px">${(v.documents || []).length}</td>
+      <td><div class="action-cell">
+        ${v.status==='pending' ? `<button class="btn-sm btn-approve" onclick="setVehicleStatus('${v.id}','approved')">✓ Approve</button>` : ''}
+        ${v.status==='waitlisted' ? `<button class="btn-sm btn-approve" onclick="setVehicleStatus('${v.id}','approved')">✓ Reactivate</button>` : ''}
+        ${v.status!=='waitlisted' && v.status!=='rejected' ? `<button class="btn-sm btn-detail" onclick="waitlistVehicle('${v.id}')">⏸ Waitlist</button>` : ''}
+        ${v.status==='pending' ? `<button class="btn-sm btn-reject" onclick="rejectVehicle('${v.id}')">✕ Reject</button>` : ''}
+        <button class="btn-sm btn-detail" onclick="vehicleDetail('${v.id}')">Details</button>
+        <button class="btn-sm btn-detail" onclick="editVehicle('${v.id}')">✏ Edit</button>
+        <button class="btn-sm btn-detail" onclick="renderDocsModalForVehicle('${v.id}')">📂 Docs</button>
+        <button class="btn-sm btn-reject" onclick="deleteVehicle('${v.id}')">🗑 Delete</button>
+      </div></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+async function setVehicleStatus(id, status, reason) {
+  try {
+    const res = await apiFetch('/api/admin/vehicles/' + id + '/status', {
+      method:'PUT',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ status, reason }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast(status === 'approved' ? '✅ Vehicle approved and owner notified.' : '🚫 Vehicle rejected and owner notified.', status === 'approved' ? 'ok' : 'err');
+    loadVehicles();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+function rejectVehicle(id) {
+  document.getElementById('m-title').textContent = 'Reject Vehicle';
+  document.getElementById('m-sub').textContent = 'The owner will be notified immediately.';
+  document.getElementById('m-body').innerHTML = `
+    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Rejection Reason</label>
+    <textarea id="vehicle-reject-reason" class="f-input" style="width:100%;min-height:90px;resize:vertical;box-sizing:border-box"></textarea>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-red" onclick="doRejectVehicle('${id}')">✕ Confirm Rejection</button>`;
+  openModal();
+}
+
+function waitlistVehicle(id) {
+  document.getElementById('m-title').textContent = 'Waitlist Vehicle';
+  document.getElementById('m-sub').textContent = 'The vehicle will be removed from service and affected drivers will be notified.';
+  document.getElementById('m-body').innerHTML = `<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">Waitlist Reason <span style="color:var(--red)">*</span></label><textarea id="vehicle-waitlist-reason" class="f-input" style="width:100%;min-height:90px;resize:vertical;box-sizing:border-box"></textarea>`;
+  document.getElementById('m-foot').innerHTML = `<button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button><button class="btn-lg" style="background:#9a5b00;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer" onclick="doWaitlistVehicle('${id}')">⏸ Confirm Waitlist</button>`;
+  openModal();
+}
+
+function doWaitlistVehicle(id) {
+  const reason = document.getElementById('vehicle-waitlist-reason')?.value.trim();
+  if (!reason) return;
+  closeModal(); setVehicleStatus(id, 'waitlisted', reason);
+}
+
+function doRejectVehicle(id) {
+  const reason = document.getElementById('vehicle-reject-reason')?.value.trim() || '';
+  closeModal();
+  setVehicleStatus(id, 'rejected', reason);
+}
+
+async function renderDocsModalForVehicle(id) {
+  const vehicle = allVehicles.find(v => v.id === id);
+  document.getElementById('m-title').textContent = 'Vehicle Documents';
+  document.getElementById('m-sub').textContent = vehicle ? `${vehicle.carMake || ''} ${vehicle.vehicleModel || ''} · ${vehicle.plateNumber || ''}` : '';
+  document.getElementById('m-foot').innerHTML = '<button class="btn-lg btn-outline" onclick="closeModal()">Close</button>';
+  renderDocsModal(vehicle?.documents || []);
+  openModal();
+}
+
+function vehicleDetail(id) {
+  const v = allVehicles.find(x => x.id === id); if (!v) return;
+  document.getElementById('m-title').textContent = [v.carMake, v.vehicleModel].filter(Boolean).join(' ') || 'Vehicle';
+  document.getElementById('m-sub').textContent = v.plateNumber || '';
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid">
+      <div class="info-row"><div class="info-label">Status</div><div class="info-val"><span class="badge ${v.status==='approved'?'b-approved':v.status==='rejected'?'b-rejected':'b-pending'}">${v.status || 'draft'}</span></div></div>
+      <div class="info-row"><div class="info-label">Owner</div><div class="info-val">${escapeHtml(v.owner?.partnerProfile?.companyName || v.owner?.user?.name || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Vehicle</div><div class="info-val">${escapeHtml([v.carMake, v.vehicleModel].filter(Boolean).join(' ') || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Plate</div><div class="info-val"><span style="font-family:var(--mono)">${escapeHtml(v.plateNumber || '—')}</span></div></div>
+      <div class="info-row"><div class="info-label">Year</div><div class="info-val">${escapeHtml(v.vehicleYear || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Category</div><div class="info-val">${escapeHtml(v.vehicleType || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Color</div><div class="info-val">${escapeHtml(v.carColor || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Capacity</div><div class="info-val">${v.passengerCapacity || 4} passengers · ${v.luggageCapacity || 2} bags</div></div>
+      <div class="info-row"><div class="info-label">Documents</div><div class="info-val">${(v.documents || []).length}</div></div>
+      <div class="info-row"><div class="info-label">Submitted</div><div class="info-val">${fmtFull(v.submittedAt || v.createdAt)}</div></div>
+      ${v.rejectionReason ? `<div class="info-row"><div class="info-label">Reason</div><div class="info-val">${escapeHtml(v.rejectionReason)}</div></div>` : ''}
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Close</button>
+    <button class="btn-lg btn-outline" onclick="closeModal();editVehicle('${id}')">✏ Edit</button>
+    <button class="btn-lg btn-outline" onclick="closeModal();renderDocsModalForVehicle('${id}')">📂 Docs</button>
+    <button class="btn-lg btn-delete" onclick="closeModal();deleteVehicle('${id}')">🗑 Delete</button>`;
+  openModal();
+}
+
+function editVehicle(id) {
+  const v = allVehicles.find(x => x.id === id); if (!v) return;
+  document.getElementById('m-title').textContent = 'Edit Vehicle Details';
+  document.getElementById('m-sub').textContent = [v.carMake, v.vehicleModel, v.plateNumber].filter(Boolean).join(' · ');
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid" style="gap:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Car Make</label><input id="vehicle-carMake" class="f-input" value="${escapeHtml(v.carMake || '')}" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Vehicle Model</label><input id="vehicle-vehicleModel" class="f-input" value="${escapeHtml(v.vehicleModel || '')}" /></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">License Plate</label><input id="vehicle-plateNumber" class="f-input" value="${escapeHtml(v.plateNumber || '')}" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Car Color</label><input id="vehicle-carColor" class="f-input" value="${escapeHtml(v.carColor || '')}" /></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Year</label><input id="vehicle-vehicleYear" class="f-input" type="number" value="${escapeHtml(v.vehicleYear || '')}" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Passengers</label><input id="vehicle-passengerCapacity" class="f-input" type="number" value="${v.passengerCapacity || 4}" /></div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Luggage (Bags)</label><input id="vehicle-luggageCapacity" class="f-input" type="number" value="${v.luggageCapacity || 2}" /></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Category / Ride Class</label>
+          <select id="vehicle-vehicleType" class="f-input">
+            ${vehicleCategoryOptions(v.vehicleType)}
+          </select>
+        </div>
+        <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Approval Status</label>
+          <select id="vehicle-status" class="f-input">
+            <option value="pending" ${v.status==='pending'?'selected':''}>Pending</option>
+            <option value="approved" ${v.status==='approved'?'selected':''}>Approved</option>
+            <option value="waitlisted" ${v.status==='waitlisted'?'selected':''}>Waitlisted</option>
+            <option value="rejected" ${v.status==='rejected'?'selected':''}>Rejected</option>
+            <option value="draft" ${v.status==='draft'?'selected':''}>Draft</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Rejection Reason / Admin Notes</label>
+        <input id="vehicle-rejectionReason" class="f-input" placeholder="Optional notes or reason for rejection" value="${escapeHtml(v.rejectionReason || '')}" />
+      </div>
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-green" onclick="saveVehicleEdit('${id}')">💾 Save Changes</button>`;
+  openModal();
+}
+
+function vehicleCategoryOptions(selected) {
+  return [
+    ['budget','A2B Lite / Budget'],
+    ['sedan','Sedan / Standard'],
+    ['business','Business Class'],
+    ['luxury','Luxury / VIP'],
+    ['vip','VIP Exclusive'],
+    ['van','Van / 7-Seater'],
+    ['v_class','V-Class / Luxury Van'],
+    ['luxury_van','Luxury Van'],
+  ].map(([value,label]) => `<option value="${value}" ${selected===value?'selected':''}>${label}</option>`).join('');
+}
+
+async function saveVehicleEdit(id) {
+  const body = {
+    carMake: document.getElementById('vehicle-carMake')?.value.trim() || '',
+    vehicleModel: document.getElementById('vehicle-vehicleModel')?.value.trim() || '',
+    plateNumber: document.getElementById('vehicle-plateNumber')?.value.trim() || '',
+    carColor: document.getElementById('vehicle-carColor')?.value.trim() || '',
+    vehicleYear: parseInt(document.getElementById('vehicle-vehicleYear')?.value || '0', 10),
+    passengerCapacity: parseInt(document.getElementById('vehicle-passengerCapacity')?.value || '4', 10),
+    luggageCapacity: parseInt(document.getElementById('vehicle-luggageCapacity')?.value || '2', 10),
+    vehicleType: document.getElementById('vehicle-vehicleType')?.value || 'budget',
+    status: document.getElementById('vehicle-status')?.value || 'pending',
+    rejectionReason: document.getElementById('vehicle-rejectionReason')?.value.trim() || '',
+  };
+  closeModal();
+  try {
+    const res = await apiFetch('/api/admin/vehicles/' + id, {
+      method:'PUT',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast('✅ Vehicle updated successfully.', 'ok');
+    loadVehicles();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+}
+
+function deleteVehicle(id) {
+  const v = allVehicles.find(x => x.id === id);
+  showDeleteConfirm({
+    title: 'Delete Vehicle',
+    subtitle: 'This removes the vehicle, its documents, and assignments.',
+    message: `Delete ${[v?.carMake, v?.vehicleModel, v?.plateNumber].filter(Boolean).join(' · ') || 'this vehicle'}?`,
+    confirmLabel: 'Confirm Delete',
+    onConfirm: async () => {
+      try {
+        const res = await apiFetch('/api/admin/vehicles/' + id, { method:'DELETE' });
+        if (!res.ok) throw new Error(await res.text());
+        toast('🗑 Vehicle deleted.', 'ok');
+        loadVehicles();
+      } catch(e) { toast('❌ ' + e.message, 'err'); }
+    },
+  });
 }
 
 function chaufDetail(id) {
@@ -664,7 +1966,10 @@ function chaufDetail(id) {
   document.getElementById('m-foot').innerHTML = `
     <button class="btn-lg btn-outline" onclick="closeModal()">Close</button>
     <button class="btn-lg btn-outline" onclick="closeModal();viewDocs('${c.id}','${(c.userName||'Driver').replace(/'/g,"\\'")}')">📄 View Docs</button>
-    ${!c.isApproved ? `<button class="btn-lg btn-green" onclick="approveChauf('${c.id}');closeModal()">✓ Approve</button>` : ''}
+    <button class="btn-lg btn-outline" onclick="closeModal();editChauf('${c.id}')">✏ Edit</button>
+    ${!c.isApproved ? `<button class="btn-lg btn-green" onclick="closeModal();approveChauf('${c.id}')">✓ Approve</button>` : ''}
+    ${!c.isApproved ? `<button class="btn-lg" style="background:var(--red);color:#fff;border:none;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer" onclick="closeModal();rejectChauf('${c.id}')">✕ Reject</button>` : ''}
+    <button class="btn-lg btn-delete" onclick="closeModal();deleteChauf('${c.id}','${(c.userName||'this driver').replace(/'/g,"\\'")}')">🗑 Delete Driver</button>
   `;
   openModal();
 }
@@ -682,7 +1987,9 @@ async function viewDocs(chauffeurId, name) {
       pdrp_certificate:'PDRP Certificate', drivers_license:"Driver's License",
       driver_evaluation:'Driver Evaluation', criminal_background_check:'Background Check',
       double_license_disk:'License Disk', passenger_liability_insurance:'Liability Insurance',
-      dekra_report:'Dekra Report', driver_photo:'Driver Photo',
+      insurance:'Liability Insurance', dekra_report:'Dekra Report', driver_photo:'Driver Photo',
+      inspection_photos:'Vehicle Photos (5 Angles)', photo_front:'Front View', photo_back:'Rear View',
+      photo_left:'Left Side View', photo_right:'Right Side View', photo_inside:'Interior View',
       id_document:'ID / Passport', proof_of_address:'Proof of Address',
       vehicle_registration:'Vehicle Registration', prDP:'PrDP Certificate',
     };
@@ -693,11 +2000,18 @@ async function viewDocs(chauffeurId, name) {
     let html = '<div class="docs-grid">';
     for (const d of docs) {
       const label = DOC_LABELS[d.documentType] || (d.documentType || '').replace(/_/g,' ').replace(/\b\w/g, l => l.toUpperCase());
-      const isImg = /\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(d.url || '') || (d.url || '').includes('supabase');
+      const docUrl = resolveDocUrl(d.url);
+      const isImg = /\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(docUrl) || (docUrl.includes('supabase') && !docUrl.includes('.pdf')) || docUrl.includes('/api/media/');
       html += `<div class="doc-card">
-        <div class="doc-label">${label}</div>
-        ${isImg ? `<img class="doc-img" src="${d.url}" onerror="this.style.display='none'" />` : `<div style="font-size:36px;margin:12px 0">📄</div>`}
-        <a class="doc-link" href="${d.url}" target="_blank">View / Download ↗</a>
+        <div class="doc-label">${escapeHtml(label)}</div>
+        ${docUrl && isImg ? `<img class="doc-img" src="${docUrl}" onerror="this.style.display='none'" />` : `<div style="font-size:36px;margin:12px 0">📄</div>`}
+        ${docUrl ? `
+          <div style="display:flex;gap:6px;justify-content:center;margin-top:8px">
+            <a class="btn-sm btn-detail" href="${docUrl}" target="_blank" rel="noopener" style="text-decoration:none">View ↗</a>
+            <button class="btn-sm btn-detail" onclick="downloadDoc('${docUrl}','${escapeHtml(label)}')">Download ⬇</button>
+          </div>
+        ` : `<div class="empty-sub" style="color:var(--red,#e53e3e);font-size:11px;margin-top:8px">⚠️ Re-upload needed (stored as local path)</div>`}
+        <button class="btn-sm btn-delete" style="margin-top:8px;width:100%" onclick="adminDelete('document','${d.id}','${label.replace(/'/g,"\\'")}')">🗑 Delete</button>
       </div>`;
     }
     html += '</div>';
@@ -708,30 +2022,204 @@ async function viewDocs(chauffeurId, name) {
 }
 
 // ── RIDES ──
+function queueTripSearch() {
+  clearTimeout(tripSearchTimer);
+  tripSearchTimer = setTimeout(() => applyTripFilters(), 350);
+}
+
+function applyTripFilters() {
+  tripPage = 1;
+  loadRides();
+}
+
+function clearTripFilters() {
+  ['trip-search','trip-from','trip-to'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const status = document.getElementById('trip-status');
+  if (status) status.value = 'all';
+  applyTripFilters();
+}
+
+function changeTripPage(nextPage) {
+  const page = Math.max(1, Math.min(tripTotalPages, Number(nextPage) || 1));
+  if (page === tripPage) return;
+  tripPage = page;
+  loadRides();
+}
+
+function tripStatusClass(status) {
+  if (status === 'trip_completed') return 'b-completed';
+  if (status === 'cancelled') return 'b-cancelled';
+  return 'b-pending';
+}
+
+function formatTripDistance(ride) {
+  const source = ride.actualDistanceKm ?? ride.distanceKm;
+  const value = source == null ? Number.NaN : Number(source);
+  return Number.isFinite(value) && value >= 0 ? `${value.toFixed(1)} km` : '—';
+}
+
+function formatTripDuration(ride) {
+  const source = ride.actualDurationMin ?? ride.durationMin;
+  const value = source == null ? Number.NaN : Number(source);
+  return Number.isFinite(value) && value >= 0 ? `${Math.round(value)} min` : '—';
+}
+
 async function loadRides() {
   spin('rides-table');
   try {
-    const res = await apiFetch('/api/rides');
-    if (!res.ok) throw new Error(res.status);
-    const rides = await res.json();
-    if (!Array.isArray(rides) || !rides.length) {
+    const params = new URLSearchParams({ page:String(tripPage), pageSize:String(tripPageSize) });
+    const search = document.getElementById('trip-search')?.value?.trim();
+    const status = document.getElementById('trip-status')?.value || 'all';
+    const from = document.getElementById('trip-from')?.value;
+    const to = document.getElementById('trip-to')?.value;
+    if (search) params.set('search', search);
+    if (status !== 'all') params.set('status', status);
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+
+    const res = await apiFetch('/api/admin/trips?' + params.toString());
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || res.status);
+    const rides = Array.isArray(data.items) ? data.items : [];
+    tripPage = Number(data.page || 1);
+    tripTotalPages = Math.max(1, Number(data.totalPages || 1));
+    if (!rides.length) {
       document.getElementById('rides-table').innerHTML = emptyState('🗺', 'No rides yet', 'Rides appear here once users book them');
       return;
     }
     document.getElementById('rides-table').innerHTML = `<table>
-      <thead><tr><th>Pickup</th><th>Dropoff</th><th>Status</th><th>Price</th><th>Payment</th><th>Date</th></tr></thead>
-      <tbody>${rides.map(r => `<tr>
-        <td style="max-width:180px;font-size:13px">${r.pickupAddress || 'N/A'}</td>
-        <td style="max-width:180px;font-size:13px">${r.dropoffAddress || 'N/A'}</td>
-        <td><span class="badge ${r.status === 'trip_completed' ? 'b-completed' : r.status === 'cancelled' ? 'b-cancelled' : 'b-pending'}">${r.status || '—'}</span></td>
-        <td style="font-weight:700;color:var(--green)">R ${r.price || '—'}</td>
-        <td><span class="badge ${r.paymentStatus === 'paid' ? 'b-paid' : 'b-pending'}">${r.paymentStatus || 'unpaid'}</span></td>
-        <td style="font-size:12px">${fmt(r.createdAt)}</td>
+      <thead><tr><th>Trip</th><th>Rider / Driver</th><th>Route</th><th>Distance / Time</th><th>Status</th><th>Fare</th><th>Payment</th><th>Date</th><th>Actions</th></tr></thead>
+      <tbody>${rides.map(r => `<tr onclick="openTripDetails('${escapeHtml(r.id)}')" style="cursor:pointer">
+        <td><div style="font:11px var(--mono)">${escapeHtml(String(r.id || '').slice(0,8))}</div><div style="font-size:11px;color:var(--muted);text-transform:capitalize;margin-top:3px">${escapeHtml(String(r.vehicleType || 'budget').replace(/_/g,' '))}</div></td>
+        <td><strong>${escapeHtml(r.clientName || 'Unknown rider')}</strong><div style="font-size:11px;color:var(--muted)">${escapeHtml(r.driverName || 'Unassigned')}</div></td>
+        <td style="max-width:260px"><div style="font-size:12px">${escapeHtml(r.pickupAddress || 'Pickup unavailable')}</div><div style="font-size:11px;color:var(--muted);margin-top:3px">to ${escapeHtml(r.dropoffAddress || 'Drop-off unavailable')}</div></td>
+        <td style="font-size:12px">${formatTripDistance(r)}<div style="color:var(--muted);margin-top:3px">${formatTripDuration(r)}</div></td>
+        <td><span class="badge ${tripStatusClass(r.status)}">${escapeHtml(String(r.status || 'unknown').replace(/_/g,' '))}</span>${r.cancelledBy ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">by ${escapeHtml(r.cancelledBy)}</div>` : ''}</td>
+        <td style="font-weight:700;color:var(--green)">R ${Number(r.finalFare ?? r.price ?? 0).toFixed(2)}</td>
+        <td><span class="badge ${r.paymentStatus === 'paid' ? 'b-paid' : 'b-pending'}">${escapeHtml(r.paymentStatus || 'unpaid')}</span><div style="font-size:11px;color:var(--muted);margin-top:4px">${escapeHtml(r.paymentMethod || 'cash')}</div></td>
+        <td style="font-size:12px">${fmtFull(r.createdAt)}</td>
+        <td><div class="action-cell"><button class="btn-sm btn-detail" onclick="event.stopPropagation();openTripDetails('${escapeHtml(r.id)}')">View</button><button class="btn-sm btn-delete" aria-label="Delete trip" onclick="event.stopPropagation();adminDelete('ride','${escapeHtml(r.id)}','this trip')">Delete</button></div></td>
       </tr>`).join('')}
-      </tbody></table>`;
+      </tbody></table>
+      <div class="trip-pagination"><div style="font-size:12px;color:var(--muted)">${Number(data.total || 0).toLocaleString()} trips · Page ${tripPage} of ${tripTotalPages}</div><div class="trip-page-actions"><button class="btn-sm btn-detail" onclick="changeTripPage(${tripPage - 1})" ${tripPage <= 1 ? 'disabled' : ''}>Previous</button><button class="btn-sm btn-detail" onclick="changeTripPage(${tripPage + 1})" ${tripPage >= tripTotalPages ? 'disabled' : ''}>Next</button></div></div>`;
   } catch(e) {
     document.getElementById('rides-table').innerHTML = emptyState('❌', 'Failed to load rides', e.message);
   }
+}
+
+function showTripDetailView() {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelector('.nav-item[onclick*="rides"]')?.classList.add('active');
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-tripDetail').classList.add('active');
+  document.getElementById('page-title').textContent = 'Trip Details';
+  curView = 'tripDetail';
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+
+function backToTrips() {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-rides').classList.add('active');
+  document.getElementById('page-title').textContent = 'Trips';
+  curView = 'rides';
+}
+
+function tripField(label, value) {
+  return `<div class="trip-kv"><div class="trip-kv-label">${escapeHtml(label)}</div><div class="trip-kv-value">${value == null || value === '' ? '—' : value}</div></div>`;
+}
+
+function locationLink(lat, lng, label) {
+  const latNumber = Number(lat), lngNumber = Number(lng);
+  if (!Number.isFinite(latNumber) || !Number.isFinite(lngNumber)) return '—';
+  const href = `https://www.google.com/maps/search/?api=1&query=${latNumber},${lngNumber}`;
+  return `<a href="${href}" target="_blank" rel="noopener">${escapeHtml(label || `${latNumber.toFixed(6)}, ${lngNumber.toFixed(6)}`)}</a><div style="font:10px var(--mono);color:var(--muted);margin-top:3px">${latNumber.toFixed(6)}, ${lngNumber.toFixed(6)}</div>`;
+}
+
+async function openTripDetails(id) {
+  selectedTripId = id;
+  showTripDetailView();
+  document.getElementById('trip-detail-title').textContent = 'Trip details';
+  document.getElementById('trip-detail-id').textContent = id;
+  document.getElementById('trip-detail-status').innerHTML = '';
+  spin('trip-detail-content');
+  try {
+    const res = await apiFetch('/api/admin/trips/' + encodeURIComponent(id));
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || res.status);
+    renderTripDetails(data);
+  } catch(e) {
+    document.getElementById('trip-detail-content').innerHTML = emptyState('!', 'Failed to load trip', e.message);
+  }
+}
+
+function renderTripDetails(data) {
+  const t = data.trip || {};
+  const stops = Array.isArray(t.stops) ? t.stops : [];
+  const payments = Array.isArray(data.payments) ? data.payments : [];
+  const earnings = Array.isArray(data.earnings) ? data.earnings : [];
+  const ratings = Array.isArray(data.ratings) ? data.ratings : [];
+  const reports = Array.isArray(data.safetyReports) ? data.safetyReports : [];
+  const distanceSource = t.actual_distance_km ?? t.distance_km;
+  const durationSource = t.actual_duration_min ?? t.duration_min;
+  const distance = distanceSource == null ? Number.NaN : Number(distanceSource);
+  const duration = durationSource == null ? Number.NaN : Number(durationSource);
+  const fare = Number(t.final_fare ?? t.actual_fare ?? t.price ?? 0);
+  const commissionRate = Number(t.commission_rate || 0);
+  const timeline = [
+    ['Requested', t.created_at], ['Dispatch started', t.dispatch_started_at], ['Accepted', t.accepted_at],
+    ['Travel to pickup', t.pickup_travel_started_at], ['Arrived', t.arrived_at], ['Trip started', t.trip_started_at],
+    ['Completed', t.completed_at],
+  ].filter(item => item[1]);
+
+  document.getElementById('trip-detail-title').textContent = `${String(t.vehicle_type || 'Trip').replace(/_/g,' ')} trip`;
+  document.getElementById('trip-detail-status').innerHTML = `<span class="badge ${tripStatusClass(t.status)}">${escapeHtml(String(t.status || 'unknown').replace(/_/g,' '))}</span>`;
+  document.getElementById('trip-detail-content').innerHTML = `<div class="trip-detail-grid">
+    <section class="trip-panel trip-panel-wide"><div class="trip-panel-title">Route and stops</div>
+      ${tripField('Pickup', locationLink(t.pickup_lat, t.pickup_lng, t.pickup_address || 'Pickup'))}
+      ${stops.map((stop,index) => tripField(`Stop ${index + 1}${index < Number(t.completed_stop_count || 0) ? ' · completed' : ''}`, locationLink(stop.lat, stop.lng, stop.address || `Stop ${index + 1}`))).join('')}
+      ${tripField('Drop-off', locationLink(t.dropoff_lat, t.dropoff_lng, t.dropoff_address || 'Drop-off'))}
+      ${tripField('Recorded distance', Number.isFinite(distance) ? `${distance.toFixed(2)} km` : '—')}
+      ${tripField('Recorded duration', Number.isFinite(duration) ? `${Math.round(duration)} minutes` : '—')}
+      ${tripField('Selected route', escapeHtml(t.selected_route_id || '—'))}
+    </section>
+    <section class="trip-panel"><div class="trip-panel-title">Rider</div>
+      ${tripField('Name', escapeHtml(t.clientName || 'Unknown rider'))}
+      ${tripField('Email', escapeHtml(t.clientEmail || '—'))}
+      ${tripField('Phone', escapeHtml(t.clientPhone || '—'))}
+      ${tripField('Rating', t.clientRating == null ? '—' : Number(t.clientRating).toFixed(1))}
+      ${tripField('User ID', `<span style="font:11px var(--mono)">${escapeHtml(t.client_id || '—')}</span>`)}
+    </section>
+    <section class="trip-panel"><div class="trip-panel-title">Driver and vehicle</div>
+      ${tripField('Driver', escapeHtml(t.driverName || 'Unassigned'))}
+      ${tripField('Email', escapeHtml(t.driverEmail || '—'))}
+      ${tripField('Phone', escapeHtml(t.driverPhone || '—'))}
+      ${tripField('Current status', t.driverOnline == null ? '—' : `<span class="badge ${t.driverOnline ? 'b-online' : 'b-offline'}">${t.driverOnline ? 'Online' : 'Offline'}</span>`)}
+      ${tripField('Vehicle', escapeHtml([t.vehicleMake,t.vehicleModel,t.vehicleYear].filter(Boolean).join(' ') || '—'))}
+      ${tripField('Plate / colour', escapeHtml([t.plateNumber,t.vehicleColor].filter(Boolean).join(' · ') || '—'))}
+    </section>
+    <section class="trip-panel"><div class="trip-panel-title">Fare and settlement</div>
+      ${tripField('Rider total', `R ${fare.toFixed(2)}`)}
+      ${tripField('Quoted fare', `R ${Number(t.quoted_fare ?? t.price ?? 0).toFixed(2)}`)}
+      ${tripField('Base fare', `R ${Number(t.base_fare || 0).toFixed(2)}`)}
+      ${tripField('Commission rate', `${(commissionRate * 100).toFixed(0)}%`)}
+      ${tripField('Surge / demand', `${Number(t.surge_multiplier || 1).toFixed(2)}x / ${Number(t.demand_multiplier || 1).toFixed(2)}x`)}
+      ${tripField('Waiting / time adjustment', `R ${Number(t.waiting_fee || 0).toFixed(2)} / R ${Number(t.per_minute_adjustment || 0).toFixed(2)}`)}
+      ${tripField('Settlement', escapeHtml(t.settlement_status || '—'))}
+    </section>
+    <section class="trip-panel"><div class="trip-panel-title">Payment and cancellation</div>
+      ${tripField('Method', escapeHtml(t.payment_method || 'cash'))}
+      ${tripField('Payment status', escapeHtml(t.payment_status || 'unpaid'))}
+      ${tripField('Rewards used', `R ${Number(t.rewards_amount_used || 0).toFixed(2)}`)}
+      ${tripField('Cancelled by', escapeHtml(t.cancelled_by || '—'))}
+      ${tripField('Cancellation fee', `R ${Number(t.cancellation_fee || 0).toFixed(2)}`)}
+      ${tripField('Liveness', escapeHtml(t.liveness_status || 'not required'))}
+    </section>
+    <section class="trip-panel trip-panel-wide"><div class="trip-panel-title">Timeline</div><div class="trip-timeline">${timeline.map(item => `<div class="trip-timeline-row"><span>${escapeHtml(item[0])}</span><strong>${fmtFull(item[1])}</strong></div>`).join('') || '<div style="color:var(--muted)">No timestamps recorded.</div>'}</div></section>
+    <section class="trip-panel"><div class="trip-panel-title">Payment records (${payments.length})</div>${payments.map(p => tripField(`${p.method || 'payment'} · ${p.status || 'unknown'}`, `R ${Number(p.amount || 0).toFixed(2)}<div style="font-size:11px;color:var(--muted);margin-top:3px">${fmtFull(p.paidAt || p.createdAt)}${p.providerRef ? ` · ${escapeHtml(p.providerRef)}` : ''}</div>`)).join('') || '<div style="color:var(--muted);font-size:13px">No payment records.</div>'}</section>
+    <section class="trip-panel"><div class="trip-panel-title">Driver earnings (${earnings.length})</div>${earnings.map(e => tripField(e.type || 'earning', `Driver R ${Number(e.amount || 0).toFixed(2)} · Platform R ${Number(e.commission || 0).toFixed(2)}`)).join('') || '<div style="color:var(--muted);font-size:13px">No earnings record.</div>'}</section>
+    <section class="trip-panel"><div class="trip-panel-title">Ratings (${ratings.length})</div>${ratings.map(r => tripField(`${Number(r.rating || 0)}/5 · ${escapeHtml(r.reviewerName || 'Rider')}`, escapeHtml(r.comment || 'No comment'))).join('') || '<div style="color:var(--muted);font-size:13px">No rating recorded.</div>'}</section>
+    <section class="trip-panel"><div class="trip-panel-title">Audit and safety</div>${tripField('Chat messages', Number(data.messageCount || 0))}${tripField('Safety reports', reports.length)}${reports.map(r => tripField(`${r.priority || 'medium'} · ${r.status || 'open'}`, escapeHtml(r.description || ''))).join('')}</section>
+  </div>`;
 }
 
 // ── PAYMENTS ──
@@ -762,14 +2250,17 @@ async function loadPay() {
     }
 
     const paid = payments.filter(p => p.status === 'paid');
-    const total = paid.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    const collected = paid.filter(p => p.method !== 'pay_later');
+    const total = collected.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
     const cardTotal = paid.filter(p => p.method === 'card').reduce((s, p) => s + parseFloat(p.amount || 0), 0);
     const walletTotal = paid.filter(p => p.method === 'wallet').reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    const payLaterTotal = paid.filter(p => p.method === 'pay_later').reduce((s, p) => s + parseFloat(p.amount || 0), 0);
 
     document.getElementById('pay-summary').innerHTML = `
-      <div class="stat-card"><div class="stat-top"><div class="stat-label">Total Collected</div><div class="stat-icon si-green">💰</div></div><div class="stat-value" style="color:var(--green)">R ${total.toFixed(2)}</div><div class="stat-foot">${paid.length} successful payments</div></div>
+      <div class="stat-card"><div class="stat-top"><div class="stat-label">Total Collected</div><div class="stat-icon si-green">💰</div></div><div class="stat-value" style="color:var(--green)">R ${total.toFixed(2)}</div><div class="stat-foot">Excludes Pay Later credit</div></div>
       <div class="stat-card"><div class="stat-top"><div class="stat-label">Via Card</div><div class="stat-icon si-blue">💳</div></div><div class="stat-value" style="font-size:22px">R ${cardTotal.toFixed(2)}</div><div class="stat-foot">Card payments</div></div>
       <div class="stat-card"><div class="stat-top"><div class="stat-label">Via Wallet</div><div class="stat-icon si-black">👛</div></div><div class="stat-value" style="font-size:22px">R ${walletTotal.toFixed(2)}</div><div class="stat-foot">Wallet payments</div></div>
+      <div class="stat-card"><div class="stat-top"><div class="stat-label">Pay Later Used</div><div class="stat-icon si-black">◷</div></div><div class="stat-value" style="font-size:22px">R ${payLaterTotal.toFixed(2)}</div><div class="stat-foot">Outstanding credit usage</div></div>
     `;
 
     if (!payments.length) {
@@ -777,7 +2268,7 @@ async function loadPay() {
       return;
     }
     document.getElementById('pay-table').innerHTML = `<table>
-      <thead><tr><th>Rider</th><th>Route</th><th>Method</th><th>Amount</th><th>Status</th><th>Reference</th><th>Date</th></tr></thead>
+      <thead><tr><th>Rider</th><th>Route</th><th>Method</th><th>Amount</th><th>Status</th><th>Reference</th><th>Date</th><th></th></tr></thead>
       <tbody>${payments.map(p => `<tr>
         <td><div style="font-weight:600">${p.riderName || '—'}</div><div style="font-size:11px;color:var(--muted)">${p.riderEmail || ''}</div></td>
         <td style="font-size:12px;color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(p.rideRoute||'').replace(/"/g,'&quot;')}">${p.rideRoute || '—'}</td>
@@ -786,11 +2277,423 @@ async function loadPay() {
         <td><span class="badge b-${p.status === 'paid' ? 'paid' : p.status === 'failed' ? 'failed' : 'pending'}">${p.status || '—'}</span></td>
         <td style="font-size:11px;color:var(--muted);font-family:var(--mono)">${p.paystackReference ? p.paystackReference.slice(0,18)+'…' : '—'}</td>
         <td style="font-size:12px">${fmtFull(p.paidAt || p.createdAt)}</td>
+        <td>${p.id ? `<button class="btn-sm btn-delete" onclick="event.stopPropagation();adminDelete('payment','${p.id}','R${Number(p.amount||0).toFixed(2)} payment')">🗑</button>` : ''}</td>
       </tr>`).join('')}
       </tbody></table>`;
   } catch(e) {
     document.getElementById('pay-table').innerHTML = emptyState('❌', 'Failed to load payments', e.message);
   }
+}
+
+// ── LIFT CLUB APPLICATIONS ──
+async function loadLiftClubApplications() {
+  spin('liftclub-table');
+  spin('liftclub-routes-table');
+  try {
+    const query = liftClubFilter && liftClubFilter !== 'all' ? '?status=' + encodeURIComponent(liftClubFilter) : '';
+    const res = await apiFetch('/api/admin/lift-club-memberships' + query);
+    if (!res.ok) throw new Error(await res.text());
+    allLiftClubMemberships = await res.json();
+    if (!Array.isArray(allLiftClubMemberships)) allLiftClubMemberships = [];
+    const pendingCount = allLiftClubMemberships.filter(m => m.status === 'pending_review').length;
+    const badge = document.getElementById('nb-liftclub');
+    if (badge) {
+      badge.textContent = pendingCount;
+      badge.style.display = pendingCount ? 'inline-flex' : 'none';
+    }
+    renderLiftClubApplications();
+    loadLiftClubRoutes();
+  } catch(e) {
+    document.getElementById('liftclub-table').innerHTML = emptyState('❌', 'Failed to load Lift Club applications', e.message);
+    document.getElementById('liftclub-routes-table').innerHTML = emptyState('❌', 'Failed to load Lift Club cars', e.message);
+  }
+}
+
+function fLiftClub(f, el) {
+  document.querySelectorAll('#view-liftClubApplications .liftclub-member-filters .ftab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  liftClubFilter = f;
+  loadLiftClubApplications();
+}
+
+function fLiftClubRoutes(f, el) {
+  document.querySelectorAll('#view-liftClubApplications .liftclub-route-filters .ftab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  liftClubRouteFilter = f;
+  loadLiftClubRoutes();
+}
+
+function renderLiftClubApplications() {
+  const w = document.getElementById('liftclub-table');
+  const rows = allLiftClubMemberships;
+  if (!rows.length) {
+    w.innerHTML = emptyState('🎟️', 'No Lift Club applications', 'Applications and proof of payment will appear here.');
+    return;
+  }
+  w.innerHTML = `<table>
+    <thead><tr><th>Member</th><th>Status</th><th>Fee</th><th>Proof</th><th>Submitted</th><th>Reviewed</th><th>Actions</th></tr></thead>
+    <tbody>${rows.map(m => {
+      const user = m.user || {};
+      const proofUrl = resolveDocUrl(m.proofDocument?.url || m.proofDocument?.fileUrl || m.proofDocument?.path || '');
+      const statusCls = m.status === 'approved' ? 'b-liftclub' : m.status === 'rejected' ? 'b-rejected' : `b-${m.status || 'pending'}`;
+      return `<tr>
+        <td>
+          <div style="font-weight:700">${escapeHtml(user.name || '—')} ${m.status === 'approved' ? '<span class="badge b-liftclub" style="margin-left:6px">Lift Club</span>' : ''}</div>
+          <div style="font-size:11px;color:var(--muted)">${escapeHtml(user.username || '')}</div>
+          <div style="font-size:11px;color:var(--muted)">${escapeHtml(user.phone || '')}</div>
+          ${m.rejectionReason ? `<div style="font-size:11px;color:var(--red);margin-top:4px">Reason: ${escapeHtml(m.rejectionReason)}</div>` : ''}
+        </td>
+        <td><span class="badge ${statusCls}">${escapeHtml((m.status || 'pending').replace(/_/g, ' '))}</span></td>
+        <td style="font-weight:800">R${Number(m.feeAmount || 200).toFixed(0)}</td>
+        <td>${proofUrl ? `<a class="btn-sm btn-detail" href="${escapeHtml(proofUrl)}" target="_blank" rel="noopener" style="text-decoration:none">Open proof</a>` : '<span style="color:var(--muted)">No proof yet</span>'}</td>
+        <td style="font-size:12px">${fmtFull(m.submittedAt || m.createdAt)}</td>
+        <td style="font-size:12px">${fmtFull(m.reviewedAt)}</td>
+        <td><div class="action-cell">
+          ${m.status !== 'approved' ? `<button class="btn-sm btn-approve" onclick="setLiftClubStatus('${m.id}','approved')">✓ Approve</button>` : ''}
+          ${m.status !== 'rejected' ? `<button class="btn-sm btn-reject" onclick="openLiftClubMembershipModal('${m.id}', 'reject')">✕ Reject</button>` : ''}
+          <button class="btn-sm btn-detail" onclick="openLiftClubMembershipModal('${m.id}', 'edit')">Edit</button>
+          <button class="btn-sm btn-delete" onclick="deleteLiftClubMembership('${m.id}','${escapeHtml(user.name || user.username || 'member').replace(/'/g,"\\'")}')">🗑</button>
+        </div></td>
+      </tr>`;
+    }).join('')}
+    </tbody></table>`;
+}
+
+async function setLiftClubStatus(id, status, rejectionReason = '') {
+  try {
+    const res = await apiFetch('/api/admin/lift-club-memberships/' + id + '/status', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, rejectionReason }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast(status === 'approved' ? '✅ Lift Club member approved' : '✅ Lift Club application updated', 'ok');
+    loadLiftClubApplications();
+    loadUsers();
+  } catch(e) {
+    toast('❌ ' + e.message, 'err');
+  }
+}
+
+function openLiftClubMembershipModal(id, mode = 'edit') {
+  const membership = allLiftClubMemberships.find(m => m.id === id);
+  if (!membership) return toast('❌ Membership not found', 'err');
+  const user = membership.user || {};
+  const proofUrl = resolveDocUrl(membership.proofDocument?.url || membership.proofDocument?.fileUrl || membership.proofDocument?.path || '');
+  const selectedStatus = mode === 'reject' ? 'rejected' : (membership.status || 'pending_payment');
+  document.getElementById('m-title').textContent = mode === 'reject' ? 'Reject Lift Club application' : 'Lift Club member';
+  document.getElementById('m-sub').textContent = [user.name, user.username].filter(Boolean).join(' · ') || 'Membership details';
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid" style="margin-bottom:16px">
+      <div class="kv"><small>Member</small><b>${escapeHtml(user.name || '—')}</b></div>
+      <div class="kv"><small>Email</small><b>${escapeHtml(user.username || '—')}</b></div>
+      <div class="kv"><small>Phone</small><b>${escapeHtml(user.phone || '—')}</b></div>
+      <div class="kv"><small>Proof</small><b>${proofUrl ? `<a href="${escapeHtml(proofUrl)}" target="_blank" rel="noopener">Open proof</a>` : 'No proof yet'}</b></div>
+    </div>
+    <label class="field"><span>Status</span>
+      <select class="f-input" id="lcStatus">
+        ${['pending_payment','pending_review','approved','rejected'].map(status => `<option value="${status}" ${status === selectedStatus ? 'selected' : ''}>${status.replace(/_/g, ' ')}</option>`).join('')}
+      </select>
+    </label>
+    <label class="field"><span>Fee amount</span><input class="f-input" id="lcFeeAmount" type="number" min="0" step="1" value="${Number(membership.feeAmount || 200)}" /></label>
+    <label class="field"><span>Rejection reason</span><textarea class="f-input" id="lcRejectionReason" rows="4" placeholder="Required when rejecting">${escapeHtml(membership.rejectionReason || '')}</textarea></label>
+  `;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-delete" onclick="deleteLiftClubMembership('${id}','${escapeHtml(user.name || user.username || 'member').replace(/'/g,"\\'")}')">Delete</button>
+    <button class="btn-lg btn-outline" onclick="saveLiftClubMembershipFromModal('${id}')">Save</button>
+    <button class="btn-lg btn-red" onclick="saveLiftClubMembershipFromModal('${id}','rejected')">Reject</button>
+    <button class="btn-lg btn-green" onclick="saveLiftClubMembershipFromModal('${id}','approved')">Approve</button>
+  `;
+  openModal();
+}
+
+async function saveLiftClubMembershipFromModal(id, statusOverride = '') {
+  const status = statusOverride || document.getElementById('lcStatus')?.value || 'pending_payment';
+  const feeAmount = Number(document.getElementById('lcFeeAmount')?.value || 200);
+  const rejectionReason = String(document.getElementById('lcRejectionReason')?.value || '').trim();
+  if (status === 'rejected' && !rejectionReason) {
+    toast('❌ Rejection reason is required', 'err');
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/admin/lift-club-memberships/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status,
+        feeAmount: Number.isFinite(feeAmount) ? feeAmount : 200,
+        rejectionReason: status === 'rejected' ? rejectionReason : '',
+      }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast('✅ Lift Club membership updated', 'ok');
+    closeModal();
+    loadLiftClubApplications();
+    loadUsers();
+  } catch(e) {
+    toast('❌ ' + e.message, 'err');
+  }
+}
+
+async function deleteLiftClubMembership(id, label) {
+  showDeleteConfirm({
+    title: 'Delete Lift Club membership',
+    subtitle: label || 'Membership record',
+    message: `Delete Lift Club membership for ${label || 'this member'}? This cannot be undone.`,
+    confirmLabel: 'Delete membership',
+    onConfirm: async () => {
+      try {
+        const res = await apiFetch('/api/admin/lift-club-memberships/' + id, { method: 'DELETE' });
+        if (!res.ok) throw new Error(await res.text());
+        toast('✅ Lift Club membership deleted', 'ok');
+        loadLiftClubApplications();
+        loadUsers();
+      } catch(e) {
+        toast('❌ ' + e.message, 'err');
+      }
+    }
+  });
+}
+
+// ── PAY LATER ──
+async function loadPayLater() {
+  spin('paylater-table');
+  try {
+    const res = await apiFetch('/api/admin/pay-later');
+    if (!res.ok) throw new Error(await res.text());
+    allPayLater = await res.json();
+    if (!Array.isArray(allPayLater)) allPayLater = [];
+    const pending = allPayLater.filter(item => item.status === 'pending_review').length;
+    const badge = document.getElementById('nb-paylater');
+    if (badge) { badge.textContent = pending; badge.style.display = pending ? 'inline-flex' : 'none'; }
+    renderPayLater();
+  } catch(e) {
+    document.getElementById('paylater-table').innerHTML = emptyState('!', 'Failed to load Pay Later applications', e.message);
+  }
+}
+
+function renderPayLater() {
+  const target = document.getElementById('paylater-table');
+  if (!allPayLater.length) { target.innerHTML = emptyState('◷', 'No Pay Later applications', 'Submitted applications will appear here.'); return; }
+  target.innerHTML = `<table>
+    <thead><tr><th>Member</th><th>Status</th><th>Credit limit</th><th>Available</th><th>Documents</th><th>Submitted</th><th>Actions</th></tr></thead>
+    <tbody>${allPayLater.map(item => `<tr>
+      <td><strong>${escapeHtml(item.userName || '—')}</strong><div style="font-size:11px;color:var(--muted)">${escapeHtml(item.userEmail || '')}</div><div style="font-size:11px;color:var(--muted)">${escapeHtml(item.userPhone || '')}</div></td>
+      <td><span class="badge ${item.status === 'approved' ? 'b-approved' : item.status === 'rejected' ? 'b-rejected' : 'b-pending'}">${escapeHtml(String(item.status || '').replace(/_/g, ' '))}</span></td>
+      <td>R ${Number(item.creditLimit || 0).toFixed(2)}</td>
+      <td style="font-weight:700;color:var(--green)">R ${Number(item.availableCredit || 0).toFixed(2)}</td>
+      <td>${Array.isArray(item.documents) ? item.documents.length : 0}/4</td>
+      <td style="font-size:12px">${fmtFull(item.submittedAt)}</td>
+      <td><div class="action-cell"><button class="btn-sm btn-detail" onclick="openPayLater('${item.id}')">View</button>${item.status !== 'approved' ? `<button class="btn-sm btn-approve" onclick="updatePayLaterStatus('${item.id}','approved')">Approve</button>` : ''}<button class="btn-sm btn-delete" onclick="deletePayLater('${item.id}')">Delete</button></div></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+function payLaterDocumentLabel(type) {
+  return ({
+    'pay_later:id_copy':'ID copy',
+    'pay_later:employment_contract':'Employment contract',
+    'pay_later:payslip':'Payslip',
+    'pay_later:proof_of_address':'Proof of address'
+  })[type] || String(type || '').replace(/^pay_later:/, '').replace(/_/g, ' ');
+}
+
+function openPayLater(id) {
+  const item = allPayLater.find(value => value.id === id); if (!item) return;
+  document.getElementById('m-title').textContent = 'Pay Later application';
+  document.getElementById('m-sub').textContent = [item.userName, item.userEmail].filter(Boolean).join(' · ');
+  const docs = Array.isArray(item.documents) ? item.documents : [];
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid">
+      <div class="info-row"><div class="info-label">Status</div><div class="info-val">${escapeHtml(String(item.status || '').replace(/_/g, ' '))}</div></div>
+      <div class="info-row"><div class="info-label">Credit limit</div><div class="info-val">R ${Number(item.creditLimit || 0).toFixed(2)}</div></div>
+      <div class="info-row"><div class="info-label">Available credit</div><div class="info-val">R ${Number(item.availableCredit || 0).toFixed(2)}</div></div>
+      <div class="info-row"><div class="info-label">Submitted</div><div class="info-val">${fmtFull(item.submittedAt)}</div></div>
+    </div>
+    <div style="margin-top:18px;font-weight:600">Documents</div>
+    <div style="margin-top:8px">${docs.map(doc => {
+      const docUrl = resolveDocUrl(doc.url);
+      const label = payLaterDocumentLabel(doc.type);
+      return `<div class="info-row" style="margin-bottom:8px"><div><div class="info-label">${escapeHtml(label)}</div><div class="info-val">${escapeHtml(doc.status || 'pending')}</div></div><div class="action-cell"><a class="btn-sm btn-detail" href="${escapeHtml(docUrl)}" target="_blank" rel="noopener" style="text-decoration:none">View ↗</a><button class="btn-sm btn-detail" onclick="downloadDoc('${escapeHtml(docUrl)}','${escapeHtml(label)}')">Download ⬇</button><button class="btn-sm btn-delete" onclick="deletePayLaterDocument('${item.id}','${doc.id}')">Delete</button></div></div>`;
+    }).join('') || '<div class="muted">No documents.</div>'}</div>
+    <label class="field"><span>Rejection reason</span><textarea class="f-input" id="payLaterReason" rows="3">${escapeHtml(item.rejectionReason || '')}</textarea></label>
+    <label class="field"><span>Add credit</span><input class="f-input" id="payLaterCredit" type="number" min="1" step="0.01" placeholder="Amount in rand" /></label>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Close</button>
+    <button class="btn-lg btn-red" onclick="updatePayLaterStatus('${item.id}','rejected')">Reject</button>
+    <button class="btn-lg btn-green" onclick="updatePayLaterStatus('${item.id}','approved')">Approve</button>
+    <button class="btn-lg btn-black" onclick="creditPayLater('${item.id}')">Add credit</button>`;
+  openModal();
+}
+
+async function updatePayLaterStatus(id, status) {
+  const reason = String(document.getElementById('payLaterReason')?.value || '').trim();
+  if (status === 'rejected' && !reason) return toast('Rejection reason is required', 'err');
+  try {
+    const res = await apiFetch('/api/admin/pay-later/' + id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ status, rejectionReason: reason }) });
+    if (!res.ok) throw new Error(await res.text());
+    closeModal(); toast('Pay Later application updated', 'ok'); loadPayLater();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function creditPayLater(id) {
+  const amount = Number(document.getElementById('payLaterCredit')?.value || 0);
+  if (!(amount > 0)) return toast('Enter a valid credit amount', 'err');
+  try {
+    const res = await apiFetch('/api/admin/pay-later/' + id + '/credit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ amount }) });
+    if (!res.ok) throw new Error(await res.text());
+    closeModal(); toast('Pay Later credit added', 'ok'); loadPayLater();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function deletePayLaterDocument(id, documentId) {
+  try {
+    const res = await apiFetch('/api/admin/pay-later/' + id + '/documents/' + documentId, { method:'DELETE' });
+    if (!res.ok) throw new Error(await res.text());
+    closeModal(); toast('Document deleted', 'ok'); loadPayLater();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+function deletePayLater(id) {
+  showDeleteConfirm({ title:'Delete Pay Later application', subtitle:'Application and document records', message:'This action cannot be undone.', confirmLabel:'Delete application', onConfirm:async () => {
+    try { const res = await apiFetch('/api/admin/pay-later/' + id, { method:'DELETE' }); if (!res.ok) throw new Error(await res.text()); toast('Pay Later application deleted', 'ok'); loadPayLater(); } catch(e) { toast(e.message, 'err'); }
+  }});
+}
+
+async function loadLiftClubRoutes() {
+  spin('liftclub-routes-table');
+  try {
+    const query = liftClubRouteFilter && liftClubRouteFilter !== 'all' ? '?status=' + encodeURIComponent(liftClubRouteFilter) : '';
+    const res = await apiFetch('/api/admin/lift-club-routes' + query);
+    if (!res.ok) throw new Error(await res.text());
+    allLiftClubRoutes = await res.json();
+    if (!Array.isArray(allLiftClubRoutes)) allLiftClubRoutes = [];
+    renderLiftClubRoutes();
+  } catch(e) {
+    document.getElementById('liftclub-routes-table').innerHTML = emptyState('❌', 'Failed to load Lift Club cars', e.message);
+  }
+}
+
+function renderLiftClubRoutes() {
+  const w = document.getElementById('liftclub-routes-table');
+  const rows = allLiftClubRoutes;
+  if (!rows.length) {
+    w.innerHTML = emptyState('🚐', 'No Lift Club cars yet', 'Published driver commute routes will appear here.');
+    return;
+  }
+  w.innerHTML = `<table>
+    <thead><tr><th>Driver</th><th>Route</th><th>Vehicle</th><th>Seats</th><th>Pricing</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead>
+    <tbody>${rows.map(r => {
+      const driver = r.driver || r.chauffeur || {};
+      const vehicle = r.vehicle || {};
+      const active = r.status === 'active' || r.isActive === true;
+      return `<tr>
+        <td>
+          <div style="font-weight:700">${escapeHtml(driver.driverName || driver.name || '—')}</div>
+          <div style="font-size:11px;color:var(--muted)">${escapeHtml(driver.phone || driver.email || '')}</div>
+        </td>
+        <td>
+          <div style="font-weight:700">${escapeHtml(r.pickupArea || '—')} → ${escapeHtml(r.destinationArea || r.workplaceArea || '—')}</div>
+          <div style="font-size:11px;color:var(--muted)">${escapeHtml(r.departureWindow || 'Weekday commute')}</div>
+        </td>
+        <td>
+          <div style="font-weight:700">${escapeHtml(vehicle.make || r.vehicleMake || '')} ${escapeHtml(vehicle.model || r.vehicleModel || '')}</div>
+          <div style="font-size:11px;color:var(--muted)">${escapeHtml(String(vehicle.year || r.vehicleYear || ''))}</div>
+        </td>
+        <td>${Number(r.availableSeats ?? r.seatsAvailable ?? 0)} / ${Number(r.totalSeats ?? r.seatCount ?? 0)}</td>
+        <td><div>Weekly R${Number(r.weeklyPrice || 0).toFixed(0)}</div><div>Monthly R${Number(r.monthlyPrice || 0).toFixed(0)}</div></td>
+        <td><span class="badge ${active ? 'b-approved' : 'b-pending'}">${active ? 'active' : escapeHtml(r.status || 'inactive')}</span></td>
+        <td style="font-size:12px">${fmtFull(r.updatedAt || r.createdAt)}</td>
+        <td><div class="action-cell">
+          ${active ? `<button class="btn-sm btn-reject" onclick="setLiftClubRouteStatus('${r.id}','inactive')">Disable</button>` : `<button class="btn-sm btn-approve" onclick="setLiftClubRouteStatus('${r.id}','active')">Activate</button>`}
+        </div></td>
+      </tr>`;
+    }).join('')}
+    </tbody></table>`;
+}
+
+async function setLiftClubRouteStatus(id, status) {
+  try {
+    const res = await apiFetch('/api/admin/lift-club-routes/' + id + '/status', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast(status === 'active' ? '✅ Lift Club car activated' : '✅ Lift Club car disabled', 'ok');
+    loadLiftClubRoutes();
+  } catch(e) {
+    toast('❌ ' + e.message, 'err');
+  }
+}
+
+// ── LIVENESS SELFIES ──
+async function loadSelfies() {
+  spin('selfies-table');
+  try {
+    const res = await apiFetch('/api/admin/liveness-selfies');
+    if (!res.ok) throw new Error(res.status);
+    allSelfies = await res.json();
+    if (!Array.isArray(allSelfies) || !allSelfies.length) {
+      document.getElementById('selfies-table').innerHTML = emptyState('📸', 'No selfies yet', 'Cash-trip selfies will appear here after riders complete liveness verification');
+      return;
+    }
+    renderSelfiesTable(allSelfies);
+  } catch(e) {
+    document.getElementById('selfies-table').innerHTML = emptyState('❌', 'Failed to load selfies', e.message);
+  }
+}
+
+function renderSelfiesTable(items) {
+  document.getElementById('selfies-table').innerHTML = `<table>
+    <thead><tr><th>Rider</th><th>Ride</th><th>Liveness</th><th>Fare</th><th>Uploaded</th><th>Actions</th></tr></thead>
+    <tbody>${items.map(item => `<tr>
+      <td>
+        <div style="font-weight:600">${item.riderName || '—'}</div>
+        <div style="font-size:11px;color:var(--muted)">${item.riderEmail || ''}</div>
+        <div style="font-size:11px;color:var(--muted)">Driver: ${item.chauffeurName || 'Unassigned'}</div>
+      </td>
+      <td>
+        <div style="font-size:12px;max-width:220px">${item.pickupAddress || '—'} → ${item.dropoffAddress || '—'}</div>
+        <div style="font-size:11px;color:var(--muted);font-family:var(--mono)">${(item.rideId || '').slice(0, 14)}…</div>
+      </td>
+      <td>
+        <span class="badge ${item.livenessStatus === 'passed' ? 'b-approved' : item.livenessStatus === 'failed' ? 'b-failed' : 'b-pending'}">${item.livenessStatus || 'pending'}</span>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">${(item.livenessProvider || 'mock').toUpperCase()}${item.livenessScore ? ' · ' + Number(item.livenessScore).toFixed(2) : ''}</div>
+      </td>
+      <td>
+        <div style="font-weight:700;color:var(--green)">R ${Number(item.price || 0).toFixed(2)}</div>
+        <div style="font-size:11px;color:var(--muted)">${item.paymentMethod || 'cash'} · ${item.paymentStatus || 'unpaid'}</div>
+      </td>
+      <td style="font-size:12px">${fmtFull(item.livenessVerifiedAt || item.createdAt)}</td>
+      <td><div class="action-cell">
+        <button class="btn-sm btn-detail" onclick="viewSelfie('${item.rideId}')">View</button>
+        <a class="btn-sm btn-detail" href="${item.cashSelfieUrl}" target="_blank" download style="text-decoration:none">Download</a>
+      </div></td>
+    </tr>`).join('')}
+    </tbody></table>`;
+}
+
+function viewSelfie(rideId) {
+  const item = allSelfies.find(x => x.rideId === rideId); if (!item) return;
+  document.getElementById('m-title').textContent = 'Liveness Selfie Review';
+  document.getElementById('m-sub').textContent = `${item.riderName || 'Rider'} · ${item.pickupAddress || 'Unknown pickup'} → ${item.dropoffAddress || 'Unknown dropoff'}`;
+  document.getElementById('m-body').innerHTML = `
+    <div style="display:grid;gap:16px">
+      <img src="${item.cashSelfieUrl}" alt="Liveness selfie" style="width:100%;max-height:420px;object-fit:contain;border:1px solid var(--border);border-radius:10px;background:var(--surface)" />
+      <div class="info-grid">
+        <div class="info-row"><div class="info-label">Rider</div><div class="info-val">${item.riderName || '—'}</div></div>
+        <div class="info-row"><div class="info-label">Driver</div><div class="info-val">${item.chauffeurName || 'Unassigned'}</div></div>
+        <div class="info-row"><div class="info-label">Ride ID</div><div class="info-val" style="font-family:var(--mono);font-size:12px">${item.rideId || '—'}</div></div>
+        <div class="info-row"><div class="info-label">Liveness</div><div class="info-val">${item.livenessStatus || 'pending'}${item.livenessScore ? ' · score ' + Number(item.livenessScore).toFixed(2) : ''}</div></div>
+        <div class="info-row"><div class="info-label">Verified At</div><div class="info-val">${fmtFull(item.livenessVerifiedAt || item.createdAt)}</div></div>
+        <div class="info-row"><div class="info-label">Fare</div><div class="info-val">R ${Number(item.price || 0).toFixed(2)}</div></div>
+      </div>
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Close</button>
+    <a class="btn-lg btn-black" href="${item.cashSelfieUrl}" target="_blank" download style="text-decoration:none">Download Selfie</a>`;
+  openModal();
 }
 
 // ── WITHDRAWALS ──
@@ -815,23 +2718,68 @@ function fWd(f, el) {
 function renderFilteredWd() {
   const list = wdFilter === 'all' ? allWd : allWd.filter(w => w.status === wdFilter);
   const w = document.getElementById('wd-table');
-  if (!list.length) { w.innerHTML = emptyState('🏦', 'No withdrawal requests', 'Driver withdrawal requests appear here'); return; }
+  if (!list.length) { w.innerHTML = emptyState('🏦', 'No withdrawal requests', 'Driver and rider withdrawal requests appear here'); return; }
   w.innerHTML = `<table>
-    <thead><tr><th>Driver</th><th>Bank</th><th>Account</th><th>Amount</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Requester</th><th>Bank</th><th>Account</th><th>Amount</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
     <tbody>${list.map(wd => `<tr>
-      <td style="font-size:13px;font-weight:600">${wd.accountHolder || ('ID …' + (wd.chauffeurId||'').slice(-6))}</td>
+      <td style="font-size:13px;font-weight:600">${wd.requesterName || wd.accountHolder || ('ID …' + (wd.chauffeurId||wd.userId||'').slice(-6))}
+        <div style="font-size:11px;color:var(--muted);font-weight:400;text-transform:capitalize">${wd.requesterRole || (wd.chauffeurId ? 'driver' : 'client')}${wd.accountHolder ? ' · ' + wd.accountHolder : ''}</div></td>
       <td>${wd.bankName || '—'}</td>
       <td style="font-family:var(--mono);font-size:12px">${wd.accountNumber ? '•••• ' + String(wd.accountNumber).slice(-4) : '—'}</td>
       <td style="font-weight:700;color:var(--green)">R ${Number(wd.amount||0).toFixed(2)}</td>
       <td><span class="badge b-${wd.status}">${wd.status}</span></td>
       <td style="font-size:12px">${fmt(wd.processedAt || wd.createdAt)}</td>
       <td><div class="action-cell">
-        ${wd.status === 'pending' ? `<button class="btn-sm btn-approve" onclick="actWd('${wd.id}','approved')">✓ Approve</button><button class="btn-sm btn-reject" onclick="actWd('${wd.id}','rejected')">✕ Reject</button>` : ''}
-        ${wd.status === 'approved' ? `<button class="btn-sm btn-paid" onclick="actWd('${wd.id}','paid')">Mark Paid</button>` : ''}
+        ${wd.status === 'pending' ? `<button class="btn-sm btn-approve" onclick="actWd('${wd.id}','approved')">✓ Approve</button><button class="btn-sm btn-reject" onclick="actWd('${wd.id}','rejected')">✕ Decline</button>` : ''}
+        ${wd.status === 'approved' ? `<button class="btn-sm btn-paid" onclick="actWd('${wd.id}','paid')">Mark Paid</button><button class="btn-sm btn-reject" onclick="actWd('${wd.id}','rejected')">✕ Decline</button>` : ''}
         ${wd.status === 'paid' || wd.status === 'rejected' ? '<span style="font-size:12px;color:var(--muted-light)">Done</span>' : ''}
+        <button class="btn-sm btn-outline" onclick="event.stopPropagation();openWdEdit('${wd.id}')">✏️ Edit</button>
+        <button class="btn-sm btn-delete" onclick="event.stopPropagation();adminDelete('withdrawal','${wd.id}','R${Number(wd.amount||0).toFixed(2)} withdrawal')">🗑</button>
       </div></td>
     </tr>`).join('')}
     </tbody></table>`;
+}
+
+function openWdEdit(id) {
+  const wd = allWd.find(x => x.id === id);
+  if (!wd) return;
+  document.getElementById('m-title').textContent = `Edit withdrawal — ${wd.requesterName || wd.accountHolder || ''}`;
+  document.getElementById('m-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Amount (R)</label>
+        <input id="wd-edit-amount" class="f-input" type="number" min="1" step="0.01" value="${Number(wd.amount||0).toFixed(2)}" /></div>
+      <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Bank Name</label>
+        <input id="wd-edit-bank" class="f-input" value="${(wd.bankName||'').replace(/"/g,'&quot;')}" /></div>
+      <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Account Number</label>
+        <input id="wd-edit-account" class="f-input" value="${(wd.accountNumber||'').replace(/"/g,'&quot;')}" /></div>
+      <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Account Holder</label>
+        <input id="wd-edit-holder" class="f-input" value="${(wd.accountHolder||'').replace(/"/g,'&quot;')}" /></div>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin-top:12px">Changing the amount automatically adjusts the funds held from the ${wd.source === 'wallet' ? "user's wallet" : "driver's earnings"}. Payment itself is a manual EFT.</p>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-green" onclick="saveWdEdit('${wd.id}')">💾 Save Changes</button>`;
+  openModal();
+}
+
+async function saveWdEdit(id) {
+  try {
+    const body = {
+      amount: Number(document.getElementById('wd-edit-amount').value),
+      bankName: document.getElementById('wd-edit-bank').value.trim(),
+      accountNumber: document.getElementById('wd-edit-account').value.trim(),
+      accountHolder: document.getElementById('wd-edit-holder').value.trim(),
+    };
+    const res = await apiFetch('/api/withdrawals/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || res.status);
+    toast('💾 Withdrawal updated', 'ok');
+    closeModal();
+    loadWd();
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
 }
 
 async function actWd(id, status) {
@@ -879,7 +2827,7 @@ function renderFilteredSafe() {
       <td style="font-size:12px;color:var(--muted);max-width:160px">${(s.aiResponse||'—').slice(0,60)}${(s.aiResponse||'').length>60?'…':''}</td>
       <td><span class="badge b-${s.status}">${s.status}</span></td>
       <td style="font-size:12px">${fmt(s.createdAt)}</td>
-      <td>${s.status === 'open' ? `<button class="btn-sm btn-approve" onclick="resolveReport('${s.id}')">Mark Resolved</button>` : '<span style="font-size:12px;color:var(--muted-light)">Done</span>'}</td>
+      <td><div class="action-cell">${s.status === 'open' ? `<button class="btn-sm btn-approve" onclick="resolveReport('${s.id}')">Mark Resolved</button>` : '<span style="font-size:12px;color:var(--muted-light)">Done</span>'}<button class="btn-sm btn-delete" onclick="event.stopPropagation();adminDelete('safety-report','${s.id}','this safety report')">🗑</button></div></td>
     </tr>`).join('')}
     </tbody></table>`;
 }
@@ -904,33 +2852,496 @@ async function loadUsers() {
     const res = await apiFetch('/api/users');
     if (!res.ok) throw new Error(res.status);
     const users = await res.json();
+    allUsers = Array.isArray(users) ? users : [];
     if (!Array.isArray(users) || !users.length) {
       document.getElementById('users-table').innerHTML = emptyState('👤', 'No users yet', 'Registered user accounts will appear here');
       return;
     }
     document.getElementById('users-table').innerHTML = `<table>
-      <thead><tr><th>Name</th><th>Username</th><th>Phone</th><th>Role</th><th>Rating</th><th>Wallet Balance</th><th>Joined</th></tr></thead>
-      <tbody>${users.map(u => `<tr>
-        <td style="font-weight:600">${u.name || '—'}</td>
-        <td style="color:var(--muted);font-size:13px">@${u.username || '—'}</td>
-        <td>${u.phone || '—'}</td>
-        <td><span class="badge b-${u.role || 'client'}">${u.role || 'client'}</span></td>
+      <thead><tr><th>Name</th><th>Username</th><th>Phone</th><th>Role</th><th>Rating</th><th>Wallet Balance</th><th>Joined</th><th>Actions</th></tr></thead>
+      <tbody>${users.map(u => {
+        const liftClub = u.liftClubMembership || null;
+        const liftClubBadge = liftClub?.status === 'approved'
+          ? '<span class="badge b-liftclub" style="margin-left:6px">Lift Club</span>'
+          : liftClub?.status
+            ? `<span class="badge b-${escapeHtml(liftClub.status)}" style="margin-left:6px">${escapeHtml(String(liftClub.status).replace(/_/g, ' '))}</span>`
+            : '';
+        return `<tr onclick="userDetail('${u.id}')" style="cursor:pointer">
+        <td style="font-weight:600">${escapeHtml(u.name || '—')} ${liftClubBadge}</td>
+        <td style="color:var(--muted);font-size:13px">@${escapeHtml(u.username || '—')}</td>
+        <td>${escapeHtml(u.phone || '—')}</td>
+        <td><span class="badge b-${u.role || 'client'}">${escapeHtml(u.role || 'client')}</span></td>
         <td>⭐ ${Number(u.rating || 5).toFixed(1)}</td>
         <td style="font-weight:600;color:var(--green)">R ${Number(u.walletBalance || 0).toFixed(2)}</td>
         <td style="font-size:12px">${fmt(u.createdAt)}</td>
-      </tr>`).join('')}
+        <td><div class="action-cell"><button class="btn-sm btn-detail" onclick="event.stopPropagation();userDetail('${u.id}')">View</button>${u.role !== 'admin' ? `<button class="btn-sm btn-delete" onclick="event.stopPropagation();adminDelete('user','${u.id}','${(u.name||u.username||'this user').replace(/'/g,"\\'")}')">🗑</button>` : ''}</div></td>
+      </tr>`;
+      }).join('')}
       </tbody></table>`;
   } catch(e) {
     document.getElementById('users-table').innerHTML = emptyState('❌', 'Failed to load users', e.message);
   }
 }
 
-// ── SEARCH ──
-function doSearch(q) {
-  if (curView === 'chauffeurs') {
-    const f = allChauf.filter(c => `${c.userName} ${c.carMake} ${c.vehicleModel} ${c.plateNumber} ${c.carColor}`.toLowerCase().includes(q.toLowerCase()));
-    renderChauffeurTable('chauf-table', f, true);
+// ── REFERRALS ──
+async function loadReferrals() {
+  spin('referrals-table');
+  try {
+    const res = await apiFetch('/api/admin/referrals');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || res.status);
+    allReferrals = Array.isArray(data.relationships) ? data.relationships : [];
+    const summary = data.summary || {};
+    document.getElementById('referral-stats').innerHTML = `
+      <div class="stat-card">
+        <div class="stat-top"><div class="stat-label">Total Referrals</div><div class="stat-icon si-black">↗</div></div>
+        <div class="stat-value">${Number(summary.totalReferrals || 0)}</div>
+        <div class="stat-foot">${Number(summary.referredRiders || 0)} riders · ${Number(summary.referredDrivers || 0)} drivers</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-top"><div class="stat-label">Active Referrers</div><div class="stat-icon si-blue">👤</div></div>
+        <div class="stat-value">${Number(summary.uniqueReferrers || 0)}</div>
+        <div class="stat-foot">Users who invited at least one person</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-top"><div class="stat-label">Rewarded Referrals</div><div class="stat-icon si-green">✓</div></div>
+        <div class="stat-value">${Number(summary.rewardedReferrals || 0)}</div>
+        <div class="stat-foot">Referrals with recorded earnings</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-top"><div class="stat-label">Rewards Paid</div><div class="stat-icon si-yellow">R</div></div>
+        <div class="stat-value">R ${Number(summary.totalRewards || 0).toFixed(2)}</div>
+        <div class="stat-foot">Total earned across referral events</div>
+      </div>`;
+    renderFilteredReferrals();
+    tick();
+  } catch (e) {
+    allReferrals = [];
+    document.getElementById('referral-stats').innerHTML = '';
+    document.getElementById('referrals-table').innerHTML = emptyState('!', 'Failed to load referrals', e.message);
   }
+}
+
+function filterReferrals(filter, el) {
+  referralFilter = filter;
+  document.querySelectorAll('#view-referrals .ftab').forEach(tab => tab.classList.remove('active'));
+  el.classList.add('active');
+  renderFilteredReferrals();
+}
+
+function renderFilteredReferrals() {
+  const search = String(document.getElementById('referral-search')?.value || '').trim().toLowerCase();
+  const relationships = allReferrals.filter(item => {
+    const referredRole = String(item.referred?.role || 'client').toLowerCase();
+    const roleMatches = referralFilter === 'all'
+      || (referralFilter === 'driver' && ['driver', 'chauffeur'].includes(referredRole))
+      || (referralFilter === 'client' && !['driver', 'chauffeur'].includes(referredRole))
+      || (referralFilter === 'rewarded' && Number(item.totalRewards || 0) > 0);
+    if (!roleMatches) return false;
+    if (!search) return true;
+    return [
+      item.referrer?.name, item.referrer?.email, item.referrer?.phone,
+      item.referred?.name, item.referred?.email, item.referred?.phone,
+      item.referralCode, item.status,
+    ].some(value => String(value || '').toLowerCase().includes(search));
+  });
+  renderReferralTable(relationships);
+}
+
+function renderReferralTable(relationships) {
+  const target = document.getElementById('referrals-table');
+  if (!relationships.length) {
+    target.innerHTML = emptyState('↗', 'No referral relationships found', 'Try another filter or search term');
+    return;
+  }
+  target.innerHTML = `<table style="min-width:1120px">
+    <thead><tr><th>Referrer</th><th>Referred User</th><th>Account</th><th>Referral Link</th><th>Status</th><th>Rewards</th><th>Joined</th><th>Actions</th></tr></thead>
+    <tbody>${relationships.map(item => {
+      const referrer = item.referrer || {};
+      const referred = item.referred || {};
+      const referredRole = ['driver', 'chauffeur'].includes(String(referred.role || '').toLowerCase()) ? 'driver' : 'client';
+      const status = String(item.status || 'registered').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      const link = item.shareUrl || '';
+      return `<tr>
+        <td>
+          <button class="btn-sm btn-detail" onclick="openReferralUser('${escapeHtml(referrer.id)}')" style="font-weight:700;margin-bottom:5px">${escapeHtml(referrer.name || 'Unnamed user')}</button>
+          <div style="font-size:11px;color:var(--muted)">${escapeHtml(referrer.email || '—')} · ${escapeHtml(referrer.phone || 'No phone')}</div>
+        </td>
+        <td>
+          <button class="btn-sm btn-detail" onclick="openReferralUser('${escapeHtml(referred.id)}')" style="font-weight:700;margin-bottom:5px">${escapeHtml(referred.name || 'Unnamed user')}</button>
+          <div style="font-size:11px;color:var(--muted)">${escapeHtml(referred.email || '—')} · ${escapeHtml(referred.phone || 'No phone')}</div>
+        </td>
+        <td><span class="badge b-${referredRole}">${referredRole === 'driver' ? 'Driver' : 'Rider'}</span></td>
+        <td>
+          <div style="font-family:var(--mono);font-size:12px;font-weight:600">${escapeHtml(item.referralCode || 'No code')}</div>
+          ${link ? `<div style="margin-top:5px;display:flex;gap:6px"><button class="btn-sm btn-detail" onclick="copyReferralLink('${escapeHtml(link)}')">Copy link</button><a class="btn-sm btn-detail" href="${escapeHtml(link)}" target="_blank" rel="noopener" style="text-decoration:none">Open</a></div>` : ''}
+        </td>
+        <td><span class="badge b-${status === 'rewarded' ? 'rewarded' : 'registered'}">${escapeHtml(String(item.status || 'registered').replace(/_/g, ' '))}</span></td>
+        <td>
+          <div style="font-weight:700;color:var(--green)">R ${Number(item.totalRewards || 0).toFixed(2)}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:3px">${Number(item.rewardCount || 0)} transaction${Number(item.rewardCount || 0) === 1 ? '' : 's'}</div>
+        </td>
+        <td><div style="font-size:12px">${fmt(referred.joinedAt || item.createdAt)}</div><div style="font-size:11px;color:var(--muted);margin-top:3px">Reward: ${fmt(item.lastRewardAt)}</div></td>
+        <td><div class="action-cell"><button class="btn-sm btn-detail" onclick="showReferralDetails('${escapeHtml(referred.id)}')">Details</button></div></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+async function openReferralUser(userId) {
+  try {
+    await ensureAdminUsersLoaded();
+    userDetail(userId);
+  } catch (e) {
+    toast('Unable to open account: ' + (e.message || 'Unknown error'), 'err');
+  }
+}
+
+function showReferralDetails(referredUserId) {
+  const item = allReferrals.find(entry => entry.referred?.id === referredUserId);
+  if (!item) return;
+  const referrer = item.referrer || {};
+  const referred = item.referred || {};
+  document.getElementById('m-title').textContent = 'Referral relationship';
+  document.getElementById('m-sub').textContent = `${referrer.name || 'Unknown referrer'} referred ${referred.name || 'Unknown user'}`;
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid">
+      <div class="info-row"><div class="info-label">Referrer</div><div class="info-val">${escapeHtml(referrer.name || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Referred user</div><div class="info-val">${escapeHtml(referred.name || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Referrer email</div><div class="info-val">${escapeHtml(referrer.email || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Referred email</div><div class="info-val">${escapeHtml(referred.email || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Referrer phone</div><div class="info-val">${escapeHtml(referrer.phone || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Referred phone</div><div class="info-val">${escapeHtml(referred.phone || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Code used</div><div class="info-val" style="font-family:var(--mono)">${escapeHtml(item.referralCode || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Status</div><div class="info-val">${escapeHtml(String(item.status || 'registered').replace(/_/g, ' '))}</div></div>
+      <div class="info-row"><div class="info-label">Total rewards</div><div class="info-val" style="font-weight:700;color:var(--green)">R ${Number(item.totalRewards || 0).toFixed(2)}</div></div>
+      <div class="info-row"><div class="info-label">Reward transactions</div><div class="info-val">${Number(item.rewardCount || 0)}</div></div>
+      <div class="info-row"><div class="info-label">Registered</div><div class="info-val">${fmtFull(item.createdAt)}</div></div>
+      <div class="info-row"><div class="info-label">Last reward</div><div class="info-val">${fmtFull(item.lastRewardAt)}</div></div>
+      <div class="info-row"><div class="info-label">Referrer balances</div><div class="info-val">Rewards R ${Number(referrer.rewardsBalance || 0).toFixed(2)} · Wallet R ${Number(referrer.walletBalance || 0).toFixed(2)}</div></div>
+      <div class="info-row"><div class="info-label">Referral event ID</div><div class="info-val" style="font-family:var(--mono);font-size:11px">${escapeHtml(item.eventId || 'No audit event')}</div></div>
+    </div>
+    ${item.shareUrl ? `<div class="field" style="margin-top:18px"><div class="f-label">Referral link</div><input class="f-input" value="${escapeHtml(item.shareUrl)}" readonly onclick="this.select()" /></div>` : ''}`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Close</button>
+    <button class="btn-lg btn-outline" onclick="closeModal();openReferralUser('${escapeHtml(referrer.id)}')">Open referrer</button>
+    <button class="btn-lg btn-black" onclick="closeModal();openReferralUser('${escapeHtml(referred.id)}')">Open referred user</button>`;
+  openModal();
+}
+
+async function copyReferralLink(link) {
+  try {
+    await navigator.clipboard.writeText(link);
+    toast('Referral link copied', 'ok');
+  } catch (e) {
+    toast('Unable to copy referral link', 'err');
+  }
+}
+
+function userDetail(id) {
+  const u = allUsers.find(item => item.id === id);
+  if (!u) { toast('❌ User not found in current list.', 'err'); return; }
+  const label = u.name || u.username || 'User';
+  const membership = u.liftClubMembership || null;
+  const membershipLabel = membership?.status ? String(membership.status).replace(/_/g, ' ') : 'Not applied';
+  const membershipBadge = membership?.status === 'approved'
+    ? '<span class="badge b-liftclub">Lift Club Member</span>'
+    : membership?.status
+      ? `<span class="badge b-${escapeHtml(membership.status)}">${escapeHtml(membershipLabel)}</span>`
+      : '<span class="badge b-client">Not applied</span>';
+  document.getElementById('m-title').textContent = label;
+  document.getElementById('m-sub').textContent = `User account · ${u.role || 'client'}`;
+  document.getElementById('m-body').innerHTML = `
+    <div class="info-grid">
+      <div class="info-row"><div class="info-label">Name</div><div class="info-val">${escapeHtml(u.name || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Email / Username</div><div class="info-val">${escapeHtml(u.username || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Phone</div><div class="info-val">${escapeHtml(u.phone || '—')}</div></div>
+      <div class="info-row"><div class="info-label">Role</div><div class="info-val"><span class="badge b-${u.role || 'client'}">${escapeHtml(u.role || 'client')}</span></div></div>
+      <div class="info-row"><div class="info-label">Rating</div><div class="info-val">⭐ ${Number(u.rating || 5).toFixed(1)}</div></div>
+      <div class="info-row"><div class="info-label">Wallet Balance</div><div class="info-val" style="font-weight:700;color:var(--green)">R ${Number(u.walletBalance || 0).toFixed(2)}</div></div>
+      <div class="info-row"><div class="info-label">Lift Club</div><div class="info-val">${membershipBadge}</div></div>
+      <div class="info-row"><div class="info-label">Joined</div><div class="info-val">${fmtFull(u.createdAt)}</div></div>
+      <div class="info-row"><div class="info-label">User ID</div><div class="info-val" style="font-family:var(--mono);font-size:12px">${escapeHtml(u.id || '—')}</div></div>
+    </div>
+    <div class="notice" style="margin-top:18px">🎟️ <span>Convert or approve this current user as a Lift Club member. Their normal client login stays unchanged.</span></div>
+    <div class="notice" style="margin-top:18px"><span>Update the login email or set a new password. Email changes are checked for format and duplicates.</span></div>
+    <div class="field" style="margin-top:14px">
+      <div class="f-label">Login email</div>
+      <input id="admin-user-email" class="f-input" type="email" autocomplete="off" value="${escapeHtml(u.username || '')}" onkeydown="if(event.key==='Enter')saveAdminEmail('${id}')" />
+    </div>
+    <div class="field" style="margin-top:14px">
+      <div class="f-label">New password</div>
+      <input id="admin-user-password" class="f-input" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" onkeydown="if(event.key==='Enter')saveAdminPassword('${id}')" />
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    ${u.role !== 'admin' ? `<button class="btn-lg btn-delete" onclick="closeModal();adminDelete('user','${u.id}','${(u.name||u.username||'this user').replace(/'/g,"\\'")}')">Delete user</button>` : ''}
+    ${u.role !== 'admin' ? `<button class="btn-lg btn-outline" onclick="openLiftClubUserConvertModal('${id}')">${membership?.status === 'approved' ? 'Edit Lift Club' : 'Approve Lift Club'}</button>` : ''}
+    <button class="btn-lg btn-outline" onclick="saveAdminEmail('${id}')">Update email</button>
+    <button class="btn-lg btn-green" onclick="saveAdminPassword('${id}')">Update password</button>`;
+  openModal();
+  setTimeout(() => document.getElementById('admin-user-email')?.focus(), 50);
+}
+
+async function saveAdminEmail(id) {
+  const input = document.getElementById('admin-user-email');
+  const email = String(input?.value || '').trim().toLowerCase();
+  if (!email) {
+    input?.focus();
+    toast('Email is required.', 'err');
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/admin/users/' + id + '/email', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Unable to update email.');
+    const user = allUsers.find(item => item.id === id);
+    if (user) user.username = data.email || email;
+    closeModal();
+    loadUsers();
+    toast(data.message || 'Email updated.', 'ok');
+  } catch (e) {
+    toast(e.message || 'Unable to update email.', 'err');
+  }
+}
+
+async function saveAdminPassword(id) {
+  const input = document.getElementById('admin-user-password');
+  const password = input?.value || '';
+  if (password.length < 8) {
+    input?.focus();
+    toast('❌ Password must be at least 8 characters.', 'err');
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/admin/users/' + id + '/password', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Unable to update password.');
+    closeModal();
+    toast('✅ Password updated.', 'ok');
+  } catch (e) {
+    toast('❌ ' + (e.message || 'Unable to update password.'), 'err');
+  }
+}
+
+async function ensureAdminUsersLoaded() {
+  if (Array.isArray(allUsers) && allUsers.length) return;
+  const res = await apiFetch('/api/users');
+  if (!res.ok) throw new Error(await res.text());
+  const users = await res.json();
+  allUsers = Array.isArray(users) ? users : [];
+}
+
+async function openLiftClubUserPickerModal() {
+  try {
+    await ensureAdminUsersLoaded();
+  } catch (e) {
+    toast('❌ Unable to load users for conversion: ' + e.message, 'err');
+    return;
+  }
+  const options = allUsers
+    .filter(u => u.role !== 'admin')
+    .sort((a, b) => String(a.name || a.username || '').localeCompare(String(b.name || b.username || '')))
+    .map(u => {
+      const label = [u.name || 'Unnamed user', u.username || '', u.phone || '', u.liftClubMembership?.status ? `Lift Club: ${String(u.liftClubMembership.status).replace(/_/g, ' ')}` : 'No Lift Club application'].filter(Boolean).join(' · ');
+      return `<option value="${escapeHtml(u.id)}">${escapeHtml(label)}</option>`;
+    })
+    .join('');
+  document.getElementById('m-title').textContent = 'Convert existing user';
+  document.getElementById('m-sub').textContent = 'Approve or open a Lift Club membership for a current account';
+  document.getElementById('m-body').innerHTML = `
+    <div class="notice">🎟️ <span>This keeps the user as a normal client account and adds Lift Club membership status on top.</span></div>
+    <label class="field"><span>User</span>
+      <select class="f-input" id="lcConvertUserId">${options || '<option value="">No eligible users found</option>'}</select>
+    </label>
+    <label class="field"><span>Status</span>
+      <select class="f-input" id="lcConvertStatus">
+        <option value="approved" selected>Approved Lift Club member</option>
+        <option value="pending_payment">Pending payment</option>
+        <option value="pending_review">Pending review</option>
+        <option value="rejected">Rejected</option>
+      </select>
+    </label>
+    <label class="field"><span>Fee amount</span><input class="f-input" id="lcConvertFeeAmount" type="number" min="0" step="1" value="200" /></label>
+    <label class="field"><span>Rejection reason</span><textarea class="f-input" id="lcConvertRejectionReason" rows="3" placeholder="Required only when rejected"></textarea></label>
+  `;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-green" onclick="saveLiftClubUserConversionFromModal()">Save Lift Club status</button>`;
+  openModal();
+}
+
+function openLiftClubUserConvertModal(userId) {
+  const user = allUsers.find(u => u.id === userId);
+  if (!user) {
+    toast('❌ User not found in current list.', 'err');
+    return;
+  }
+  const membership = user.liftClubMembership || {};
+  const selectedStatus = membership.status || 'approved';
+  document.getElementById('m-title').textContent = 'Lift Club membership';
+  document.getElementById('m-sub').textContent = [user.name, user.username].filter(Boolean).join(' · ') || 'Current user';
+  document.getElementById('m-body').innerHTML = `
+    <div class="notice">🎟️ <span>Convert this current user to Lift Club or update their membership status. Their client login and account role remain unchanged.</span></div>
+    <label class="field"><span>Status</span>
+      <select class="f-input" id="lcConvertStatus">
+        ${['approved','pending_payment','pending_review','rejected'].map(status => `<option value="${status}" ${status === selectedStatus ? 'selected' : ''}>${status.replace(/_/g, ' ')}</option>`).join('')}
+      </select>
+    </label>
+    <label class="field"><span>Fee amount</span><input class="f-input" id="lcConvertFeeAmount" type="number" min="0" step="1" value="${Number(membership.feeAmount || 200)}" /></label>
+    <label class="field"><span>Rejection reason</span><textarea class="f-input" id="lcConvertRejectionReason" rows="3" placeholder="Required only when rejected">${escapeHtml(membership.rejectionReason || '')}</textarea></label>
+    <input type="hidden" id="lcConvertUserId" value="${escapeHtml(userId)}" />
+  `;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-green" onclick="saveLiftClubUserConversionFromModal()">Save Lift Club status</button>`;
+  openModal();
+}
+
+async function saveLiftClubUserConversionFromModal() {
+  const userId = document.getElementById('lcConvertUserId')?.value || '';
+  const status = document.getElementById('lcConvertStatus')?.value || 'approved';
+  const feeAmount = Number(document.getElementById('lcConvertFeeAmount')?.value || 200);
+  const rejectionReason = String(document.getElementById('lcConvertRejectionReason')?.value || '').trim();
+  if (!userId) {
+    toast('❌ Select a user first.', 'err');
+    return;
+  }
+  if (status === 'rejected' && !rejectionReason) {
+    toast('❌ Rejection reason is required.', 'err');
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/admin/lift-club-memberships/convert-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
+        status,
+        feeAmount: Number.isFinite(feeAmount) ? feeAmount : 200,
+        rejectionReason: status === 'rejected' ? rejectionReason : '',
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Unable to update Lift Club membership.');
+    toast(status === 'approved' ? '✅ User approved as Lift Club member' : '✅ Lift Club membership updated', 'ok');
+    closeModal();
+    loadLiftClubApplications();
+    loadUsers();
+  } catch(e) {
+    toast('❌ ' + (e.message || 'Unable to update Lift Club membership.'), 'err');
+  }
+}
+
+// ── ADMIN DELETE ──
+async function adminDelete(type, id, label) {
+  const endpoints = {
+    ride: '/api/admin/rides/' + id,
+    user: '/api/admin/users/' + id,
+    withdrawal: '/api/admin/withdrawals/' + id,
+    'safety-report': '/api/admin/safety-reports/' + id,
+    payment: '/api/admin/payments/' + id,
+    document: '/api/admin/documents/' + id,
+  };
+  const url = endpoints[type];
+  if (!url) { toast('❌ Unknown type', 'err'); return; }
+  showDeleteConfirm({
+    title: 'Confirm Delete',
+    subtitle: 'This change is permanent and cannot be undone.',
+    message: `Delete ${label}?`,
+    confirmLabel: 'Confirm Delete',
+    onConfirm: async () => {
+      try {
+        const res = await apiFetch(url, { method: 'DELETE' });
+        if (!res.ok) throw new Error(await res.text());
+        toast('🗑 Deleted successfully', 'ok');
+        const reloaders = { ride: loadRides, user: loadUsers, withdrawal: loadWd, 'safety-report': loadSafe, payment: loadPay, document: loadChauf };
+        reloaders[type]?.();
+      } catch(e) { toast('❌ ' + e.message, 'err'); }
+    },
+  });
+}
+
+// ── SEARCH ──
+// Switch to the Chauffeurs view WITHOUT clearing the search box (unlike go()).
+function switchToChauffeursView() {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const navChauf = document.querySelector('.nav-item[onclick*="chauffeurs"]');
+  if (navChauf) navChauf.classList.add('active');
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-chauffeurs').classList.add('active');
+  document.getElementById('page-title').textContent = VIEW_TITLES['chauffeurs'] || 'Chauffeurs';
+  curView = 'chauffeurs';
+}
+
+async function doSearch(q) {
+  const query = (q || '').trim();
+
+  if (curView === 'referrals') {
+    const input = document.getElementById('referral-search');
+    if (input) input.value = query;
+    renderFilteredReferrals();
+    return;
+  }
+
+  // The selfies view keeps its own dedicated search.
+  if (curView === 'selfies') {
+    const f = allSelfies.filter(item => `${item.riderName} ${item.riderEmail} ${item.pickupAddress} ${item.dropoffAddress} ${item.rideId}`.toLowerCase().includes(query.toLowerCase()));
+    renderSelfiesTable(f);
+    return;
+  }
+
+  if (curView === 'rides') {
+    const input = document.getElementById('trip-search');
+    if (input) input.value = query;
+    queueTripSearch();
+    return;
+  }
+
+  // From ANY other view (dashboard, rides, withdrawals, etc.) a search looks up
+  // drivers by name, email, or phone — jumping to the Chauffeurs list.
+  if (query) {
+    if (curView !== 'chauffeurs') {
+      switchToChauffeursView();
+      if (!allChauf.length) { await loadChauf(); }
+    }
+    const f = allChauf.filter(c => `${c.userName||''} ${c.userEmail||''} ${c.phone||''} ${c.userPhone||''} ${c.carMake||''} ${c.vehicleModel||''} ${c.plateNumber||''} ${c.carColor||''}`.toLowerCase().includes(query.toLowerCase()));
+    renderChauffeurTable('chauf-table', f, true);
+  } else if (curView === 'chauffeurs') {
+    // Cleared search — restore the current filter tab.
+    renderFilteredChauf();
+  }
+}
+
+// ── TEST SMS ──
+async function sendTestSms() {
+  const to = document.getElementById('test-sms-to').value.trim();
+  const msg = document.getElementById('test-sms-msg').value.trim();
+  const out = document.getElementById('test-sms-result');
+  if (!to) { out.textContent = 'Enter a phone number.'; return; }
+  out.textContent = 'Sending…';
+  try {
+    const res = await apiFetch('/api/admin/test-sms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, message: msg || undefined }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || res.status);
+    const r = data.result || {};
+    if (r.status === 'sent') out.textContent = '✅ Accepted for ' + to + ' (id: ' + (r.id || 'n/a') + ')' + (r.error ? ' · ' + r.error : '');
+    else if (r.status === 'pending_configuration') out.textContent = '⚠️ BulkSMS not configured — check Railway env vars.';
+    else if (r.status === 'skipped') out.textContent = '⚠️ ' + (r.error || 'Skipped — invalid number.');
+    else out.textContent = '❌ ' + (r.status || 'failed') + ': ' + (r.error || 'unknown error');
+  } catch(e) { out.textContent = '❌ ' + (e.message || 'Failed to send'); }
 }
 
 // ── UTILS ──
@@ -938,8 +3349,39 @@ function fmt(d) { return d ? new Date(d).toLocaleDateString('en-ZA', { day:'2-di
 function fmtFull(d) { return d ? new Date(d).toLocaleString('en-ZA') : '—'; }
 function spin(id) { const el = document.getElementById(id); if (el) el.innerHTML = '<div class="loading">Loading…</div>'; }
 function emptyState(icon, title, sub) { return `<div class="empty"><div class="empty-icon">${icon}</div><div class="empty-text">${title}</div><div class="empty-sub">${sub}</div></div>`; }
+let pendingDeleteAction = null;
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+function showDeleteConfirm({ title, subtitle, message, confirmLabel, onConfirm }) {
+  pendingDeleteAction = onConfirm;
+  document.getElementById('m-title').textContent = title || 'Confirm Delete';
+  document.getElementById('m-sub').textContent = subtitle || 'This action cannot be undone.';
+  document.getElementById('m-body').innerHTML = `
+    <div class="notice" style="margin:0">
+      ⚠️ <span>${escapeHtml(message || 'This action cannot be undone.')}</span>
+    </div>`;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-red" onclick="runPendingDeleteAction()">${escapeHtml(confirmLabel || 'Confirm Delete')}</button>`;
+  openModal();
+}
+async function runPendingDeleteAction() {
+  const action = pendingDeleteAction;
+  pendingDeleteAction = null;
+  closeModal();
+  if (typeof action === 'function') await action();
+}
 function openModal() { document.getElementById('modal-wrap').classList.add('open'); }
-function closeModal() { document.getElementById('modal-wrap').classList.remove('open'); }
+function closeModal() {
+  pendingDeleteAction = null;
+  document.getElementById('modal-wrap').classList.remove('open');
+}
 document.getElementById('modal-wrap').addEventListener('click', e => { if (e.target === document.getElementById('modal-wrap')) closeModal(); });
 
 function toast(msg, type = 'ok') {

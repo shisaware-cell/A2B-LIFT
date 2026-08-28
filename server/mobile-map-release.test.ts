@@ -243,3 +243,212 @@ test("driver app provides cash settlement with live overpayment and underpayment
   assert.match(chauffeurSource, /Overpayment of \+R/);
   assert.match(chauffeurSource, /Underpayment of -R/);
 });
+
+test("register screen provides separate name and surname fields with pre-set +27 phone prefix", () => {
+  const registerSource = readProjectFile("app/register.tsx");
+  assert.match(registerSource, /Full Name/);
+  assert.match(registerSource, /Surname/);
+  assert.match(registerSource, /firstName/);
+  assert.match(registerSource, /lastName/);
+  assert.match(registerSource, /placeholder="First and middle names"/);
+  assert.match(registerSource, /placeholder="Surname"/);
+  assert.match(registerSource, /\+27/);
+  assert.match(registerSource, /normalizeSouthAfricanPhone/);
+});
+
+test("driver application reinstates insurance docs and replaces dekra with 5 vehicle photos", () => {
+  const chauffeurRegisterSource = readProjectFile("app/chauffeur-register.tsx");
+  const vehiclesSource = readProjectFile("app/chauffeur/vehicles.tsx");
+  const routesSource = readProjectFile("server/routes.ts");
+
+  assert.doesNotMatch(chauffeurRegisterSource, /driver:driver_evaluation/);
+  assert.match(chauffeurRegisterSource, /driver:passenger_liability_insurance/);
+  assert.match(chauffeurRegisterSource, /\+27/);
+  assert.match(chauffeurRegisterSource, /normalizeSouthAfricanPhone/);
+
+  assert.match(vehiclesSource, /vehicle:passenger_liability_insurance/);
+  assert.match(vehiclesSource, /vehicle:inspection_photos/);
+  assert.match(vehiclesSource, /VEHICLE_PHOTO_ANGLES/);
+  assert.match(vehiclesSource, /saveAllVehiclePhotos/);
+  assert.match(vehiclesSource, /isAll5PhotosTaken/);
+
+  assert.match(routesSource, /const VEHICLE_REQUIRED_DOCS = new Set\(\[\s*"vehicle:double_license_disk",\s*"vehicle:passenger_liability_insurance",?\s*\]\)/);
+  assert.match(routesSource, /vehicle:inspection_photos/);
+});
+
+test("driver app supports capturing documents using device camera and gallery", () => {
+  const chauffeurRegisterSource = readProjectFile("app/chauffeur-register.tsx");
+  const vehiclesSource = readProjectFile("app/chauffeur/vehicles.tsx");
+  const settingsSource = readProjectFile("app/chauffeur/settings.tsx");
+
+  assert.match(chauffeurRegisterSource, /launchCameraAsync/);
+  assert.match(chauffeurRegisterSource, /promptDocumentChoice/);
+  assert.match(vehiclesSource, /launchCameraAsync/);
+  assert.match(vehiclesSource, /handleDocumentUploadPress/);
+  assert.match(settingsSource, /launchCameraAsync/);
+  assert.match(settingsSource, /handleSettingsDocumentPress/);
+});
+
+test("map recentering reliably centers on driver overview view and fits active routes", () => {
+  const mapNativeSource = readProjectFile("components/A2BMap.native.tsx");
+  const mapWebSource = readProjectFile("components/A2BMap.web.tsx");
+  const chauffeurSource = readProjectFile("app/chauffeur/index.tsx");
+
+  assert.match(mapNativeSource, /fitMap/);
+  assert.match(mapNativeSource, /IDLE_DELTA/);
+  assert.match(mapNativeSource, /CITY_DELTA/);
+  assert.match(mapNativeSource, /isMapMoved/);
+  assert.match(mapNativeSource, /onRegionChangeComplete/);
+  assert.match(mapWebSource, /fitMap/);
+  assert.match(mapWebSource, /idleZoom/);
+  assert.match(mapWebSource, /isMapMoved/);
+  assert.match(chauffeurSource, /initialZoom="city"/);
+});
+
+test("driver navigation settings and bottom-left green vehicle button are configured", () => {
+  const navSettingsSource = readProjectFile("app/chauffeur/navigation-settings.tsx");
+  const settingsSource = readProjectFile("app/chauffeur/settings.tsx");
+  const chauffeurSource = readProjectFile("app/chauffeur/index.tsx");
+  const navPrefsSource = readProjectFile("lib/navigation-preferences.ts");
+
+  assert.match(navSettingsSource, /A2B Navigation/);
+  assert.match(navSettingsSource, /Google Maps/);
+  assert.match(navSettingsSource, /Auto-navigate/);
+  assert.match(settingsSource, /\/chauffeur\/navigation-settings/);
+  assert.match(chauffeurSource, /greenVehicleBtn/);
+  assert.match(chauffeurSource, /getNavigationPreferences/);
+  assert.match(navPrefsSource, /getNavigationPreferences/);
+  assert.match(navPrefsSource, /setNavigationApp/);
+});
+
+test("supports live trip destination change with price recalculation and Waze deep navigation", () => {
+  const routesSource = readProjectFile("server/routes.ts");
+  const clientSource = readProjectFile("app/client/index.tsx");
+  const chauffeurSource = readProjectFile("app/chauffeur/index.tsx");
+  const navHelperSource = readProjectFile("lib/google-navigation.ts");
+
+  assert.match(routesSource, /\/api\/rides\/:id\/destination/);
+  assert.match(routesSource, /ride:destinationUpdated/);
+  assert.match(routesSource, /priceEstimate/);
+  assert.match(clientSource, /active_dropoff/);
+  assert.match(clientSource, /openActiveDestinationEditor/);
+  assert.match(clientSource, /activeDestinationCard/);
+  assert.match(chauffeurSource, /handleDestinationUpdated/);
+  assert.match(chauffeurSource, /ride:destinationUpdated/);
+  assert.match(navHelperSource, /buildWazeNavigationUrl/);
+  assert.match(navHelperSource, /waze:\/\//);
+});
+
+test("driver cancellation notifies client and automatically resumes ride search", () => {
+  const routesSource = readProjectFile("server/routes.ts");
+  const clientSource = readProjectFile("app/client/index.tsx");
+
+  assert.match(routesSource, /cancelledBy === "driver"/);
+  assert.match(routesSource, /We are automatically searching for another driver for you now/);
+  assert.match(clientSource, /isDriverCancellation/);
+  assert.match(clientSource, /reRequestCancelledRide/);
+  assert.match(clientSource, /Your driver had to cancel this trip\. We are automatically searching for another nearby driver/);
+  assert.match(clientSource, /on\("ride:cancelled", handleStatusUpdate\)/);
+});
+
+test("admin document viewer ignores local device URIs and shows re-upload indicator", () => {
+  const adminSource = readProjectFile("server/templates/admin.html");
+  const a2bAdminSource = readProjectFile("a2b-admin.html");
+  const routesSource = readProjectFile("server/routes.ts");
+  const vehiclesAppSource = readProjectFile("app/chauffeur/vehicles.tsx");
+
+  assert.match(adminSource, /trimmed\.startsWith\('file:'\)/);
+  assert.match(adminSource, /Re-upload needed/);
+  assert.match(a2bAdminSource, /trimmed\.startsWith\('file:'\)/);
+  assert.match(routesSource, /Invalid document URL\. Documents must be uploaded via \/api\/upload-document\./);
+  assert.doesNotMatch(vehiclesAppSource, /catch \{\}\s+await apiRequest\("POST", `\/api\/vehicles\/\$\{vehicleId\}\/documents`/);
+});
+
+test("destination update route supports client auth and rejects after trip completion", () => {
+  const routesSource = readProjectFile("server/routes.ts");
+  assert.match(routesSource, /app\.put\("\/api\/rides\/:id\/destination", authOptional/);
+  assert.match(routesSource, /callerUserId && existingRide\.clientId && existingRide\.clientId !== callerUserId/);
+  assert.match(routesSource, /Destination cannot be changed after the trip has ended/);
+});
+
+test("admin dashboard provides comprehensive vehicle editing", () => {
+  const adminSource = readProjectFile("server/templates/admin.html");
+  const a2bAdminSource = readProjectFile("a2b-admin.html");
+  const routesSource = readProjectFile("server/routes.ts");
+
+  assert.match(adminSource, /editVehicle/);
+  assert.match(adminSource, /vehicle-carMake/);
+  assert.match(adminSource, /vehicle-vehicleModel/);
+  assert.match(adminSource, /vehicle-plateNumber/);
+  assert.match(adminSource, /vehicle-status/);
+  assert.match(adminSource, /vehicle-rejectionReason/);
+  assert.match(a2bAdminSource, /editVehicle/);
+  assert.match(routesSource, /app\.put\("\/api\/admin\/vehicles\/:id", requireAuth/);
+});
+
+test("Resend email templates are configured for driver onboarding and vehicle reviews", async () => {
+  const {
+    sendDriverSignupReceivedEmail,
+    sendDriverApprovedEmail,
+    sendDriverRejectedEmail,
+    sendVehicleApprovedEmail,
+    sendVehicleRejectedEmail,
+    sendDocumentApprovedEmail,
+    sendDocumentRejectedEmail,
+  } = await import("./email-templates");
+
+  assert.strictEqual(typeof sendDriverSignupReceivedEmail, "function");
+  assert.strictEqual(typeof sendDriverApprovedEmail, "function");
+  assert.strictEqual(typeof sendDriverRejectedEmail, "function");
+  assert.strictEqual(typeof sendVehicleApprovedEmail, "function");
+  assert.strictEqual(typeof sendVehicleRejectedEmail, "function");
+  assert.strictEqual(typeof sendDocumentApprovedEmail, "function");
+  assert.strictEqual(typeof sendDocumentRejectedEmail, "function");
+
+  const signupRes = await sendDriverSignupReceivedEmail({ to: "test@example.com", name: "John Doe" });
+  assert.ok(["sent", "pending_configuration"].includes(signupRes.status));
+
+  const approveRes = await sendDriverApprovedEmail({ to: "test@example.com", name: "John Doe" });
+  assert.ok(["sent", "pending_configuration"].includes(approveRes.status));
+
+  const rejectRes = await sendDriverRejectedEmail({ to: "test@example.com", name: "John Doe", reason: "License expired" });
+  assert.ok(["sent", "pending_configuration"].includes(rejectRes.status));
+
+  const vehApproveRes = await sendVehicleApprovedEmail({ to: "test@example.com", name: "John Doe", carMake: "Mercedes-Benz", vehicleModel: "C-Class", plateNumber: "CA 123456" });
+  assert.ok(["sent", "pending_configuration"].includes(vehApproveRes.status));
+
+  const vehRejectRes = await sendVehicleRejectedEmail({ to: "test@example.com", name: "John Doe", carMake: "Toyota", vehicleModel: "Corolla", plateNumber: "CA 123456", reason: "Interior photo missing" });
+  assert.ok(["sent", "pending_configuration"].includes(vehRejectRes.status));
+});
+
+test("driver overlay module and service contain robust crash protection for Android 12-15", () => {
+  const serviceSource = readProjectFile("modules/driver-overlay/android/src/main/java/expo/modules/driveroverlay/DriverOverlayService.kt");
+  const moduleSource = readProjectFile("modules/driver-overlay/android/src/main/java/expo/modules/driveroverlay/DriverOverlayModule.kt");
+  const overlayLibSource = readProjectFile("lib/driver-overlay.ts");
+  const layoutSource = readProjectFile("app/chauffeur/_layout.tsx");
+  const appConfigSource = readProjectFile("app.config.shared.js");
+
+  // Android 14+ Foreground Service Type
+  assert.match(serviceSource, /FOREGROUND_SERVICE_TYPE_SPECIAL_USE/);
+  assert.match(serviceSource, /UPSIDE_DOWN_CAKE/);
+
+  // Crash guards in native module
+  assert.match(moduleSource, /catch \(e: Throwable\)/);
+  assert.match(moduleSource, /startService\(intent\)/);
+
+  // JavaScript wrapper fail-safe try-catches
+  assert.match(overlayLibSource, /export async function startDriverOverlay/);
+  assert.match(overlayLibSource, /try \{/);
+
+  // Service trigger in layout
+  assert.match(layoutSource, /keepDriverServiceActive/);
+
+  // Required Android permissions
+  assert.match(appConfigSource, /android\.permission\.FOREGROUND_SERVICE_SPECIAL_USE/);
+  assert.match(appConfigSource, /android\.permission\.SYSTEM_ALERT_WINDOW/);
+});
+
+
+
+
+

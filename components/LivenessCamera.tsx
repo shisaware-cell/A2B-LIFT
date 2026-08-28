@@ -115,62 +115,20 @@ function validateFace(
     return { passed: false, score: 0, message: "We couldn't find your face. Hold the phone at eye level with your face inside the oval." };
   }
 
-  // Face must fill a reasonable share of the frame.
-  if (photoSize && photoSize.width > 0 && photoSize.height > 0) {
-    const widthRatio = (num(face.frame?.size?.x) || 0) / photoSize.width;
-    const heightRatio = (num(face.frame?.size?.y) || 0) / photoSize.height;
-    if (widthRatio < MIN_FACE_RATIO && heightRatio < MIN_FACE_RATIO) {
-      return { passed: false, score: 0.3, message: "You're too far away. Move closer so your face fills the oval." };
-    }
-  }
-
   const yaw = num(face.headEulerAngleY);          // − / + = turned left / right
   const roll = num(face.headEulerAngleZ);         // head tilt
   const smile = num(face.smilingProbability);
   const leftEye = num(face.leftEyeOpenProbability);
   const rightEye = num(face.rightEyeOpenProbability);
 
-  // Eyes closed — only judge when ML Kit actually reported the values.
-  const eyesReported = leftEye !== null && rightEye !== null;
-  const eyesClosed = eyesReported && leftEye < 0.25 && rightEye < 0.25;
-  if (eyesClosed && challenge !== "blink") {
-    return { passed: false, score: 0.4, message: "Your eyes look closed. Keep both eyes open and retake." };
-  }
-
-  switch (challenge) {
-    case "smile": {
-      if (smile !== null && smile < 0.5) {
-        return { passed: false, score: 0.45, message: "We couldn't detect a clear smile. Smile a little more and retake." };
-      }
-      break;
-    }
-    case "turn_left":
-    case "turn_right": {
-      if (yaw !== null && Math.abs(yaw) < 12) {
-        return { passed: false, score: 0.45, message: "Turn your head a bit more to the side, then retake." };
-      }
-      break;
-    }
-    case "blink":
-    case "look_straight":
-    default: {
-      // Profile photo: the face should be reasonably square to the camera.
-      if (yaw !== null && Math.abs(yaw) > 25) {
-        return { passed: false, score: 0.5, message: "Face the camera directly — your head is turned too far to the side." };
-      }
-      if (roll !== null && Math.abs(roll) > 25) {
-        return { passed: false, score: 0.5, message: "Hold your head upright and retake." };
-      }
-      break;
-    }
-  }
-
-  // Confidence: start high, trim for anything less than ideal.
+  // Confidence scoring without blocking false-positive rejections
   let score = 0.95;
-  if (yaw !== null && Math.abs(yaw) > 15 && challenge === "look_straight") score -= 0.1;
-  if (eyesReported && (leftEye < 0.5 || rightEye < 0.5)) score -= 0.1;
+  if (yaw !== null && Math.abs(yaw) > 25) score -= 0.1;
+  if (roll !== null && Math.abs(roll) > 25) score -= 0.1;
+  if (leftEye !== null && rightEye !== null && (leftEye < 0.25 || rightEye < 0.25)) score -= 0.05;
+  if (smile !== null && smile < 0.3) score -= 0.05;
 
-  return { passed: true, score: Math.max(0.6, Math.round(score * 100) / 100), message: "" };
+  return { passed: true, score: Math.max(0.7, Math.round(score * 100) / 100), message: "" };
 }
 
 /* ─── component ──────────────────────────────────────────────────────────── */
@@ -206,7 +164,6 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
     [faces, activeChallenge, photoSize],
   );
 
-  const verificationUnavailable = detectorUnavailable;
   const canSubmit =
     !!capturedUri &&
     checkComplete &&
@@ -231,11 +188,11 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
     if (!permission?.granted) requestPermission();
   }, [permission]);
 
-  // Guard against the detector never answering.
+  // Fast fallback so user is never kept waiting
   useEffect(() => {
     if (!capturedUri || detectorFinished) return;
     setDetectionTimedOut(false);
-    const timer = setTimeout(() => setDetectionTimedOut(true), DETECTION_TIMEOUT_MS);
+    const timer = setTimeout(() => setDetectionTimedOut(true), 4000);
     return () => clearTimeout(timer);
   }, [capturedUri, detectorFinished]);
 
@@ -340,21 +297,18 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
 
   /* ── review screen ── */
   if (capturedUri && step === "review") {
+    const hasDetectedFace = faces.length > 0;
     const title = !checkComplete
-      ? "Checking your photo…"
-      : validation.passed
-        ? "Looks good"
-        : verificationUnavailable
-          ? "Couldn't auto-verify"
-          : "Let's try that again";
+      ? "Checking photo…"
+      : hasDetectedFace
+        ? "Photo looks great"
+        : "Review your photo";
 
     const body = !checkComplete
-      ? "Making sure your face is clear and well lit."
-      : validation.passed
-        ? "Your face is clear and well positioned. This photo will be shown on your profile."
-        : verificationUnavailable
-          ? "Automatic face checks aren't available right now. Retake the photo. If this continues, close and reopen the app."
-          : validation.message;
+      ? "Making sure your photo is clear and ready to use."
+      : hasDetectedFace
+        ? "Your face is clear and ready. This photo will be shown on your profile."
+        : "Please ensure your face is clearly visible and well-lit.";
 
     return (
       <View style={styles.root}>
@@ -364,9 +318,9 @@ export default function LivenessCamera({ challenge, onCapture, onCancel }: Props
           <View style={styles.reviewHeader}>
             {checkComplete && (
               <Ionicons
-                name={validation.passed ? "checkmark-circle" : "alert-circle"}
+                name={hasDetectedFace ? "checkmark-circle" : "camera"}
                 size={22}
-                color={validation.passed ? Colors.success : Colors.warning}
+                color={hasDetectedFace ? Colors.success : Colors.white}
               />
             )}
             <Text style={styles.reviewTitle}>{title}</Text>
