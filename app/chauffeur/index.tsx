@@ -251,7 +251,9 @@ export default function ChauffeurDashboard() {
   const tripAlertEnabledRef = useRef(false);
   const seenRideIdRef = useRef<string | null>(null);
   const destinationArrivalPromptedRideIdRef = useRef<string | null>(null);
+  const destinationArrivalSnoozedUntilRef = useRef<number>(0);
   const pickupArrivalPromptedRideIdRef = useRef<string | null>(null);
+  const pickupArrivalSnoozedUntilRef = useRef<number>(0);
   const suppressedRideAlertIdRef = useRef<string | null>(null);
   const suppressedRideIdsRef = useRef<Record<string, number>>({});
   const clientSummaryCacheRef = useRef<Record<string, ClientSummary>>({});
@@ -1405,10 +1407,11 @@ export default function ChauffeurDashboard() {
     const dropoffLat = parseFloat(currentRide.dropoffLat);
     const dropoffLng = parseFloat(currentRide.dropoffLng);
     if (!Number.isFinite(dropoffLat) || !Number.isFinite(dropoffLng)) return;
+    if (Date.now() < destinationArrivalSnoozedUntilRef.current) return;
 
     const distanceKm = haversineDistance(myLocation.lat, myLocation.lng, dropoffLat, dropoffLng);
-    // If driver is within 100 meters of the destination and has not yet been prompted for this ride
-    if (distanceKm <= 0.100 && destinationArrivalPromptedRideIdRef.current !== currentRide.id) {
+    // If driver is within 60 meters of the destination and has not yet completed the trip
+    if (distanceKm <= 0.060 && destinationArrivalPromptedRideIdRef.current !== currentRide.id) {
       destinationArrivalPromptedRideIdRef.current = currentRide.id;
       if (Platform.OS !== "web") {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -1420,11 +1423,21 @@ export default function ChauffeurDashboard() {
         "Arrived at Destination",
         "You have reached the final destination. Would you like to end the trip now?",
         [
-          { text: "Not Yet", style: "cancel" },
+          {
+            text: "Not Yet",
+            style: "cancel",
+            onPress: () => {
+              destinationArrivalPromptedRideIdRef.current = null;
+              destinationArrivalSnoozedUntilRef.current = Date.now() + 45_000;
+            },
+          },
           {
             text: "End Trip",
             style: "default",
-            onPress: () => updateRideStatus("trip_completed"),
+            onPress: () => {
+              destinationArrivalPromptedRideIdRef.current = currentRide.id;
+              updateRideStatus("trip_completed");
+            },
           },
         ],
       );
@@ -1453,9 +1466,11 @@ export default function ChauffeurDashboard() {
     const pLat = parseFloat(currentRide.pickupLat);
     const pLng = parseFloat(currentRide.pickupLng);
     if (!Number.isFinite(pLat) || !Number.isFinite(pLng)) return;
+    if (Date.now() < pickupArrivalSnoozedUntilRef.current) return;
 
     const distanceKm = haversineDistance(myLocation.lat, myLocation.lng, pLat, pLng);
-    if (distanceKm <= 0.100 && pickupArrivalPromptedRideIdRef.current !== currentRide.id) {
+    // If driver is within 60 meters of the pickup location and has not yet arrived
+    if (distanceKm <= 0.060 && pickupArrivalPromptedRideIdRef.current !== currentRide.id) {
       pickupArrivalPromptedRideIdRef.current = currentRide.id;
       if (Platform.OS !== "web") {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -1467,11 +1482,21 @@ export default function ChauffeurDashboard() {
         "Arrived at Pickup",
         "You have reached the pickup location. Tap I've Arrived to notify the rider.",
         [
-          { text: "Not Yet", style: "cancel" },
+          {
+            text: "Not Yet",
+            style: "cancel",
+            onPress: () => {
+              pickupArrivalPromptedRideIdRef.current = null;
+              pickupArrivalSnoozedUntilRef.current = Date.now() + 45_000;
+            },
+          },
           {
             text: "I've Arrived",
             style: "default",
-            onPress: () => updateRideStatus("chauffeur_arrived"),
+            onPress: () => {
+              pickupArrivalPromptedRideIdRef.current = currentRide.id;
+              updateRideStatus("chauffeur_arrived");
+            },
           },
         ],
       );
@@ -2498,8 +2523,8 @@ export default function ChauffeurDashboard() {
                 <Text style={styles.actionBtnText}>I've Arrived</Text>
               </Pressable>
             )}
-            {(currentRide?.status === "chauffeur_assigned" || currentRide?.status === "chauffeur_arriving" || currentRide?.status === "chauffeur_arrived") && (
-              <Pressable style={styles.actionBtn} onPress={startTripToDestination}>
+            {currentRide?.status === "chauffeur_arrived" && (
+              <Pressable style={[styles.actionBtn, styles.completeBtnStyle]} onPress={startTripToDestination}>
                 <Text style={styles.actionBtnText}>Start Trip — Rider On Board</Text>
               </Pressable>
             )}
@@ -2808,17 +2833,12 @@ export default function ChauffeurDashboard() {
             </Pressable>
           </View>
           {(currentRide.status === "chauffeur_assigned" || currentRide.status === "chauffeur_arriving") && (
-            <View style={{ gap: 8 }}>
-              <Pressable style={[styles.actionBtn, styles.completeBtnStyle]} onPress={handleDriverArrivedAtPickup}>
-                <Text style={styles.actionBtnText}>I've Arrived</Text>
-              </Pressable>
-              <Pressable style={styles.actionBtn} onPress={startTripToDestination}>
-                <Text style={styles.actionBtnText}>Start Trip — Rider On Board</Text>
-              </Pressable>
-            </View>
+            <Pressable style={[styles.actionBtn, styles.completeBtnStyle]} onPress={handleDriverArrivedAtPickup}>
+              <Text style={styles.actionBtnText}>I've Arrived</Text>
+            </Pressable>
           )}
           {currentRide.status === "chauffeur_arrived" && (
-            <Pressable style={styles.actionBtn} onPress={startTripToDestination}>
+            <Pressable style={[styles.actionBtn, styles.completeBtnStyle]} onPress={startTripToDestination}>
               <Text style={styles.actionBtnText}>Start Trip — Rider On Board</Text>
             </Pressable>
           )}

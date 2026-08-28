@@ -227,12 +227,15 @@ test("floating driver overlay indicates incoming trips and active trip live blin
   assert.match(serviceSource, /Trip in Progress/);
 });
 
-test("driver app detects destination and pickup arrival within geofence", () => {
+test("driver app detects destination and pickup arrival within geofence with snooze and proper lifecycle transitions", () => {
   const chauffeurSource = readProjectFile("app/chauffeur/index.tsx");
   assert.match(chauffeurSource, /Destination Arrival Geofence Detection/);
   assert.match(chauffeurSource, /Pickup Arrival Geofence Detection/);
-  assert.match(chauffeurSource, /You have arrived at your destination/);
+  assert.match(chauffeurSource, /pickupArrivalSnoozedUntilRef/);
+  assert.match(chauffeurSource, /destinationArrivalSnoozedUntilRef/);
+  assert.match(chauffeurSource, /distanceKm <= 0\.060/);
   assert.match(chauffeurSource, /You have arrived at the pickup location/);
+  assert.match(chauffeurSource, /updateRideStatus\("chauffeur_arrived"\)/);
 });
 
 test("driver app provides cash settlement with live overpayment and underpayment wallet adjustment", () => {
