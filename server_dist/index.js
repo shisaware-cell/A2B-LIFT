@@ -713,16 +713,16 @@ var DatabaseStorage = class {
     return user;
   }
   async getChauffeur(id) {
-    const [chauffeur] = await db.select().from(chauffeurs).where((0, import_drizzle_orm2.eq)(chauffeurs.id, id));
-    return chauffeur;
+    const [chauffeur2] = await db.select().from(chauffeurs).where((0, import_drizzle_orm2.eq)(chauffeurs.id, id));
+    return chauffeur2;
   }
   async getChauffeurByUserId(userId) {
-    const [chauffeur] = await db.select().from(chauffeurs).where((0, import_drizzle_orm2.eq)(chauffeurs.userId, userId));
-    return chauffeur;
+    const [chauffeur2] = await db.select().from(chauffeurs).where((0, import_drizzle_orm2.eq)(chauffeurs.userId, userId));
+    return chauffeur2;
   }
   async createChauffeur(data) {
-    const [chauffeur] = await db.insert(chauffeurs).values(data).returning();
-    return chauffeur;
+    const [chauffeur2] = await db.insert(chauffeurs).values(data).returning();
+    return chauffeur2;
   }
   async updateChauffeur(id, data) {
     const sanitizedEntries = Object.entries(data || {}).filter(([, value]) => value !== void 0);
@@ -730,8 +730,8 @@ var DatabaseStorage = class {
       return this.getChauffeur(id);
     }
     const sanitizedData = Object.fromEntries(sanitizedEntries);
-    const [chauffeur] = await db.update(chauffeurs).set(sanitizedData).where((0, import_drizzle_orm2.eq)(chauffeurs.id, id)).returning();
-    return chauffeur;
+    const [chauffeur2] = await db.update(chauffeurs).set(sanitizedData).where((0, import_drizzle_orm2.eq)(chauffeurs.id, id)).returning();
+    return chauffeur2;
   }
   async deleteChauffeur(id) {
     const deleted = await db.delete(chauffeurs).where((0, import_drizzle_orm2.eq)(chauffeurs.id, id)).returning();
@@ -920,26 +920,26 @@ var DatabaseStorage = class {
     return invite;
   }
   async enrichLiftClubRoute(route) {
-    const [chauffeur, vehicle] = await Promise.all([
+    const [chauffeur2, vehicle] = await Promise.all([
       this.getChauffeur(route.chauffeurId),
       this.getVehicle(route.vehicleId)
     ]);
-    if (!chauffeur || !vehicle) return void 0;
-    if (!chauffeur.isApproved) return void 0;
+    if (!chauffeur2 || !vehicle) return void 0;
+    if (!chauffeur2.isApproved) return void 0;
     if (vehicle.status !== "approved") return void 0;
     if (Number(vehicle.vehicleYear || 0) < 2015) return void 0;
-    const driver = chauffeur.userId ? await this.getUser(chauffeur.userId) : void 0;
+    const driver = chauffeur2.userId ? await this.getUser(chauffeur2.userId) : void 0;
     return {
       ...route,
       driverName: driver?.name || "Verified A2B driver",
-      driverPhoto: chauffeur.profilePhoto || driver?.profilePhoto || null,
+      driverPhoto: chauffeur2.profilePhoto || driver?.profilePhoto || null,
       driverRating: driver?.rating || 5,
-      vehicleModel: `${vehicle.carMake || ""} ${vehicle.vehicleModel || ""}`.trim() || chauffeur.vehicleModel || vehicle.vehicleType,
+      vehicleModel: `${vehicle.carMake || ""} ${vehicle.vehicleModel || ""}`.trim() || chauffeur2.vehicleModel || vehicle.vehicleType,
       vehicleType: vehicle.vehicleType,
       vehicleYear: vehicle.vehicleYear,
       vehicleColor: vehicle.carColor,
       plateNumber: vehicle.plateNumber,
-      chauffeurUserId: chauffeur.userId
+      chauffeurUserId: chauffeur2.userId
     };
   }
   async searchLiftClubRoutes(filters = {}) {
@@ -1300,9 +1300,9 @@ var DatabaseStorage = class {
     return db.select().from(rideRatings).where((0, import_drizzle_orm2.eq)(rideRatings.chauffeurId, chauffeurId)).orderBy((0, import_drizzle_orm2.desc)(rideRatings.createdAt));
   }
   async getAverageRatingForUser(userId) {
-    const chauffeur = await this.getChauffeurByUserId(userId);
-    if (!chauffeur) return null;
-    const [row] = await db.select({ value: (0, import_drizzle_orm2.avg)(rideRatings.rating) }).from(rideRatings).where((0, import_drizzle_orm2.eq)(rideRatings.chauffeurId, chauffeur.id));
+    const chauffeur2 = await this.getChauffeurByUserId(userId);
+    if (!chauffeur2) return null;
+    const [row] = await db.select({ value: (0, import_drizzle_orm2.avg)(rideRatings.rating) }).from(rideRatings).where((0, import_drizzle_orm2.eq)(rideRatings.chauffeurId, chauffeur2.id));
     const value = row?.value ?? null;
     return value;
   }
@@ -3035,10 +3035,10 @@ async function creditRiderTripCashback(options) {
     type: "reward"
   });
 }
-function hasFreshChauffeurLocation(chauffeur) {
-  if (chauffeur.lat == null || chauffeur.lng == null) return false;
-  if (!chauffeur.locationUpdatedAt) return true;
-  const timestamp2 = new Date(chauffeur.locationUpdatedAt).getTime();
+function hasFreshChauffeurLocation(chauffeur2) {
+  if (chauffeur2.lat == null || chauffeur2.lng == null) return false;
+  if (!chauffeur2.locationUpdatedAt) return true;
+  const timestamp2 = new Date(chauffeur2.locationUpdatedAt).getTime();
   if (!Number.isFinite(timestamp2)) return true;
   return Date.now() - timestamp2 <= CHAUFFEUR_LOCATION_STALE_WINDOW_MS;
 }
@@ -3095,11 +3095,11 @@ async function notifyUserEvent(options) {
     body: options.body,
     isRead: false
   });
-  const [user, chauffeur] = await Promise.all([
+  const [user, chauffeur2] = await Promise.all([
     storage.getUser(options.userId).catch(() => void 0),
     storage.getChauffeurByUserId(options.userId).catch(() => void 0)
   ]);
-  const pushToken = user?.pushToken || chauffeur?.pushToken;
+  const pushToken = user?.pushToken || chauffeur2?.pushToken;
   if (pushToken) {
     await sendExpoPushNotification([pushToken], options.title, options.body, options.data);
   }
@@ -3444,11 +3444,11 @@ async function registerRoutes(app2) {
     }));
     return Array.from(tokens);
   }
-  async function getApprovedActiveVehicle(chauffeur) {
-    if (!chauffeur?.userId) return null;
-    let activeVehicleId = chauffeur.activeVehicleId || null;
+  async function getApprovedActiveVehicle(chauffeur2) {
+    if (!chauffeur2?.userId) return null;
+    let activeVehicleId = chauffeur2.activeVehicleId || null;
     if (!activeVehicleId) {
-      const profile = await storage.getOperatorProfileByUserId(chauffeur.userId).catch(() => void 0);
+      const profile = await storage.getOperatorProfileByUserId(chauffeur2.userId).catch(() => void 0);
       if (profile?.id) {
         const assignments = await storage.getVehicleAssignments({ driverOperatorProfileId: profile.id, status: "active" }).catch(() => []);
         for (const assignment of assignments) {
@@ -3456,7 +3456,7 @@ async function registerRoutes(app2) {
           if (assignedVehicle && assignedVehicle.status === "approved" && Number(assignedVehicle.vehicleYear || 0) >= 2015) {
             const vehicleType = resolveVehicleDispatchCategory(assignedVehicle);
             void Promise.all([
-              storage.updateChauffeur(chauffeur.id, { activeVehicleId: assignedVehicle.id, vehicleType }).catch(() => void 0),
+              storage.updateChauffeur(chauffeur2.id, { activeVehicleId: assignedVehicle.id, vehicleType }).catch(() => void 0),
               vehicleType !== assignedVehicle.vehicleType ? storage.updateVehicle(assignedVehicle.id, { vehicleType }).catch(() => void 0) : Promise.resolve(void 0)
             ]);
             return { ...assignedVehicle, vehicleType };
@@ -3468,21 +3468,21 @@ async function registerRoutes(app2) {
     const vehicle = await storage.getVehicle(activeVehicleId).catch(() => void 0);
     if (vehicle && vehicle.status === "approved" && Number(vehicle.vehicleYear || 0) >= 2015) {
       const vehicleType = resolveVehicleDispatchCategory(vehicle);
-      if (vehicleType !== vehicle.vehicleType || chauffeur.vehicleType !== vehicleType) {
+      if (vehicleType !== vehicle.vehicleType || chauffeur2.vehicleType !== vehicleType) {
         void Promise.all([
           vehicleType !== vehicle.vehicleType ? storage.updateVehicle(vehicle.id, { vehicleType }).catch(() => void 0) : Promise.resolve(void 0),
-          chauffeur.vehicleType !== vehicleType ? storage.updateChauffeur(chauffeur.id, { vehicleType }).catch(() => void 0) : Promise.resolve(void 0)
+          chauffeur2.vehicleType !== vehicleType ? storage.updateChauffeur(chauffeur2.id, { vehicleType }).catch(() => void 0) : Promise.resolve(void 0)
         ]);
       }
       return { ...vehicle, vehicleType };
     }
     return null;
   }
-  function getCachedApprovedActiveVehicle(chauffeur) {
-    const cacheKey = `${chauffeur.id}:${chauffeur.activeVehicleId || "unselected"}`;
+  function getCachedApprovedActiveVehicle(chauffeur2) {
+    const cacheKey = `${chauffeur2.id}:${chauffeur2.activeVehicleId || "unselected"}`;
     let lookup = activeVehicleLookupCache.get(cacheKey);
     if (!lookup) {
-      lookup = getApprovedActiveVehicle(chauffeur);
+      lookup = getApprovedActiveVehicle(chauffeur2);
       activeVehicleLookupCache.set(cacheKey, lookup);
       setTimeout(() => activeVehicleLookupCache.delete(cacheKey), 2e3);
       lookup.catch(() => activeVehicleLookupCache.delete(cacheKey));
@@ -3501,10 +3501,10 @@ async function registerRoutes(app2) {
       }
     }
     const chauffeurs2 = await storage.getAllChauffeurs();
-    const chauffeurUpdates = chauffeurs2.flatMap((chauffeur) => {
-      const resolvedCategory = chauffeur.activeVehicleId ? resolvedByVehicleId.get(chauffeur.activeVehicleId) : null;
-      if (!resolvedCategory || chauffeur.vehicleType === resolvedCategory) return [];
-      return [storage.updateChauffeur(chauffeur.id, { vehicleType: resolvedCategory })];
+    const chauffeurUpdates = chauffeurs2.flatMap((chauffeur2) => {
+      const resolvedCategory = chauffeur2.activeVehicleId ? resolvedByVehicleId.get(chauffeur2.activeVehicleId) : null;
+      if (!resolvedCategory || chauffeur2.vehicleType === resolvedCategory) return [];
+      return [storage.updateChauffeur(chauffeur2.id, { vehicleType: resolvedCategory })];
     });
     await Promise.all([...vehicleUpdates, ...chauffeurUpdates]);
     if (vehicleUpdates.length || chauffeurUpdates.length) {
@@ -3523,16 +3523,16 @@ async function registerRoutes(app2) {
     const hasPickup = Number.isFinite(pickupLat) && Number.isFinite(pickupLng);
     const skipped = options.excludeSkipped ? skippedChauffeursByRide.get(ride.id) : null;
     const chauffeurs2 = await storage.getAllChauffeurs();
-    const evaluations = await Promise.all(chauffeurs2.map(async (chauffeur) => {
-      if (!chauffeur?.isOnline) return { eligible: null, diagnostic: null };
-      if (!chauffeur?.isApproved) return { eligible: null, diagnostic: { chauffeurId: chauffeur.id, reason: "not_approved" } };
-      if (skipped?.has(chauffeur.id)) return { eligible: null, diagnostic: { chauffeurId: chauffeur.id, reason: "offer_skipped" } };
-      if (hasPickup && !hasFreshChauffeurLocation(chauffeur)) {
-        return { eligible: null, diagnostic: { chauffeurId: chauffeur.id, reason: "stale_location" } };
+    const evaluations = await Promise.all(chauffeurs2.map(async (chauffeur2) => {
+      if (!chauffeur2?.isOnline) return { eligible: null, diagnostic: null };
+      if (!chauffeur2?.isApproved) return { eligible: null, diagnostic: { chauffeurId: chauffeur2.id, reason: "not_approved" } };
+      if (skipped?.has(chauffeur2.id)) return { eligible: null, diagnostic: { chauffeurId: chauffeur2.id, reason: "offer_skipped" } };
+      if (hasPickup && !hasFreshChauffeurLocation(chauffeur2)) {
+        return { eligible: null, diagnostic: { chauffeurId: chauffeur2.id, reason: "stale_location" } };
       }
-      const activeVehicle = await getCachedApprovedActiveVehicle(chauffeur);
+      const activeVehicle = await getCachedApprovedActiveVehicle(chauffeur2);
       if (!activeVehicle) {
-        return { eligible: null, diagnostic: { chauffeurId: chauffeur.id, reason: "no_approved_active_vehicle" } };
+        return { eligible: null, diagnostic: { chauffeurId: chauffeur2.id, reason: "no_approved_active_vehicle" } };
       }
       const categoryPriority = getVehicleDispatchPriority(
         ride.vehicleType || "budget",
@@ -3542,18 +3542,18 @@ async function registerRoutes(app2) {
         return {
           eligible: null,
           diagnostic: {
-            chauffeurId: chauffeur.id,
+            chauffeurId: chauffeur2.id,
             reason: "category_mismatch",
             activeCategory: activeVehicle.vehicleType
           }
         };
       }
-      const distKm = hasPickup ? calculateHaversineDistanceKm(pickupLat, pickupLng, Number(chauffeur.lat), Number(chauffeur.lng)) : 0;
+      const distKm = hasPickup ? calculateHaversineDistanceKm(pickupLat, pickupLng, Number(chauffeur2.lat), Number(chauffeur2.lng)) : 0;
       if (hasPickup && distKm > RIDE_MATCH_RADIUS_KM) {
-        return { eligible: null, diagnostic: { chauffeurId: chauffeur.id, reason: "outside_radius", distanceKm: Number(distKm.toFixed(1)) } };
+        return { eligible: null, diagnostic: { chauffeurId: chauffeur2.id, reason: "outside_radius", distanceKm: Number(distKm.toFixed(1)) } };
       }
       return {
-        eligible: { ...chauffeur, activeVehicle, distKm, categoryPriority },
+        eligible: { ...chauffeur2, activeVehicle, distKm, categoryPriority },
         diagnostic: null
       };
     }));
@@ -4283,9 +4283,9 @@ async function registerRoutes(app2) {
         const incomingDeviceId = String(req.body.deviceId || req.headers["x-device-id"] || "").trim();
         const isDriverLogin = req.body.appVariant === "driver" || req.headers["x-app-variant"] === "driver" || user.role === "chauffeur";
         if (isDriverLogin) {
-          const chauffeur = await storage.getChauffeurByUserId(user.id);
-          if (chauffeur) {
-            const currentActiveDevice = chauffeur.activeDeviceId;
+          const chauffeur2 = await storage.getChauffeurByUserId(user.id);
+          if (chauffeur2) {
+            const currentActiveDevice = chauffeur2.activeDeviceId;
             if (currentActiveDevice && incomingDeviceId && currentActiveDevice !== incomingDeviceId) {
               console.warn(`[auth/login] driver "${user.username}" session conflict: active on ${currentActiveDevice}, attempt from ${incomingDeviceId}`);
               return res.status(409).json({
@@ -4294,7 +4294,7 @@ async function registerRoutes(app2) {
               });
             }
             if (incomingDeviceId) {
-              await storage.updateChauffeur(chauffeur.id, {
+              await storage.updateChauffeur(chauffeur2.id, {
                 activeDeviceId: incomingDeviceId,
                 lastDriverLoginAt: /* @__PURE__ */ new Date()
               });
@@ -4330,9 +4330,9 @@ async function registerRoutes(app2) {
           const token = authHeader.slice(7);
           const payload = (init_auth(), __toCommonJS(auth_exports)).verifyAccessToken(token);
           if (payload?.sub) {
-            const chauffeur = await storage.getChauffeurByUserId(payload.sub);
-            if (chauffeur) {
-              await storage.updateChauffeur(chauffeur.id, {
+            const chauffeur2 = await storage.getChauffeurByUserId(payload.sub);
+            if (chauffeur2) {
+              await storage.updateChauffeur(chauffeur2.id, {
                 activeDeviceId: null,
                 isOnline: false
               });
@@ -4349,9 +4349,9 @@ async function registerRoutes(app2) {
   });
   app2.post("/api/admin/drivers/:chauffeurId/reset-device-session", requireAuth, requireRole(["admin"]), async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeur(req.params.chauffeurId);
-      if (!chauffeur) return res.status(404).json({ message: "Driver not found" });
-      await storage.updateChauffeur(chauffeur.id, {
+      const chauffeur2 = await storage.getChauffeur(req.params.chauffeurId);
+      if (!chauffeur2) return res.status(404).json({ message: "Driver not found" });
+      await storage.updateChauffeur(chauffeur2.id, {
         activeDeviceId: null,
         isOnline: false
       });
@@ -6515,7 +6515,7 @@ If you did not request this, you can ignore this email.`,
           }
         }
         if (!userId) return res.status(400).json({ message: "userId is required" });
-        let chauffeur;
+        let chauffeur2;
         const existingChauffeur = await storage.getChauffeurByUserId(userId);
         const normalizedVehicleYear = rawVehicleYear == null || rawVehicleYear === "" ? existingChauffeur?.vehicleYear ?? null : Number.parseInt(String(rawVehicleYear), 10);
         if (!Number.isFinite(normalizedVehicleYear) || normalizedVehicleYear == null) {
@@ -6525,7 +6525,7 @@ If you did not request this, you can ignore this email.`,
           return res.status(400).json({ message: `Please enter a vehicle model year between 2015 and ${currentYear + 1}.` });
         }
         if (existingChauffeur) {
-          chauffeur = await storage.updateChauffeur(existingChauffeur.id, {
+          chauffeur2 = await storage.updateChauffeur(existingChauffeur.id, {
             carMake: req.body.carMake || existingChauffeur.carMake,
             vehicleModel: req.body.vehicleModel || existingChauffeur.vehicleModel,
             vehicleYear: normalizedVehicleYear,
@@ -6538,7 +6538,7 @@ If you did not request this, you can ignore this email.`,
             profilePhoto: req.body.profilePhoto || existingChauffeur.profilePhoto
           });
         } else {
-          chauffeur = await storage.createChauffeur({
+          chauffeur2 = await storage.createChauffeur({
             ...req.body,
             vehicleYear: normalizedVehicleYear
           });
@@ -6551,13 +6551,13 @@ If you did not request this, you can ignore this email.`,
         if (!existingApp) {
           await storage.createDriverApplication({
             userId: req.body.userId,
-            chauffeurId: chauffeur.id,
+            chauffeurId: chauffeur2.id,
             status: "pending"
           });
-        } else if (existingApp.chauffeurId !== chauffeur.id) {
-          await storage.updateDriverApplication(existingApp.id, { chauffeurId: chauffeur.id });
+        } else if (existingApp.chauffeurId !== chauffeur2.id) {
+          await storage.updateDriverApplication(existingApp.id, { chauffeurId: chauffeur2.id });
         }
-        return res.json(chauffeur);
+        return res.json(chauffeur2);
       });
     } catch (error) {
       return res.status(error instanceof UserIdentityConflictError ? 409 : 500).json({
@@ -6623,12 +6623,12 @@ If you did not request this, you can ignore this email.`,
     });
   }
   async function serializeOperatorProfile(profile) {
-    const [user, chauffeur, partnerProfile] = await Promise.all([
+    const [user, chauffeur2, partnerProfile] = await Promise.all([
       storage.getUser(profile.userId).catch(() => void 0),
       profile.type === "driver" ? storage.getChauffeurByUserId(profile.userId).catch(() => void 0) : Promise.resolve(null),
       profile.type === "partner" ? storage.getPartnerProfileByOperatorId(profile.id).catch(() => void 0) : Promise.resolve(null)
     ]);
-    return { ...profile, user: user || null, chauffeur: chauffeur || null, partnerProfile: partnerProfile || null };
+    return { ...profile, user: user || null, chauffeur: chauffeur2 || null, partnerProfile: partnerProfile || null };
   }
   async function serializeVehicle(vehicle) {
     const [ownerProfile, documents2, assignments] = await Promise.all([
@@ -6653,16 +6653,16 @@ If you did not request this, you can ignore this email.`,
   }
   async function ensureDriverOperatorForChauffeur(userId) {
     let profile = await storage.getOperatorProfileByUserId(userId);
-    const chauffeur = await storage.getChauffeurByUserId(userId).catch(() => void 0);
-    if (!chauffeur) return profile || null;
+    const chauffeur2 = await storage.getChauffeurByUserId(userId).catch(() => void 0);
+    if (!chauffeur2) return profile || null;
     if (!profile) {
       profile = await storage.createOperatorProfile({
         userId,
         type: "driver",
-        status: chauffeur.isApproved ? "approved" : "pending",
-        submittedAt: chauffeur.createdAt || /* @__PURE__ */ new Date()
+        status: chauffeur2.isApproved ? "approved" : "pending",
+        submittedAt: chauffeur2.createdAt || /* @__PURE__ */ new Date()
       });
-    } else if (profile.type === "driver" && chauffeur.isApproved && profile.status !== "approved") {
+    } else if (profile.type === "driver" && chauffeur2.isApproved && profile.status !== "approved") {
       profile = await storage.updateOperatorProfile(profile.id, {
         status: "approved",
         reviewedAt: /* @__PURE__ */ new Date()
@@ -6670,22 +6670,22 @@ If you did not request this, you can ignore this email.`,
     }
     if (profile.type !== "driver") return profile;
     const ownedVehicles = await storage.getVehiclesByOwnerOperator(profile.id).catch(() => []);
-    const hasLegacyVehicle = !!(chauffeur.carMake || chauffeur.vehicleModel || chauffeur.plateNumber);
+    const hasLegacyVehicle = !!(chauffeur2.carMake || chauffeur2.vehicleModel || chauffeur2.plateNumber);
     if (ownedVehicles.length === 0 && hasLegacyVehicle) {
       const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
-      const vehicleYear = Number(chauffeur.vehicleYear) || currentYear;
+      const vehicleYear = Number(chauffeur2.vehicleYear) || currentYear;
       const vehicle = await storage.createVehicle({
         ownerOperatorProfileId: profile.id,
-        status: chauffeur.isApproved ? "approved" : "pending",
-        submittedAt: chauffeur.createdAt || /* @__PURE__ */ new Date(),
-        carMake: String(chauffeur.carMake || "A2B").trim(),
-        vehicleModel: String(chauffeur.vehicleModel || "Vehicle").trim(),
+        status: chauffeur2.isApproved ? "approved" : "pending",
+        submittedAt: chauffeur2.createdAt || /* @__PURE__ */ new Date(),
+        carMake: String(chauffeur2.carMake || "A2B").trim(),
+        vehicleModel: String(chauffeur2.vehicleModel || "Vehicle").trim(),
         vehicleYear,
-        plateNumber: String(chauffeur.plateNumber || `LEGACY-${chauffeur.id.slice(0, 6)}`).trim().toUpperCase(),
-        vehicleType: normalizeVehicleType2(chauffeur.vehicleType || "budget"),
-        carColor: String(chauffeur.carColor || "Unknown").trim(),
-        passengerCapacity: chauffeur.passengerCapacity || 4,
-        luggageCapacity: chauffeur.luggageCapacity || 2
+        plateNumber: String(chauffeur2.plateNumber || `LEGACY-${chauffeur2.id.slice(0, 6)}`).trim().toUpperCase(),
+        vehicleType: normalizeVehicleType2(chauffeur2.vehicleType || "budget"),
+        carColor: String(chauffeur2.carColor || "Unknown").trim(),
+        passengerCapacity: chauffeur2.passengerCapacity || 4,
+        luggageCapacity: chauffeur2.luggageCapacity || 2
       });
       await storage.createVehicleAssignment({
         vehicleId: vehicle.id,
@@ -6693,8 +6693,8 @@ If you did not request this, you can ignore this email.`,
         assignedByOperatorProfileId: profile.id,
         status: "active"
       });
-      if (chauffeur.isApproved) {
-        await storage.updateChauffeur(chauffeur.id, { activeVehicleId: vehicle.id });
+      if (chauffeur2.isApproved) {
+        await storage.updateChauffeur(chauffeur2.id, { activeVehicleId: vehicle.id });
       }
     }
     return profile;
@@ -6702,10 +6702,10 @@ If you did not request this, you can ignore this email.`,
   app2.get("/api/operator-profile/me", requireAuth, async (req, res) => {
     try {
       const profile = await ensureDriverOperatorForChauffeur(req.auth.sub);
-      const chauffeur = await storage.getChauffeurByUserId(req.auth.sub).catch(() => void 0);
+      const chauffeur2 = await storage.getChauffeurByUserId(req.auth.sub).catch(() => void 0);
       if (!profile) return res.status(404).json({ message: "Operator profile not found" });
       const partnerProfile = profile.type === "partner" ? await storage.getPartnerProfileByOperatorId(profile.id) : null;
-      return res.json({ profile, partnerProfile, chauffeur: chauffeur || null });
+      return res.json({ profile, partnerProfile, chauffeur: chauffeur2 || null });
     } catch (error) {
       return res.status(500).json({ message: error.message });
     }
@@ -6768,15 +6768,15 @@ If you did not request this, you can ignore this email.`,
             status: "pending"
           });
           if (!profile2) throw new Error("Could not create driver profile");
-          let chauffeur2 = await storage.getChauffeurByUserId(req.auth.sub);
-          if (chauffeur2) {
-            chauffeur2 = await storage.updateChauffeur(chauffeur2.id, {
+          let chauffeur3 = await storage.getChauffeurByUserId(req.auth.sub);
+          if (chauffeur3) {
+            chauffeur3 = await storage.updateChauffeur(chauffeur3.id, {
               phone,
-              profilePhoto: req.body.profilePhoto || chauffeur2.profilePhoto,
-              isApproved: profile2.status === "approved" ? true : chauffeur2.isApproved
+              profilePhoto: req.body.profilePhoto || chauffeur3.profilePhoto,
+              isApproved: profile2.status === "approved" ? true : chauffeur3.isApproved
             });
           } else {
-            chauffeur2 = await storage.createChauffeur({
+            chauffeur3 = await storage.createChauffeur({
               userId: req.auth.sub,
               phone,
               profilePhoto: req.body.profilePhoto || null,
@@ -6784,22 +6784,22 @@ If you did not request this, you can ignore this email.`,
             });
           }
           await storage.updateUser(req.auth.sub, { role: "chauffeur", phone });
-          return { profile: profile2, chauffeur: chauffeur2 };
+          return { profile: profile2, chauffeur: chauffeur3 };
         }
       );
       const { profile } = result;
-      let { chauffeur } = result;
+      let { chauffeur: chauffeur2 } = result;
       let application = await storage.getDriverApplicationByUserId(req.auth.sub);
       if (application) {
         application = await storage.updateDriverApplication(application.id, {
-          chauffeurId: chauffeur.id,
+          chauffeurId: chauffeur2.id,
           status: "pending",
           submittedAt: /* @__PURE__ */ new Date()
         });
       } else {
         application = await storage.createDriverApplication({
           userId: req.auth.sub,
-          chauffeurId: chauffeur.id,
+          chauffeurId: chauffeur2.id,
           status: "pending",
           submittedAt: /* @__PURE__ */ new Date()
         });
@@ -6814,7 +6814,7 @@ If you did not request this, you can ignore this email.`,
         }
       } catch {
       }
-      return res.status(201).json({ profile, chauffeur, application });
+      return res.status(201).json({ profile, chauffeur: chauffeur2, application });
     } catch (error) {
       const message = error.message || "Failed to submit driver profile";
       return res.status(error instanceof UserIdentityConflictError || message.includes("already registered") ? 409 : 400).json({ message });
@@ -6878,7 +6878,7 @@ If you did not request this, you can ignore this email.`,
         assignments.filter((assignment) => !ownedVehicles.some((vehicle) => vehicle.id === assignment.vehicleId)).map((assignment) => storage.getVehicle(assignment.vehicleId))
       );
       const visibleVehicles = [...ownedVehicles, ...assignedVehicles.filter(Boolean)];
-      const [vehiclesWithDocuments, chauffeur] = await Promise.all([
+      const [vehiclesWithDocuments, chauffeur2] = await Promise.all([
         Promise.all(visibleVehicles.map(async (vehicle) => ({
           ...vehicle,
           vehicle,
@@ -6890,7 +6890,7 @@ If you did not request this, you can ignore this email.`,
         vehicles: vehiclesWithDocuments,
         assignments,
         operatorProfile: profile,
-        activeVehicleId: chauffeur?.activeVehicleId || null
+        activeVehicleId: chauffeur2?.activeVehicleId || null
       });
     } catch (error) {
       return res.status(500).json({ message: error.message });
@@ -7337,9 +7337,9 @@ If you did not request this, you can ignore this email.`,
         storage.getOperatorProfile(assignment.driverOperatorProfileId)
       ]);
       if (driverProfile) {
-        const chauffeur = await storage.getChauffeurByUserId(driverProfile.userId).catch(() => void 0);
-        if (chauffeur?.activeVehicleId === assignment.vehicleId) {
-          await storage.updateChauffeur(chauffeur.id, { activeVehicleId: null, isOnline: false });
+        const chauffeur2 = await storage.getChauffeurByUserId(driverProfile.userId).catch(() => void 0);
+        if (chauffeur2?.activeVehicleId === assignment.vehicleId) {
+          await storage.updateChauffeur(chauffeur2.id, { activeVehicleId: null, isOnline: false });
         }
         await notifyUserEvent({
           userId: driverProfile.userId,
@@ -7512,12 +7512,12 @@ If you did not request this, you can ignore this email.`,
   });
   app2.get("/api/chauffeurs/user/:userId", async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeurByUserId(req.params.userId);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
+      const chauffeur2 = await storage.getChauffeurByUserId(req.params.userId);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
       const application = await storage.getDriverApplicationByUserId(req.params.userId).catch(() => void 0);
       return res.json({
-        ...chauffeur,
-        applicationStatus: application?.status || (chauffeur.isApproved ? "approved" : "pending"),
+        ...chauffeur2,
+        applicationStatus: application?.status || (chauffeur2.isApproved ? "approved" : "pending"),
         applicationNotes: application?.notes || null,
         waitlistReason: application?.status === "waitlisted" ? application?.notes || null : null
       });
@@ -7534,9 +7534,9 @@ If you did not request this, you can ignore this email.`,
       if (!pushToken.startsWith("ExponentPushToken[") && !pushToken.startsWith("ExpoPushToken[")) {
         return res.status(400).json({ message: "Invalid Expo push token" });
       }
-      const chauffeur = await storage.getChauffeur(req.params.id);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
-      if (chauffeur.userId !== req.auth.sub && req.auth.role !== "admin") {
+      const chauffeur2 = await storage.getChauffeur(req.params.id);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
+      if (chauffeur2.userId !== req.auth.sub && req.auth.role !== "admin") {
         return res.status(403).json({ message: "Forbidden" });
       }
       await storage.updateChauffeur(req.params.id, { pushToken });
@@ -7547,13 +7547,13 @@ If you did not request this, you can ignore this email.`,
   });
   app2.get("/api/chauffeurs/:id", async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeur(req.params.id);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
+      const chauffeur2 = await storage.getChauffeur(req.params.id);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
       const [ratings, earningsList] = await Promise.all([
         storage.getRatingsByChauffeur(req.params.id),
         storage.getEarningsByChauffeur(req.params.id).catch(() => [])
       ]);
-      const application = chauffeur.userId ? await storage.getDriverApplicationByUserId(chauffeur.userId).catch(() => void 0) : void 0;
+      const application = chauffeur2.userId ? await storage.getDriverApplicationByUserId(chauffeur2.userId).catch(() => void 0) : void 0;
       const computedRating = ratings.length > 0 ? parseFloat((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1)) : null;
       const cardEarningsTotal = earningsList.filter((e) => e.type === "card" || e.type === "wallet").reduce((s, e) => s + (e.amount || 0), 0);
       const todayStart = /* @__PURE__ */ new Date();
@@ -7563,12 +7563,12 @@ If you did not request this, you can ignore this email.`,
       const todayCashFares = chauffeurRides.filter((r) => r.status === "trip_completed" && r.paymentMethod === "cash" && r.completedAt && new Date(r.completedAt) >= todayStart).reduce((s, r) => s + calculateChauffeurEarnings(r.price || 0, r.commissionRate).chauffeurEarnings, 0);
       const todayEarnings = Math.round(todayCardEarnings + todayCashFares);
       return res.json({
-        ...chauffeur,
+        ...chauffeur2,
         computedRating,
         totalRatings: ratings.length,
         cardEarningsTotal,
         todayEarnings,
-        applicationStatus: application?.status || (chauffeur.isApproved ? "approved" : "pending"),
+        applicationStatus: application?.status || (chauffeur2.isApproved ? "approved" : "pending"),
         applicationNotes: application?.notes || null,
         waitlistReason: application?.status === "waitlisted" ? application?.notes || null : null
       });
@@ -7577,43 +7577,43 @@ If you did not request this, you can ignore this email.`,
     }
   });
   async function getResolvedChauffeurDetails(chauffeurId, vehicleIdOverride) {
-    const chauffeur = await storage.getChauffeur(chauffeurId);
-    if (!chauffeur) return null;
-    const user = chauffeur.userId ? await storage.getUser(chauffeur.userId).catch(() => null) : null;
-    const targetVehicleId = vehicleIdOverride || chauffeur.activeVehicleId;
+    const chauffeur2 = await storage.getChauffeur(chauffeurId);
+    if (!chauffeur2) return null;
+    const user = chauffeur2.userId ? await storage.getUser(chauffeur2.userId).catch(() => null) : null;
+    const targetVehicleId = vehicleIdOverride || chauffeur2.activeVehicleId;
     const activeVehicle = targetVehicleId ? await storage.getVehicle(targetVehicleId).catch(() => void 0) : void 0;
     const ratings = await storage.getRatingsByChauffeur(chauffeurId).catch(() => []);
     const avgRating = ratings.length > 0 ? parseFloat((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1)) : user?.rating ?? 5;
-    const application = chauffeur.userId ? await storage.getDriverApplicationByUserId(chauffeur.userId).catch(() => void 0) : void 0;
-    const resolvedPhoto = chauffeur.profilePhoto || user?.profilePhoto || application?.profilePhoto || application?.selfieUrl || null;
+    const application = chauffeur2.userId ? await storage.getDriverApplicationByUserId(chauffeur2.userId).catch(() => void 0) : void 0;
+    const resolvedPhoto = chauffeur2.profilePhoto || user?.profilePhoto || application?.profilePhoto || application?.selfieUrl || null;
     return {
-      id: chauffeur.id,
+      id: chauffeur2.id,
       driverName: user?.name || "Driver",
-      driverPhone: chauffeur.phone || user?.phone || null,
+      driverPhone: chauffeur2.phone || user?.phone || null,
       profilePhoto: resolvedPhoto,
-      carMake: activeVehicle?.carMake || activeVehicle?.make || chauffeur.carMake || null,
-      vehicleModel: activeVehicle?.vehicleModel || activeVehicle?.model || chauffeur.vehicleModel || null,
-      plateNumber: activeVehicle?.plateNumber || chauffeur.plateNumber || null,
-      carColor: activeVehicle?.carColor || activeVehicle?.color || chauffeur.carColor || null,
-      vehicleType: activeVehicle?.vehicleType || activeVehicle?.category || chauffeur.vehicleType || null,
-      vehicleCategory: activeVehicle?.vehicleType || activeVehicle?.category || chauffeur.vehicleCategory || null,
-      vehicleYear: activeVehicle?.vehicleYear || activeVehicle?.year || chauffeur.vehicleYear || null,
+      carMake: activeVehicle?.carMake || activeVehicle?.make || chauffeur2.carMake || null,
+      vehicleModel: activeVehicle?.vehicleModel || activeVehicle?.model || chauffeur2.vehicleModel || null,
+      plateNumber: activeVehicle?.plateNumber || chauffeur2.plateNumber || null,
+      carColor: activeVehicle?.carColor || activeVehicle?.color || chauffeur2.carColor || null,
+      vehicleType: activeVehicle?.vehicleType || activeVehicle?.category || chauffeur2.vehicleType || null,
+      vehicleCategory: activeVehicle?.vehicleType || activeVehicle?.category || chauffeur2.vehicleCategory || null,
+      vehicleYear: activeVehicle?.vehicleYear || activeVehicle?.year || chauffeur2.vehicleYear || null,
       driverRating: avgRating,
       totalRatings: ratings.length,
-      lat: chauffeur.lat,
-      lng: chauffeur.lng
+      lat: chauffeur2.lat,
+      lng: chauffeur2.lng
     };
   }
   app2.get("/api/chauffeurs/:id/details", async (req, res) => {
     try {
       const resolved = await getResolvedChauffeurDetails(req.params.id);
       if (!resolved) return res.status(404).json({ message: "Chauffeur not found" });
-      const chauffeur = await storage.getChauffeur(req.params.id);
-      const user = chauffeur?.userId ? await storage.getUser(chauffeur.userId).catch(() => null) : null;
+      const chauffeur2 = await storage.getChauffeur(req.params.id);
+      const user = chauffeur2?.userId ? await storage.getUser(chauffeur2.userId).catch(() => null) : null;
       return res.json({
-        ...chauffeur,
+        ...chauffeur2,
         ...resolved,
-        profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null
+        profilePhoto: chauffeur2.profilePhoto || user?.profilePhoto || null
       });
     } catch (error) {
       return res.status(500).json({ message: error.message });
@@ -7621,9 +7621,9 @@ If you did not request this, you can ignore this email.`,
   });
   app2.get("/api/chauffeurs/:id/profile", async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeur(req.params.id);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
-      const user = chauffeur?.userId ? await storage.getUser(chauffeur.userId).catch(() => null) : null;
+      const chauffeur2 = await storage.getChauffeur(req.params.id);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
+      const user = chauffeur2?.userId ? await storage.getUser(chauffeur2.userId).catch(() => null) : null;
       const resolved = await getResolvedChauffeurDetails(req.params.id);
       const ratings = await storage.getRatingsByChauffeur(req.params.id);
       const avgRating = ratings.length > 0 ? parseFloat((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(2)) : null;
@@ -7649,18 +7649,18 @@ If you did not request this, you can ignore this email.`,
       const rides2 = await storage.getRidesByChauffeur(req.params.id);
       const completedTrips = rides2.filter((r) => r.status === "trip_completed").length;
       return res.json({
-        id: chauffeur.id,
+        id: chauffeur2.id,
         driverName: resolved?.driverName || "Chauffeur",
         driverRating: avgRating,
         totalRatings: ratings.length,
         completedTrips,
         distribution,
-        profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null,
-        carMake: resolved?.carMake || chauffeur.carMake,
-        vehicleModel: resolved?.vehicleModel || chauffeur.vehicleModel,
-        carColor: resolved?.carColor || chauffeur.carColor,
-        plateNumber: resolved?.plateNumber || chauffeur.plateNumber,
-        vehicleCategory: resolved?.vehicleCategory || chauffeur.vehicleCategory,
+        profilePhoto: chauffeur2.profilePhoto || user?.profilePhoto || null,
+        carMake: resolved?.carMake || chauffeur2.carMake,
+        vehicleModel: resolved?.vehicleModel || chauffeur2.vehicleModel,
+        carColor: resolved?.carColor || chauffeur2.carColor,
+        plateNumber: resolved?.plateNumber || chauffeur2.plateNumber,
+        vehicleCategory: resolved?.vehicleCategory || chauffeur2.vehicleCategory,
         ratings: ratingsWithNames
       });
     } catch (error) {
@@ -7736,22 +7736,22 @@ If you did not request this, you can ignore this email.`,
   app2.put("/api/chauffeurs/:id", async (req, res) => {
     try {
       const { name, ...chauffeurData } = req.body;
-      const chauffeur = await storage.updateChauffeur(req.params.id, chauffeurData);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
-      if (name && chauffeur.userId) {
-        await storage.updateUser(chauffeur.userId, { name: name.trim() });
+      const chauffeur2 = await storage.updateChauffeur(req.params.id, chauffeurData);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
+      if (name && chauffeur2.userId) {
+        await storage.updateUser(chauffeur2.userId, { name: name.trim() });
       }
-      return res.json({ ...chauffeur, userName: name || chauffeur.userName });
+      return res.json({ ...chauffeur2, userName: name || chauffeur2.userName });
     } catch (error) {
       return res.status(500).json({ message: error.message });
     }
   });
   app2.delete("/api/chauffeurs/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeur(req.params.id);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
-      if (chauffeur.userId) {
-        const app3 = await storage.getDriverApplicationByUserId(chauffeur.userId);
+      const chauffeur2 = await storage.getChauffeur(req.params.id);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
+      if (chauffeur2.userId) {
+        const app3 = await storage.getDriverApplicationByUserId(chauffeur2.userId);
         if (app3) await storage.deleteDriverApplication(app3.id);
       }
       await storage.deleteChauffeur(req.params.id);
@@ -7762,18 +7762,18 @@ If you did not request this, you can ignore this email.`,
   });
   app2.post("/api/chauffeurs/:id/approve", requireAuth, requireRole(["admin"]), async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeur(req.params.id);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
+      const chauffeur2 = await storage.getChauffeur(req.params.id);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
       await storage.updateChauffeur(req.params.id, { isApproved: true });
-      if (chauffeur.userId) {
+      if (chauffeur2.userId) {
         await notifyUserEvent({
-          userId: chauffeur.userId,
+          userId: chauffeur2.userId,
           type: "approval",
           title: "Application approved",
           body: "Your driver profile has been approved. Add or select an approved vehicle before going online."
         });
         try {
-          const app3 = await storage.getDriverApplicationByUserId(chauffeur.userId);
+          const app3 = await storage.getDriverApplicationByUserId(chauffeur2.userId);
           if (app3) {
             await storage.updateDriverApplication(app3.id, {
               status: "approved",
@@ -7786,7 +7786,7 @@ If you did not request this, you can ignore this email.`,
           console.error("[approve] application update failed:", e.message);
         }
         try {
-          const docs = await storage.getDocumentsByUser(chauffeur.userId);
+          const docs = await storage.getDocumentsByUser(chauffeur2.userId);
           for (const doc of docs) {
             await storage.updateDocument(doc.id, { status: "approved" });
           }
@@ -7803,18 +7803,18 @@ If you did not request this, you can ignore this email.`,
     try {
       const { reason } = req.body;
       if (!reason?.trim()) return res.status(400).json({ message: "Rejection reason is required" });
-      const chauffeur = await storage.getChauffeur(req.params.id);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
+      const chauffeur2 = await storage.getChauffeur(req.params.id);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
       await storage.updateChauffeur(req.params.id, { isApproved: false });
-      if (chauffeur.userId) {
+      if (chauffeur2.userId) {
         await notifyUserEvent({
-          userId: chauffeur.userId,
+          userId: chauffeur2.userId,
           type: "rejection",
           title: "Application Not Approved",
           body: `Your driver application was not approved. Reason: ${reason.trim()}. Please contact support if you have questions.`
         });
         try {
-          const app3 = await storage.getDriverApplicationByUserId(chauffeur.userId);
+          const app3 = await storage.getDriverApplicationByUserId(chauffeur2.userId);
           if (app3) {
             await storage.updateDriverApplication(app3.id, {
               status: "rejected",
@@ -7835,11 +7835,11 @@ If you did not request this, you can ignore this email.`,
     try {
       const { reason } = req.body;
       if (!reason?.trim()) return res.status(400).json({ message: "Waitlist reason is required" });
-      const chauffeur = await storage.getChauffeur(req.params.id);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
+      const chauffeur2 = await storage.getChauffeur(req.params.id);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
       await storage.updateChauffeur(req.params.id, { isApproved: false, isOnline: false });
-      if (chauffeur.userId) {
-        const app3 = await storage.getDriverApplicationByUserId(chauffeur.userId);
+      if (chauffeur2.userId) {
+        const app3 = await storage.getDriverApplicationByUserId(chauffeur2.userId);
         if (app3) {
           await storage.updateDriverApplication(app3.id, {
             status: "waitlisted",
@@ -7849,8 +7849,8 @@ If you did not request this, you can ignore this email.`,
           });
         } else {
           await storage.createDriverApplication({
-            userId: chauffeur.userId,
-            chauffeurId: chauffeur.id,
+            userId: chauffeur2.userId,
+            chauffeurId: chauffeur2.id,
             status: "waitlisted",
             notes: reason.trim(),
             reviewedAt: /* @__PURE__ */ new Date(),
@@ -7858,7 +7858,7 @@ If you did not request this, you can ignore this email.`,
           });
         }
         await notifyUserEvent({
-          userId: chauffeur.userId,
+          userId: chauffeur2.userId,
           type: "waitlisted",
           title: "Driver profile waitlisted",
           body: `Your A2B driver profile has been waitlisted. Reason: ${reason.trim()}`
@@ -7871,11 +7871,11 @@ If you did not request this, you can ignore this email.`,
   });
   app2.post("/api/chauffeurs/:id/reactivate", requireAuth, requireRole(["admin"]), async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeur(req.params.id);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
+      const chauffeur2 = await storage.getChauffeur(req.params.id);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
       await storage.updateChauffeur(req.params.id, { isApproved: true, isOnline: false });
-      if (chauffeur.userId) {
-        const app3 = await storage.getDriverApplicationByUserId(chauffeur.userId);
+      if (chauffeur2.userId) {
+        const app3 = await storage.getDriverApplicationByUserId(chauffeur2.userId);
         if (app3) {
           await storage.updateDriverApplication(app3.id, {
             status: "approved",
@@ -7885,7 +7885,7 @@ If you did not request this, you can ignore this email.`,
           });
         }
         await notifyUserEvent({
-          userId: chauffeur.userId,
+          userId: chauffeur2.userId,
           type: "approval",
           title: "Driver profile reactivated",
           body: "Your A2B driver profile has been reactivated. You can go online after selecting an approved vehicle."
@@ -7898,9 +7898,9 @@ If you did not request this, you can ignore this email.`,
   });
   app2.get("/api/chauffeurs/:id/documents", requireAuth, requireRole(["admin"]), async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeur(req.params.id);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
-      const docs = chauffeur.userId ? await storage.getDocumentsByUser(chauffeur.userId) : [];
+      const chauffeur2 = await storage.getChauffeur(req.params.id);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
+      const docs = chauffeur2.userId ? await storage.getDocumentsByUser(chauffeur2.userId) : [];
       return res.json(docs);
     } catch (error) {
       return res.status(500).json({ message: error.message });
@@ -7908,27 +7908,27 @@ If you did not request this, you can ignore this email.`,
   });
   app2.put("/api/chauffeurs/:id/toggle-online", async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeur(req.params.id);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
-      const nextOnline = !chauffeur.isOnline;
+      const chauffeur2 = await storage.getChauffeur(req.params.id);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
+      const nextOnline = !chauffeur2.isOnline;
       if (nextOnline) {
-        const application = await storage.getDriverApplicationByUserId(chauffeur.userId).catch(() => void 0);
+        const application = await storage.getDriverApplicationByUserId(chauffeur2.userId).catch(() => void 0);
         if (application?.status === "waitlisted") {
           await storage.updateChauffeur(req.params.id, { isOnline: false });
           return res.status(403).json({ message: application.notes || "Your driver profile is waitlisted. Please contact support before going online." });
         }
-        const profile = await ensureDriverOperatorForChauffeur(chauffeur.userId);
+        const profile = await ensureDriverOperatorForChauffeur(chauffeur2.userId);
         if (profile?.type === "partner") {
           return res.status(403).json({ message: "Partners cannot go online as drivers." });
         }
-        if (!profile || profile.status !== "approved" || !chauffeur.isApproved) {
+        if (!profile || profile.status !== "approved" || !chauffeur2.isApproved) {
           return res.status(403).json({ message: "Account not yet approved" });
         }
-        if (!chauffeur.activeVehicleId) {
+        if (!chauffeur2.activeVehicleId) {
           return res.status(400).json({ message: "Select an approved vehicle before going online." });
         }
-        const vehicle = await storage.getVehicle(chauffeur.activeVehicleId);
-        const assignment = await storage.getActiveVehicleAssignment(chauffeur.activeVehicleId, profile.id);
+        const vehicle = await storage.getVehicle(chauffeur2.activeVehicleId);
+        const assignment = await storage.getActiveVehicleAssignment(chauffeur2.activeVehicleId, profile.id);
         if (!vehicle || vehicle.status !== "approved" || !assignment) {
           await storage.updateChauffeur(req.params.id, { activeVehicleId: null, isOnline: false });
           return res.status(400).json({ message: "This vehicle is no longer approved or assigned to you." });
@@ -8007,9 +8007,9 @@ If you did not request this, you can ignore this email.`,
   app2.post("/api/long-distance/availability", requireAuth, async (req, res) => {
     try {
       const userId = req.auth.sub;
-      const chauffeur = await storage.getChauffeurByUserId(userId);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur profile not found" });
-      if (!chauffeur.isApproved) return res.status(403).json({ message: "Account not yet approved" });
+      const chauffeur2 = await storage.getChauffeurByUserId(userId);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur profile not found" });
+      if (!chauffeur2.isApproved) return res.status(403).json({ message: "Account not yet approved" });
       const {
         available,
         from,
@@ -8040,7 +8040,7 @@ If you did not request this, you can ignore this email.`,
           return res.status(400).json({ message: "At least one seat must be available" });
         }
       }
-      await storage.updateChauffeur(chauffeur.id, {
+      await storage.updateChauffeur(chauffeur2.id, {
         availableForLongDistance: available,
         longDistanceFrom: available ? normalizedFrom : null,
         longDistanceTo: available ? normalizedTo : null,
@@ -8113,50 +8113,50 @@ If you did not request this, you can ignore this email.`,
       }
       const rider = await storage.getUser(req.auth.sub);
       if (!rider) return res.status(404).json({ message: "Passenger not found" });
-      const chauffeur = await storage.getChauffeur(driverId);
-      if (!chauffeur || !chauffeur.isApproved || !chauffeur.availableForLongDistance) {
+      const chauffeur2 = await storage.getChauffeur(driverId);
+      if (!chauffeur2 || !chauffeur2.isApproved || !chauffeur2.availableForLongDistance) {
         return res.status(404).json({ message: "This route is no longer available" });
       }
-      if (chauffeur.userId === rider.id) {
+      if (chauffeur2.userId === rider.id) {
         return res.status(400).json({ message: "You cannot book your own route" });
       }
-      const seatsAvailable = Number(chauffeur.longDistanceSeatsAvailable || 0);
+      const seatsAvailable = Number(chauffeur2.longDistanceSeatsAvailable || 0);
       if (seatsAvailable < seatsRequested) {
         return res.status(409).json({ message: `Only ${seatsAvailable} seat${seatsAvailable === 1 ? "" : "s"} remain on this route` });
       }
-      const chauffeurUser = await storage.getUser(chauffeur.userId);
+      const chauffeurUser = await storage.getUser(chauffeur2.userId);
       const remainingSeats = seatsAvailable - seatsRequested;
-      await storage.updateChauffeur(chauffeur.id, {
+      await storage.updateChauffeur(chauffeur2.id, {
         longDistanceSeatsAvailable: remainingSeats,
         availableForLongDistance: remainingSeats > 0
       });
-      const bookingFare = Number(chauffeur.longDistancePricePerSeat || 0) * seatsRequested;
+      const bookingFare = Number(chauffeur2.longDistancePricePerSeat || 0) * seatsRequested;
       const earningsCalc = calculateChauffeurEarnings(bookingFare);
       if (bookingFare > 0) {
         await storage.createEarning({
-          chauffeurId: chauffeur.id,
+          chauffeurId: chauffeur2.id,
           rideId: null,
           amount: method === "cash" ? -earningsCalc.commission : earningsCalc.chauffeurEarnings,
           commission: earningsCalc.commission,
           type: `long_distance_${method}`
         });
-        await storage.updateChauffeur(chauffeur.id, {
-          earningsTotal: (chauffeur.earningsTotal || 0) + (method === "cash" ? -earningsCalc.commission : earningsCalc.chauffeurEarnings)
+        await storage.updateChauffeur(chauffeur2.id, {
+          earningsTotal: (chauffeur2.earningsTotal || 0) + (method === "cash" ? -earningsCalc.commission : earningsCalc.chauffeurEarnings)
         });
       }
       const riderFirstName = String(passengerName || rider.name || "Passenger").trim().split(" ")[0] || "Passenger";
-      const routeFrom = chauffeur.longDistanceFrom || from;
-      const routeTo = chauffeur.longDistanceTo || to;
-      const travelDate = chauffeur.longDistanceDate || date;
+      const routeFrom = chauffeur2.longDistanceFrom || from;
+      const routeTo = chauffeur2.longDistanceTo || to;
+      const travelDate = chauffeur2.longDistanceDate || date;
       const paymentNote = method === "cash" ? "The rider selected cash payment for the day of travel." : "Card payment was confirmed online.";
       const driverBody = `${riderFirstName} booked ${seatsRequested} seat${seatsRequested === 1 ? "" : "s"} for ${routeFrom} to ${routeTo} on ${travelDate}. ${paymentNote}`;
       await storage.createNotification({
-        userId: chauffeur.userId,
+        userId: chauffeur2.userId,
         title: "New long-distance booking",
         body: driverBody,
         type: "long_distance"
       });
-      const pushTokens = Array.from(new Set([chauffeur.pushToken, chauffeurUser?.pushToken].filter(Boolean)));
+      const pushTokens = Array.from(new Set([chauffeur2.pushToken, chauffeurUser?.pushToken].filter(Boolean)));
       if (pushTokens.length) {
         sendExpoPushNotification(
           pushTokens,
@@ -8164,7 +8164,7 @@ If you did not request this, you can ignore this email.`,
           `${riderFirstName} booked ${seatsRequested} seat${seatsRequested === 1 ? "" : "s"} for ${routeFrom} to ${routeTo}.`,
           {
             type: "long_distance:booking",
-            driverId: chauffeur.id,
+            driverId: chauffeur2.id,
             passengerId: rider.id,
             from: routeFrom,
             to: routeTo,
@@ -8186,8 +8186,8 @@ If you did not request this, you can ignore this email.`,
       if (bookingFare > 0) {
         try {
           await creditReferralReward({
-            referredUserId: chauffeur.userId,
-            sourceUserId: chauffeur.userId,
+            referredUserId: chauffeur2.userId,
+            sourceUserId: chauffeur2.userId,
             grossFare: bookingFare,
             type: "driver_referral_commission",
             description: "2.5% reward programme earning from a long-distance booking by a driver you invited",
@@ -8247,8 +8247,8 @@ If you did not request this, you can ignore this email.`,
       status: tx?.status
     };
   }
-  async function getApprovedLiftClubVehicleForChauffeur(userId, chauffeur) {
-    const activeVehicle = chauffeur.activeVehicleId ? await storage.getVehicle(chauffeur.activeVehicleId).catch(() => void 0) : void 0;
+  async function getApprovedLiftClubVehicleForChauffeur(userId, chauffeur2) {
+    const activeVehicle = chauffeur2.activeVehicleId ? await storage.getVehicle(chauffeur2.activeVehicleId).catch(() => void 0) : void 0;
     if (activeVehicle && activeVehicle.status === "approved" && Number(activeVehicle.vehicleYear || 0) >= 2015) {
       return activeVehicle;
     }
@@ -8678,14 +8678,14 @@ If you did not request this, you can ignore this email.`,
   });
   app2.get("/api/lift-club/my-route", requireAuth, async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeurByUserId(req.auth.sub);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur profile not found" });
-      const route = await storage.getLiftClubRouteByChauffeurId(chauffeur.id);
-      const vehicle = await getApprovedLiftClubVehicleForChauffeur(req.auth.sub, chauffeur);
+      const chauffeur2 = await storage.getChauffeurByUserId(req.auth.sub);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur profile not found" });
+      const route = await storage.getLiftClubRouteByChauffeurId(chauffeur2.id);
+      const vehicle = await getApprovedLiftClubVehicleForChauffeur(req.auth.sub, chauffeur2);
       return res.json({
         route: route || null,
-        canPublish: Boolean(chauffeur.isApproved && vehicle),
-        isApproved: Boolean(chauffeur.isApproved),
+        canPublish: Boolean(chauffeur2.isApproved && vehicle),
+        isApproved: Boolean(chauffeur2.isApproved),
         vehicle: vehicle || null
       });
     } catch (error) {
@@ -8694,12 +8694,12 @@ If you did not request this, you can ignore this email.`,
   });
   app2.post("/api/lift-club/my-route", requireAuth, async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeurByUserId(req.auth.sub);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur profile not found" });
-      if (!chauffeur.isApproved) return res.status(403).json({ message: "Your driver profile must be approved before publishing a lift club route." });
+      const chauffeur2 = await storage.getChauffeurByUserId(req.auth.sub);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur profile not found" });
+      if (!chauffeur2.isApproved) return res.status(403).json({ message: "Your driver profile must be approved before publishing a lift club route." });
       const available = req.body?.available !== false;
       if (!available) {
-        const route2 = await storage.updateLiftClubRouteStatus(chauffeur.id, "inactive");
+        const route2 = await storage.updateLiftClubRouteStatus(chauffeur2.id, "inactive");
         if (route2) {
           await storage.createNotification({
             userId: req.auth.sub,
@@ -8710,7 +8710,7 @@ If you did not request this, you can ignore this email.`,
         }
         return res.json({ success: true, route: route2 || null, available: false });
       }
-      const vehicle = await getApprovedLiftClubVehicleForChauffeur(req.auth.sub, chauffeur);
+      const vehicle = await getApprovedLiftClubVehicleForChauffeur(req.auth.sub, chauffeur2);
       if (!vehicle) {
         return res.status(403).json({ message: "An approved vehicle from 2015 onwards is required before publishing a lift club route." });
       }
@@ -8720,7 +8720,7 @@ If you did not request this, you can ignore this email.`,
       const weeklyPrice = Number(req.body?.weeklyPrice);
       const monthlyPrice = Number(req.body?.monthlyPrice);
       const requestedSeats = Math.floor(Number(req.body?.totalSeats) || 0);
-      const vehicleCapacity = Math.max(1, Number(vehicle.passengerCapacity || chauffeur.passengerCapacity || 1));
+      const vehicleCapacity = Math.max(1, Number(vehicle.passengerCapacity || chauffeur2.passengerCapacity || 1));
       const totalSeats = Math.max(1, Math.min(vehicleCapacity, requestedSeats || vehicleCapacity));
       if (!pickupArea || !destinationArea) {
         return res.status(400).json({ message: "Pickup area and workplace are required." });
@@ -8731,14 +8731,14 @@ If you did not request this, you can ignore this email.`,
       if (!Number.isFinite(weeklyPrice) || weeklyPrice <= 0 || !Number.isFinite(monthlyPrice) || monthlyPrice <= 0) {
         return res.status(400).json({ message: "Weekly and monthly prices must be greater than zero." });
       }
-      const existingRoute = await storage.getLiftClubRouteByChauffeurId(chauffeur.id);
+      const existingRoute = await storage.getLiftClubRouteByChauffeurId(chauffeur2.id);
       const hasBookedSeats = Number(existingRoute?.bookedSeats || 0) > 0;
       const routeChanged = existingRoute && (String(existingRoute.pickupArea || "").trim().toLowerCase() !== pickupArea.toLowerCase() || String(existingRoute.destinationArea || "").trim().toLowerCase() !== destinationArea.toLowerCase());
       if (hasBookedSeats && routeChanged) {
         return res.status(409).json({ message: "This lift club already has booked riders. Turn it off or contact support before changing the route areas." });
       }
       const route = await storage.upsertLiftClubRoute({
-        chauffeurId: chauffeur.id,
+        chauffeurId: chauffeur2.id,
         vehicleId: vehicle.id,
         pickupArea,
         destinationArea,
@@ -8760,7 +8760,7 @@ If you did not request this, you can ignore this email.`,
       }).catch(() => void 0);
       await notifyAdmins(
         "Lift Club route published",
-        `${chauffeur.driverName || "A driver"} published ${pickupArea} to ${destinationArea} for Lift Club.`,
+        `${chauffeur2.driverName || "A driver"} published ${pickupArea} to ${destinationArea} for Lift Club.`,
         "lift_club_route"
       ).catch(() => void 0);
       return res.json({ success: true, route, available: true });
@@ -8845,15 +8845,15 @@ If you did not request this, you can ignore this email.`,
   });
   app2.get("/api/long-distance/my-availability", requireAuth, async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeurByUserId(req.auth.sub);
-      if (!chauffeur) return res.status(404).json({ message: "Not found" });
+      const chauffeur2 = await storage.getChauffeurByUserId(req.auth.sub);
+      if (!chauffeur2) return res.status(404).json({ message: "Not found" });
       return res.json({
-        available: chauffeur.availableForLongDistance || false,
-        from: chauffeur.longDistanceFrom || "",
-        to: chauffeur.longDistanceTo || "",
-        date: chauffeur.longDistanceDate || "",
-        pricePerSeat: chauffeur.longDistancePricePerSeat || 0,
-        seatsAvailable: chauffeur.longDistanceSeatsAvailable || 1
+        available: chauffeur2.availableForLongDistance || false,
+        from: chauffeur2.longDistanceFrom || "",
+        to: chauffeur2.longDistanceTo || "",
+        date: chauffeur2.longDistanceDate || "",
+        pricePerSeat: chauffeur2.longDistancePricePerSeat || 0,
+        seatsAvailable: chauffeur2.longDistanceSeatsAvailable || 1
       });
     } catch (error) {
       return res.status(500).json({ message: error.message });
@@ -8900,9 +8900,9 @@ If you did not request this, you can ignore this email.`,
         reviewerAdminId: req.auth.sub
       });
       if (profile.type === "driver") {
-        const chauffeur = await storage.getChauffeurByUserId(profile.userId).catch(() => void 0);
-        if (chauffeur) {
-          await storage.updateChauffeur(chauffeur.id, {
+        const chauffeur2 = await storage.getChauffeurByUserId(profile.userId).catch(() => void 0);
+        if (chauffeur2) {
+          await storage.updateChauffeur(chauffeur2.id, {
             isApproved: status === "approved",
             ...status === "rejected" ? { isOnline: false, activeVehicleId: null } : {}
           });
@@ -9026,9 +9026,9 @@ If you did not request this, you can ignore this email.`,
             await storage.updateVehicleAssignment(assignment.id, { status: "removed", removedAt: /* @__PURE__ */ new Date() });
             const driverProfile = await storage.getOperatorProfile(assignment.driverOperatorProfileId).catch(() => void 0);
             if (driverProfile) {
-              const chauffeur = await storage.getChauffeurByUserId(driverProfile.userId).catch(() => void 0);
-              if (chauffeur?.activeVehicleId === vehicle.id) {
-                await storage.updateChauffeur(chauffeur.id, { activeVehicleId: null, isOnline: false });
+              const chauffeur2 = await storage.getChauffeurByUserId(driverProfile.userId).catch(() => void 0);
+              if (chauffeur2?.activeVehicleId === vehicle.id) {
+                await storage.updateChauffeur(chauffeur2.id, { activeVehicleId: null, isOnline: false });
               }
               if (driverProfile.userId !== ownerProfile.userId) {
                 await notifyUserEvent({
@@ -9444,13 +9444,13 @@ If you did not request this, you can ignore this email.`,
   });
   app2.put("/api/chauffeurs/:id/location", requireAuth, async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeur(req.params.id);
-      if (!chauffeur || chauffeur.userId !== req.auth.sub) return res.status(403).json({ message: "Forbidden" });
+      const chauffeur2 = await storage.getChauffeur(req.params.id);
+      if (!chauffeur2 || chauffeur2.userId !== req.auth.sub) return res.status(403).json({ message: "Forbidden" });
       const lat = Number(req.body?.lat);
       const lng = Number(req.body?.lng);
       if (!isValidLocationSample(lat, lng)) return res.status(400).json({ message: "A valid latitude and longitude are required" });
-      const updated = await storage.updateChauffeur(chauffeur.id, { lat, lng, locationUpdatedAt: /* @__PURE__ */ new Date() });
-      const activeRide = (await storage.getRidesByChauffeur(chauffeur.id)).find(
+      const updated = await storage.updateChauffeur(chauffeur2.id, { lat, lng, locationUpdatedAt: /* @__PURE__ */ new Date() });
+      const activeRide = (await storage.getRidesByChauffeur(chauffeur2.id)).find(
         (ride) => ["chauffeur_assigned", "chauffeur_arriving", "chauffeur_arrived", "trip_started"].includes(ride.status)
       );
       if (activeRide) {
@@ -9462,7 +9462,7 @@ If you did not request this, you can ignore this email.`,
         const travelledKm = previous ? calculateHaversineDistanceKm(Number(previous.latitude), Number(previous.longitude), lat, lng) : 0;
         await pool2.query(
           "INSERT INTO ride_location_samples (ride_id, chauffeur_id, latitude, longitude) VALUES ($1, $2, $3, $4)",
-          [activeRide.id, chauffeur.id, lat, lng]
+          [activeRide.id, chauffeur2.id, lat, lng]
         );
         if (travelledKm > 0 && travelledKm < 5) {
           await storage.updateRide(activeRide.id, { actualDistanceKm: Number(activeRide.actualDistanceKm || 0) + travelledKm });
@@ -9922,10 +9922,10 @@ If you did not request this, you can ignore this email.`,
                 commission: earningsCalc.commission,
                 type: "card"
               });
-              const chauffeur = await storage.getChauffeur(ride.chauffeurId);
-              if (chauffeur) {
+              const chauffeur2 = await storage.getChauffeur(ride.chauffeurId);
+              if (chauffeur2) {
                 await storage.updateChauffeur(ride.chauffeurId, {
-                  earningsTotal: (chauffeur.earningsTotal || 0) + earningsCalc.chauffeurEarnings
+                  earningsTotal: (chauffeur2.earningsTotal || 0) + earningsCalc.chauffeurEarnings
                 });
               }
             }
@@ -10058,18 +10058,18 @@ If you did not request this, you can ignore this email.`,
       io.emit("ride:statusUpdate", payload);
       if (updatedRide.chauffeurId) {
         try {
-          const chauffeur = await storage.getChauffeur(updatedRide.chauffeurId);
-          if (chauffeur?.userId) {
+          const chauffeur2 = await storage.getChauffeur(updatedRide.chauffeurId);
+          if (chauffeur2?.userId) {
             await storage.createNotification({
-              userId: chauffeur.userId,
+              userId: chauffeur2.userId,
               title: "Trip Stops Updated",
               body: `The rider updated this trip. It now has ${nextStops.length} stop${nextStops.length === 1 ? "" : "s"}.`,
               type: "ride"
             });
           }
-          if (chauffeur?.pushToken) {
+          if (chauffeur2?.pushToken) {
             sendExpoPushNotification(
-              [chauffeur.pushToken],
+              [chauffeur2.pushToken],
               "Trip Stops Updated",
               `The rider updated this trip. It now has ${nextStops.length} stop${nextStops.length === 1 ? "" : "s"}.`,
               { rideId: updatedRide.id, type: "ride:stops-updated" }
@@ -10160,18 +10160,18 @@ If you did not request this, you can ignore this email.`,
       io.emit("ride:statusUpdate", payload);
       if (updatedRide.chauffeurId) {
         try {
-          const chauffeur = await storage.getChauffeur(updatedRide.chauffeurId);
-          if (chauffeur?.userId) {
+          const chauffeur2 = await storage.getChauffeur(updatedRide.chauffeurId);
+          if (chauffeur2?.userId) {
             await storage.createNotification({
-              userId: chauffeur.userId,
+              userId: chauffeur2.userId,
               title: "Destination Changed",
               body: `The rider changed the destination to: ${dropoffAddress}. The route and fare (R ${Number(priceEstimate.totalPrice).toFixed(0)}) have been updated.`,
               type: "ride"
             });
           }
-          if (chauffeur?.pushToken) {
+          if (chauffeur2?.pushToken) {
             sendExpoPushNotification(
-              [chauffeur.pushToken],
+              [chauffeur2.pushToken],
               "Destination Changed",
               `The rider changed the destination to: ${dropoffAddress}.`,
               { rideId: updatedRide.id, type: "ride:destination-updated" }
@@ -10194,8 +10194,8 @@ If you did not request this, you can ignore this email.`,
     try {
       const { chauffeurId } = req.body;
       if (!chauffeurId) return res.status(400).json({ message: "chauffeurId is required" });
-      const chauffeur = await storage.getChauffeur(chauffeurId);
-      if (!chauffeur || chauffeur.userId !== req.auth.sub) {
+      const chauffeur2 = await storage.getChauffeur(chauffeurId);
+      if (!chauffeur2 || chauffeur2.userId !== req.auth.sub) {
         return res.status(403).json({ message: "Forbidden: chauffeur mismatch" });
       }
       const rideToAccept = await storage.getRide(req.params.id);
@@ -10203,7 +10203,7 @@ If you did not request this, you can ignore this email.`,
       if (!isRideOfferActive(rideToAccept, chauffeurId)) {
         return res.status(409).json({ message: "Ride offer expired or is no longer assigned to this driver" });
       }
-      const activeVehicle = await getApprovedActiveVehicle(chauffeur);
+      const activeVehicle = await getApprovedActiveVehicle(chauffeur2);
       if (!activeVehicle || !isVehicleEligibleForRide(rideToAccept.vehicleType || "budget", activeVehicle.vehicleType)) {
         return res.status(403).json({ message: "Your active approved vehicle does not match this ride category." });
       }
@@ -10221,7 +10221,7 @@ If you did not request this, you can ignore this email.`,
         clientFirstName = getUserFirstName(client, "Rider");
       } catch {
       }
-      const chauffeurDetails = await getResolvedChauffeurDetails(chauffeur.id, activeVehicle.id);
+      const chauffeurDetails = await getResolvedChauffeurDetails(chauffeur2.id, activeVehicle.id);
       const enrichedAccepted = { ...updated, clientFirstName, chauffeurDetails };
       io.emit("ride:accepted", enrichedAccepted);
       if (updated.clientId) {
@@ -10243,14 +10243,14 @@ If you did not request this, you can ignore this email.`,
         }
       }
       await storage.createNotification({
-        userId: chauffeur.userId,
+        userId: chauffeur2.userId,
         title: "Ride Accepted",
         body: "You're on your way to pick up the client. Head to the pickup location.",
         type: "ride"
       });
-      if (chauffeur.pushToken) {
+      if (chauffeur2.pushToken) {
         sendExpoPushNotification(
-          [chauffeur.pushToken],
+          [chauffeur2.pushToken],
           "\u{1F697} Going to Pick Up",
           "You've accepted the ride. Head to the pickup location now.",
           { rideId: updated.id, type: "ride:accepted" }
@@ -10307,17 +10307,52 @@ If you did not request this, you can ignore this email.`,
       if (status === "trip_completed") {
         const actualDurationFromBody = Number(req.body?.actualDurationMin);
         const actualDurationMin = Number.isFinite(actualDurationFromBody) && actualDurationFromBody > 0 ? actualDurationFromBody : existingRide.tripStartedAt ? Math.max(0, (now.getTime() - new Date(existingRide.tripStartedAt).getTime()) / 6e4) : existingRide.acceptedAt ? Math.max(0, (now.getTime() - new Date(existingRide.acceptedAt).getTime()) / 6e4) : Number(existingRide.durationMin || 0);
-        const minuteAdjustment = calculatePerMinuteAdjustment(
-          existingRide.estimatedDurationMin ?? existingRide.durationMin,
-          actualDurationMin
-        );
-        const previousAdjustment = Number(existingRide.perMinuteAdjustment || 0);
-        const additionalAdjustment = Math.max(0, minuteAdjustment.adjustmentAmount - previousAdjustment);
+        const driverLat = Number(req.body?.driverLat || (chauffeur ? chauffeur.lat : void 0));
+        const driverLng = Number(req.body?.driverLng || (chauffeur ? chauffeur.lng : void 0));
+        let recordedDistanceKm = Number(existingRide.actualDistanceKm || req.body?.actualDistanceKm || 0);
+        if (recordedDistanceKm <= 0 && isValidLocationSample(driverLat, driverLng) && isValidLocationSample(Number(existingRide.pickupLat), Number(existingRide.pickupLng))) {
+          recordedDistanceKm = calculateHaversineDistanceKm(
+            Number(existingRide.pickupLat),
+            Number(existingRide.pickupLng),
+            driverLat,
+            driverLng
+          );
+        }
+        const quotedDistanceKm = Math.max(0.1, Number(existingRide.distanceKm || 0));
+        const baseFare = Math.max(0, Number(existingRide.baseFare || 0));
+        const category = getVehicleCategories()[normalizeVehicleType2(existingRide.vehicleType || "budget")];
+        const pricePerKm = Math.max(0, Number(existingRide.pricePerKm || category?.pricePerKm || 0));
+        const pricingMultiplier = Number(existingRide.demandMultiplier || existingRide.surgeMultiplier || 1);
+        const arrivedAt = existingRide.arrivedAt;
+        const minutesSinceArrival = arrivedAt ? Math.max(0, (new Date(existingRide.tripStartedAt || now).getTime() - new Date(arrivedAt).getTime()) / 6e4) : 0;
+        const waitingFeeCents = arrivedAt ? calculateWaitingFee(minutesSinceArrival) : 0;
+        const waitingFee = waitingFeeCents / 100;
+        let finalFare;
+        if (recordedDistanceKm < quotedDistanceKm * 0.8) {
+          const unfinishedFareCents = calculateUnfinishedTripFare({
+            baseFareCents: Math.round(baseFare * 100),
+            pricePerKmCents: Math.round(pricePerKm * 100),
+            distanceTraveledKm: recordedDistanceKm,
+            waitingFeeCents,
+            pricingMultiplier
+          });
+          const calculatedFare = Math.round(unfinishedFareCents) / 100;
+          finalFare = Math.min(Number(existingRide.price || calculatedFare), Math.max(baseFare + waitingFee, calculatedFare));
+        } else {
+          const minuteAdjustment = calculatePerMinuteAdjustment(
+            existingRide.estimatedDurationMin ?? existingRide.durationMin,
+            actualDurationMin
+          );
+          const previousAdjustment = Number(existingRide.perMinuteAdjustment || 0);
+          const additionalAdjustment = Math.max(0, minuteAdjustment.adjustmentAmount - previousAdjustment);
+          finalFare = Math.round((Number(existingRide.price || 0) + additionalAdjustment) * 100) / 100;
+        }
         updateData.completedAt = now;
         updateData.actualDurationMin = Math.round(actualDurationMin * 10) / 10;
-        updateData.perMinuteAdjustment = minuteAdjustment.adjustmentAmount;
-        updateData.price = Math.round((Number(existingRide.price || 0) + additionalAdjustment) * 100) / 100;
-        updateData.finalFare = updateData.price;
+        updateData.actualDistanceKm = Math.round(recordedDistanceKm * 100) / 100;
+        updateData.waitingFee = waitingFee;
+        updateData.price = finalFare;
+        updateData.finalFare = finalFare;
         updateData.settlementStatus = "completed";
       }
       if (status === "cancelled") {
@@ -10470,10 +10505,10 @@ If you did not request this, you can ignore this email.`,
                 commission: cancellationEarnings.commission,
                 type: "cancellation"
               });
-              const chauffeur = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
-              if (chauffeur) {
-                await storage.updateChauffeur(chauffeur.id, {
-                  earningsTotal: Number(chauffeur.earningsTotal || 0) + cancellationEarnings.chauffeurEarnings
+              const chauffeur2 = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
+              if (chauffeur2) {
+                await storage.updateChauffeur(chauffeur2.id, {
+                  earningsTotal: Number(chauffeur2.earningsTotal || 0) + cancellationEarnings.chauffeurEarnings
                 });
               }
             }
@@ -10601,10 +10636,10 @@ If you did not request this, you can ignore this email.`,
             });
           }
           if (rideBeforeUpdate.chauffeurId && cancelledBy === "client") {
-            const chauffeur = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
-            if (chauffeur?.userId) {
+            const chauffeur2 = await storage.getChauffeur(rideBeforeUpdate.chauffeurId);
+            if (chauffeur2?.userId) {
               await storage.createNotification({
-                userId: chauffeur.userId,
+                userId: chauffeur2.userId,
                 title: "Ride Cancelled",
                 body: cancellationFee > 0 ? `The client cancelled. R${calculateChauffeurEarnings(cancellationFee, ride.commissionRate).chauffeurEarnings.toFixed(2)} was added to your earnings.` : "The client has cancelled this trip.",
                 type: "ride"
@@ -10630,10 +10665,10 @@ If you did not request this, you can ignore this email.`,
                 commission: earningsCalc.commission,
                 type: "cash"
               });
-              const chauffeur = await storage.getChauffeur(ride.chauffeurId);
-              if (chauffeur) {
+              const chauffeur2 = await storage.getChauffeur(ride.chauffeurId);
+              if (chauffeur2) {
                 await storage.updateChauffeur(ride.chauffeurId, {
-                  earningsTotal: (chauffeur.earningsTotal || 0) - earningsCalc.commission
+                  earningsTotal: (chauffeur2.earningsTotal || 0) - earningsCalc.commission
                 });
               }
             } else {
@@ -10644,10 +10679,10 @@ If you did not request this, you can ignore this email.`,
                 commission: earningsCalc.commission,
                 type: paymentMethod
               });
-              const chauffeur = await storage.getChauffeur(ride.chauffeurId);
-              if (chauffeur) {
+              const chauffeur2 = await storage.getChauffeur(ride.chauffeurId);
+              if (chauffeur2) {
                 await storage.updateChauffeur(ride.chauffeurId, {
-                  earningsTotal: (chauffeur.earningsTotal || 0) + earningsCalc.chauffeurEarnings
+                  earningsTotal: (chauffeur2.earningsTotal || 0) + earningsCalc.chauffeurEarnings
                 });
               }
             }
@@ -10913,8 +10948,8 @@ If you did not request this, you can ignore this email.`,
       }
       const callerUser = await storage.getUser(req.auth.sub);
       if (!callerUser) return res.status(403).json({ message: "Forbidden" });
-      const chauffeur = existingRide.chauffeurId ? await storage.getChauffeur(existingRide.chauffeurId) : null;
-      const isAssignedChauffeur = chauffeur?.userId === callerUser.id;
+      const chauffeur2 = existingRide.chauffeurId ? await storage.getChauffeur(existingRide.chauffeurId) : null;
+      const isAssignedChauffeur = chauffeur2?.userId === callerUser.id;
       const isAdmin = callerUser.role === "admin";
       if (!isAssignedChauffeur && !isAdmin) {
         return res.status(403).json({ message: "Only the assigned driver can confirm a stop." });
@@ -10988,11 +11023,11 @@ If you did not request this, you can ignore this email.`,
       rating,
       comment: comment || null
     });
-    const chauffeur = await storage.getChauffeur(ride.chauffeurId);
-    if (chauffeur) {
-      const avgRating = await storage.getAverageRatingForUser(chauffeur.userId);
+    const chauffeur2 = await storage.getChauffeur(ride.chauffeurId);
+    if (chauffeur2) {
+      const avgRating = await storage.getAverageRatingForUser(chauffeur2.userId);
       if (avgRating != null) {
-        await storage.updateUser(chauffeur.userId, { rating: avgRating });
+        await storage.updateUser(chauffeur2.userId, { rating: avgRating });
       }
     }
     return res.json(rr);
@@ -11009,8 +11044,8 @@ If you did not request this, you can ignore this email.`,
       if (!ride) return res.status(404).json({ message: "Ride not found" });
       if (!ride.chauffeurId) return res.status(400).json({ message: "Ride has no chauffeur" });
       if (ride.status !== "trip_completed") return res.status(400).json({ message: "Ride not completed" });
-      const chauffeur = await storage.getChauffeur(ride.chauffeurId);
-      if (!chauffeur || chauffeur.userId !== req.auth.sub) {
+      const chauffeur2 = await storage.getChauffeur(ride.chauffeurId);
+      if (!chauffeur2 || chauffeur2.userId !== req.auth.sub) {
         return res.status(403).json({ message: "Forbidden" });
       }
       const result = await pool2.query(
@@ -11064,24 +11099,24 @@ If you did not request this, you can ignore this email.`,
   });
   app2.get("/api/rides/available/:chauffeurId", async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeur(req.params.chauffeurId);
-      if (!chauffeur || !chauffeur.isOnline || !chauffeur.isApproved) {
+      const chauffeur2 = await storage.getChauffeur(req.params.chauffeurId);
+      if (!chauffeur2 || !chauffeur2.isOnline || !chauffeur2.isApproved) {
         return res.json([]);
       }
-      const activeVehicle = await getApprovedActiveVehicle(chauffeur);
+      const activeVehicle = await getApprovedActiveVehicle(chauffeur2);
       if (!activeVehicle) return res.json([]);
       const allRides = await storage.getAllRides();
       const searching = allRides.filter(
-        (r) => r.status === "searching" && isRideOfferActive(r, chauffeur.id) && isVehicleEligibleForRide(r.vehicleType || "budget", activeVehicle.vehicleType)
+        (r) => r.status === "searching" && isRideOfferActive(r, chauffeur2.id) && isVehicleEligibleForRide(r.vehicleType || "budget", activeVehicle.vehicleType)
       );
       if (!searching.length) return res.json([]);
       let candidates = searching;
-      if (chauffeur.lat && chauffeur.lng) {
+      if (chauffeur2.lat && chauffeur2.lng) {
         candidates = searching.map((r) => ({
           ...r,
           distKm: calculateHaversineDistanceKm(
-            Number(chauffeur.lat),
-            Number(chauffeur.lng),
+            Number(chauffeur2.lat),
+            Number(chauffeur2.lng),
             parseFloat(r.pickupLat),
             parseFloat(r.pickupLng)
           )
@@ -11105,15 +11140,15 @@ If you did not request this, you can ignore this email.`,
   });
   app2.get("/api/rides/chauffeur-pending/:chauffeurId", async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeur(req.params.chauffeurId);
-      if (!chauffeur || !chauffeur.isOnline || !chauffeur.isApproved) {
+      const chauffeur2 = await storage.getChauffeur(req.params.chauffeurId);
+      if (!chauffeur2 || !chauffeur2.isOnline || !chauffeur2.isApproved) {
         return res.status(204).end();
       }
-      const activeVehicle = await getApprovedActiveVehicle(chauffeur);
+      const activeVehicle = await getApprovedActiveVehicle(chauffeur2);
       if (!activeVehicle) return res.status(204).end();
       const allRides = await storage.getAllRides();
       const searching = allRides.filter(
-        (r) => r.status === "searching" && isRideOfferActive(r, chauffeur.id) && isVehicleEligibleForRide(r.vehicleType || "budget", activeVehicle.vehicleType)
+        (r) => r.status === "searching" && isRideOfferActive(r, chauffeur2.id) && isVehicleEligibleForRide(r.vehicleType || "budget", activeVehicle.vehicleType)
       );
       if (!searching.length) return res.status(204).end();
       async function enrichRide(r) {
@@ -11125,12 +11160,12 @@ If you did not request this, you can ignore this email.`,
           return { ...r, clientFirstName: "Rider" };
         }
       }
-      if (hasFreshChauffeurLocation(chauffeur)) {
+      if (hasFreshChauffeurLocation(chauffeur2)) {
         const withDist = searching.map((r) => ({
           ...r,
           distKm: calculateHaversineDistanceKm(
-            Number(chauffeur.lat),
-            Number(chauffeur.lng),
+            Number(chauffeur2.lat),
+            Number(chauffeur2.lng),
             parseFloat(r.pickupLat),
             parseFloat(r.pickupLng)
           )
@@ -11145,11 +11180,11 @@ If you did not request this, you can ignore this email.`,
   });
   app2.get("/api/rides/chauffeur-active/:chauffeurId", async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeur(req.params.chauffeurId);
-      if (!chauffeur) return res.status(204).end();
+      const chauffeur2 = await storage.getChauffeur(req.params.chauffeurId);
+      if (!chauffeur2) return res.status(204).end();
       const allRides = await storage.getAllRides();
       const activeRide = allRides.find(
-        (r) => r.chauffeurId === chauffeur.id && !["trip_completed", "cancelled"].includes(r.status)
+        (r) => r.chauffeurId === chauffeur2.id && !["trip_completed", "cancelled"].includes(r.status)
       );
       if (!activeRide) return res.status(204).end();
       const client = await storage.getUser(activeRide.clientId).catch(() => null);
@@ -11166,11 +11201,11 @@ If you did not request this, you can ignore this email.`,
   });
   app2.get("/api/chauffeurs/:id/active-ride", async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeur(req.params.id);
-      if (!chauffeur) return res.status(204).end();
+      const chauffeur2 = await storage.getChauffeur(req.params.id);
+      if (!chauffeur2) return res.status(204).end();
       const allRides = await storage.getAllRides();
       const activeRide = allRides.find(
-        (r) => r.chauffeurId === chauffeur.id && !["trip_completed", "cancelled"].includes(r.status)
+        (r) => r.chauffeurId === chauffeur2.id && !["trip_completed", "cancelled"].includes(r.status)
       );
       if (!activeRide) return res.status(204).end();
       const client = await storage.getUser(activeRide.clientId).catch(() => null);
@@ -11187,11 +11222,11 @@ If you did not request this, you can ignore this email.`,
   });
   app2.get("/api/rides/driver-active-by-user/:userId", async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeurByUserId(req.params.userId);
-      if (!chauffeur) return res.status(204).end();
+      const chauffeur2 = await storage.getChauffeurByUserId(req.params.userId);
+      if (!chauffeur2) return res.status(204).end();
       const allRides = await storage.getAllRides();
       const activeRide = allRides.find(
-        (r) => r.chauffeurId === chauffeur.id && !["trip_completed", "cancelled"].includes(r.status)
+        (r) => r.chauffeurId === chauffeur2.id && !["trip_completed", "cancelled"].includes(r.status)
       );
       if (!activeRide) return res.status(204).end();
       const client = await storage.getUser(activeRide.clientId).catch(() => null);
@@ -11230,10 +11265,10 @@ If you did not request this, you can ignore this email.`,
         (r) => r.clientId === userId && !["trip_completed", "cancelled"].includes(r.status)
       );
       if (!activeRide) {
-        const chauffeur = await storage.getChauffeurByUserId(userId);
-        if (chauffeur) {
+        const chauffeur2 = await storage.getChauffeurByUserId(userId);
+        if (chauffeur2) {
           activeRide = allRides.find(
-            (r) => r.chauffeurId === chauffeur.id && !["trip_completed", "cancelled"].includes(r.status)
+            (r) => r.chauffeurId === chauffeur2.id && !["trip_completed", "cancelled"].includes(r.status)
           );
         }
       }
@@ -11271,7 +11306,7 @@ If you did not request this, you can ignore this email.`,
     try {
       const yearParam = Number(req.query.year);
       const year = Number.isFinite(yearParam) && yearParam > 2020 ? yearParam : (/* @__PURE__ */ new Date()).getFullYear();
-      const [chauffeur, earningsList, chauffeurRides] = await Promise.all([
+      const [chauffeur2, earningsList, chauffeurRides] = await Promise.all([
         storage.getChauffeur(req.params.chauffeurId),
         storage.getEarningsByChauffeur(req.params.chauffeurId),
         storage.getRidesByChauffeur(req.params.chauffeurId)
@@ -11283,7 +11318,7 @@ If you did not request this, you can ignore this email.`,
         ])
       );
       const summary = summarizeAnnualDriverShare(earningsList, year, grossFareByRideId);
-      const createdAt = chauffeur?.createdAt ? new Date(chauffeur.createdAt).getTime() : Date.now();
+      const createdAt = chauffeur2?.createdAt ? new Date(chauffeur2.createdAt).getTime() : Date.now();
       const activeMonths = Math.max(0, Math.floor((Date.now() - createdAt) / (1e3 * 60 * 60 * 24 * 30)));
       return res.json({
         ...summary,
@@ -11306,10 +11341,10 @@ If you did not request this, you can ignore this email.`,
         await recordWalletTx(user.id, "refund", amount, balanceBefore, "Withdrawal request refunded");
       }
     } else if (withdrawal.chauffeurId) {
-      const chauffeur = await storage.getChauffeur(withdrawal.chauffeurId);
-      if (chauffeur) {
-        await storage.updateChauffeur(chauffeur.id, {
-          earningsTotal: Number(chauffeur.earningsTotal || 0) + amount
+      const chauffeur2 = await storage.getChauffeur(withdrawal.chauffeurId);
+      if (chauffeur2) {
+        await storage.updateChauffeur(chauffeur2.id, {
+          earningsTotal: Number(chauffeur2.earningsTotal || 0) + amount
         });
       }
     }
@@ -11317,8 +11352,8 @@ If you did not request this, you can ignore this email.`,
   async function getWithdrawalRequesterUserId(withdrawal) {
     if (withdrawal?.userId) return withdrawal.userId;
     if (withdrawal?.chauffeurId) {
-      const chauffeur = await storage.getChauffeur(withdrawal.chauffeurId).catch(() => void 0);
-      return chauffeur?.userId || null;
+      const chauffeur2 = await storage.getChauffeur(withdrawal.chauffeurId).catch(() => void 0);
+      return chauffeur2?.userId || null;
     }
     return null;
   }
@@ -11337,20 +11372,20 @@ If you did not request this, you can ignore this email.`,
       const userId = req.auth.sub;
       const user = await storage.getUser(userId);
       if (!user) return res.status(404).json({ message: "User not found" });
-      const chauffeur = await storage.getChauffeurByUserId(userId).catch(() => void 0);
+      const chauffeur2 = await storage.getChauffeurByUserId(userId).catch(() => void 0);
       let source;
-      if (chauffeur && Number(chauffeur.earningsTotal || 0) >= amount) {
+      if (chauffeur2 && Number(chauffeur2.earningsTotal || 0) >= amount) {
         source = "driver_earnings";
       } else if (Number(user.walletBalance || 0) >= amount) {
         source = "wallet";
       } else {
-        const available = Math.max(Number(chauffeur?.earningsTotal || 0), Number(user.walletBalance || 0));
+        const available = Math.max(Number(chauffeur2?.earningsTotal || 0), Number(user.walletBalance || 0));
         return res.status(400).json({ message: `You only have R${available.toFixed(2)} available to withdraw.` });
       }
-      if (source === "wallet" && chauffeur && !await requireLiftClubRewardAccess(userId, res)) return;
-      if (source === "driver_earnings" && chauffeur) {
-        await storage.updateChauffeur(chauffeur.id, {
-          earningsTotal: Number(chauffeur.earningsTotal || 0) - amount
+      if (source === "wallet" && chauffeur2 && !await requireLiftClubRewardAccess(userId, res)) return;
+      if (source === "driver_earnings" && chauffeur2) {
+        await storage.updateChauffeur(chauffeur2.id, {
+          earningsTotal: Number(chauffeur2.earningsTotal || 0) - amount
         });
       } else {
         const balanceBefore = Number(user.walletBalance || 0);
@@ -11359,7 +11394,7 @@ If you did not request this, you can ignore this email.`,
       }
       const withdrawal = await storage.createWithdrawal({
         userId,
-        chauffeurId: chauffeur?.id || null,
+        chauffeurId: chauffeur2?.id || null,
         source,
         amount,
         status: "pending",
@@ -11399,10 +11434,10 @@ If you did not request this, you can ignore this email.`,
   app2.get("/api/withdrawals/my", requireAuth, async (req, res) => {
     try {
       const userId = req.auth.sub;
-      const chauffeur = await storage.getChauffeurByUserId(userId).catch(() => void 0);
+      const chauffeur2 = await storage.getChauffeurByUserId(userId).catch(() => void 0);
       const all = await storage.getAllWithdrawals();
       const mine = (all || []).filter(
-        (w) => w.userId === userId || chauffeur && w.chauffeurId === chauffeur.id
+        (w) => w.userId === userId || chauffeur2 && w.chauffeurId === chauffeur2.id
       );
       return res.json(mine);
     } catch (error) {
@@ -11467,13 +11502,13 @@ If you did not request this, you can ignore this email.`,
               await recordWalletTx(holder.id, delta > 0 ? "withdrawal" : "refund", Math.abs(delta), balanceBefore, "Withdrawal amount adjusted by admin");
             }
           } else if (existing.chauffeurId) {
-            const chauffeur = await storage.getChauffeur(existing.chauffeurId);
-            if (chauffeur) {
-              if (delta > 0 && Number(chauffeur.earningsTotal || 0) < delta) {
+            const chauffeur2 = await storage.getChauffeur(existing.chauffeurId);
+            if (chauffeur2) {
+              if (delta > 0 && Number(chauffeur2.earningsTotal || 0) < delta) {
                 return res.status(400).json({ message: "Driver does not have enough earnings for the increased amount." });
               }
-              await storage.updateChauffeur(chauffeur.id, {
-                earningsTotal: Number(chauffeur.earningsTotal || 0) - delta
+              await storage.updateChauffeur(chauffeur2.id, {
+                earningsTotal: Number(chauffeur2.earningsTotal || 0) - delta
               });
             }
           }
@@ -11533,16 +11568,16 @@ If you did not request this, you can ignore this email.`,
           if (ride) {
             const previewText = (msgText || "").slice(0, 80);
             if (senderId === ride.clientId && ride.chauffeurId) {
-              const chauffeur = await storage.getChauffeur(ride.chauffeurId);
-              if (chauffeur?.pushToken) {
-                sendExpoPushNotification([chauffeur.pushToken], "New message from rider", previewText);
+              const chauffeur2 = await storage.getChauffeur(ride.chauffeurId);
+              if (chauffeur2?.pushToken) {
+                sendExpoPushNotification([chauffeur2.pushToken], "New message from rider", previewText);
               }
-              if (chauffeur?.userId) {
-                await storage.createNotification({ userId: chauffeur.userId, type: "chat", title: "New message from rider", body: previewText, isRead: false });
+              if (chauffeur2?.userId) {
+                await storage.createNotification({ userId: chauffeur2.userId, type: "chat", title: "New message from rider", body: previewText, isRead: false });
               }
             } else if (ride.chauffeurId) {
-              const chauffeur = await storage.getChauffeur(ride.chauffeurId);
-              if (chauffeur?.userId && senderId !== ride.clientId) {
+              const chauffeur2 = await storage.getChauffeur(ride.chauffeurId);
+              if (chauffeur2?.userId && senderId !== ride.clientId) {
                 const rider = await storage.getUser(ride.clientId);
                 if (rider?.pushToken) {
                   sendExpoPushNotification(
@@ -11736,14 +11771,14 @@ If you did not request this, you can ignore this email.`,
         const records = await Promise.all(
           selfieRides.map(async (ride) => {
             const rider = await storage.getUser(ride.clientId);
-            const chauffeur = ride.chauffeurId ? await storage.getChauffeur(ride.chauffeurId) : void 0;
-            const chauffeurUser = chauffeur?.userId ? await storage.getUser(chauffeur.userId) : void 0;
+            const chauffeur2 = ride.chauffeurId ? await storage.getChauffeur(ride.chauffeurId) : void 0;
+            const chauffeurUser = chauffeur2?.userId ? await storage.getUser(chauffeur2.userId) : void 0;
             return {
               rideId: ride.id,
               riderId: ride.clientId,
               riderName: rider?.name || "Unknown Rider",
               riderEmail: rider?.username || "",
-              chauffeurId: chauffeur?.id || null,
+              chauffeurId: chauffeur2?.id || null,
               chauffeurName: chauffeurUser?.name || null,
               pickupAddress: ride.pickupAddress || null,
               dropoffAddress: ride.dropoffAddress || null,
@@ -12471,10 +12506,10 @@ If you did not request this, you can ignore this email.`,
       if (!amount || !bankCode || !accountNumber || !accountName) {
         return res.status(400).json({ message: "amount, bankCode, accountNumber and accountName are required" });
       }
-      const chauffeur = await storage.getChauffeurByUserId(userId);
-      if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
-      if ((chauffeur.earningsTotal || 0) < amount) {
-        return res.status(400).json({ message: `You only have R${(chauffeur.earningsTotal || 0).toFixed(2)} available to withdraw. Please enter a lower amount.` });
+      const chauffeur2 = await storage.getChauffeurByUserId(userId);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
+      if ((chauffeur2.earningsTotal || 0) < amount) {
+        return res.status(400).json({ message: `You only have R${(chauffeur2.earningsTotal || 0).toFixed(2)} available to withdraw. Please enter a lower amount.` });
       }
       const recipientRes = await paystackAPI.post("/transferrecipient", {
         type: "nuban",
@@ -12496,7 +12531,7 @@ If you did not request this, you can ignore this email.`,
       const transferCode = transferRes.data.data.transfer_code;
       const status = transferRes.data.data.status;
       await storage.createWithdrawal({
-        chauffeurId: chauffeur.id,
+        chauffeurId: chauffeur2.id,
         amount,
         status: status === "success" ? "completed" : "pending",
         bankName: bankNameInput || bankCode,
@@ -12505,8 +12540,8 @@ If you did not request this, you can ignore this email.`,
         paystackTransferCode: transferCode,
         paystackRecipientCode: recipientCode
       });
-      await storage.updateChauffeur(chauffeur.id, {
-        earningsTotal: (chauffeur.earningsTotal || 0) - amount
+      await storage.updateChauffeur(chauffeur2.id, {
+        earningsTotal: (chauffeur2.earningsTotal || 0) - amount
       });
       return res.json({
         success: true,
@@ -12585,8 +12620,8 @@ If you did not request this, you can ignore this email.`,
       const ride = await storage.getRide(id);
       if (!ride) return res.status(404).json({ error: "Ride not found" });
       const authedReq = req;
-      const chauffeur = authedReq.auth?.role !== "admin" ? await storage.getChauffeur(ride.chauffeurId ?? "") : null;
-      if (chauffeur && chauffeur.userId !== authedReq.auth.sub) {
+      const chauffeur2 = authedReq.auth?.role !== "admin" ? await storage.getChauffeur(ride.chauffeurId ?? "") : null;
+      if (chauffeur2 && chauffeur2.userId !== authedReq.auth.sub) {
         return res.status(403).json({ error: "Forbidden" });
       }
       await storage.updateRide(id, {
@@ -12732,11 +12767,11 @@ If you did not request this, you can ignore this email.`,
   });
   app2.delete("/api/admin/users/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
     try {
-      const chauffeur = await storage.getChauffeurByUserId(req.params.id);
-      if (chauffeur) {
+      const chauffeur2 = await storage.getChauffeurByUserId(req.params.id);
+      if (chauffeur2) {
         const app3 = await storage.getDriverApplicationByUserId(req.params.id);
         if (app3) await storage.deleteDriverApplication(app3.id);
-        await storage.deleteChauffeur(chauffeur.id);
+        await storage.deleteChauffeur(chauffeur2.id);
       }
       const deleted = await storage.deleteUserCascade(req.params.id);
       if (!deleted) return res.status(404).json({ message: "User not found" });

@@ -45,6 +45,7 @@ import { sendTripInvoiceEmail } from "./trip-invoice";
 import { normalizeRideStops } from "../shared/ride-stops";
 import {
   calculateWaitingFee,
+  calculateUnfinishedTripFare,
   isValidLocationSample,
   resolveCancellation,
 } from "./ride-operations-policy";
@@ -8879,17 +8880,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
             : (existingRide as any).acceptedAt
               ? Math.max(0, (now.getTime() - new Date((existingRide as any).acceptedAt).getTime()) / 60000)
               : Number(existingRide.durationMin || 0);
-        const minuteAdjustment = calculatePerMinuteAdjustment(
-          (existingRide as any).estimatedDurationMin ?? existingRide.durationMin,
-          actualDurationMin,
-        );
-        const previousAdjustment = Number((existingRide as any).perMinuteAdjustment || 0);
-        const additionalAdjustment = Math.max(0, minuteAdjustment.adjustmentAmount - previousAdjustment);
+
+        // 1. Calculate actual distance covered during the trip
+        const driverLat = Number(req.body?.driverLat || (chauffeur ? chauffeur.lat : undefined));
+        const driverLng = Number(req.body?.driverLng || (chauffeur ? chauffeur.lng : undefined));
+
+        let recordedDistanceKm = Number((existingRide as any).actualDistanceKm || req.body?.actualDistanceKm || 0);
+        if (
+          recordedDistanceKm <= 0 &&
+          isValidLocationSample(driverLat, driverLng) &&
+          isValidLocationSample(Number(existingRide.pickupLat), Number(existingRide.pickupLng))
+        ) {
+          recordedDistanceKm = calculateHaversineDistanceKm(
+            Number(existingRide.pickupLat),
+            Number(existingRide.pickupLng),
+            driverLat,
+            driverLng,
+          );
+        }
+
+        const quotedDistanceKm = Math.max(0.1, Number(existingRide.distanceKm || 0));
+        const baseFare = Math.max(0, Number(existingRide.baseFare || 0));
+        const category = getVehicleCategories()[normalizeVehicleType(existingRide.vehicleType || "budget")];
+        const pricePerKm = Math.max(0, Number(existingRide.pricePerKm || category?.pricePerKm || 0));
+        const pricingMultiplier = Number((existingRide as any).demandMultiplier || existingRide.surgeMultiplier || 1);
+
+        const arrivedAt = (existingRide as any).arrivedAt;
+        const minutesSinceArrival = arrivedAt
+          ? Math.max(0, (new Date((existingRide as any).tripStartedAt || now).getTime() - new Date(arrivedAt).getTime()) / 60000)
+          : 0;
+        const waitingFeeCents = arrivedAt ? calculateWaitingFee(minutesSinceArrival) : 0;
+        const waitingFee = waitingFeeCents / 100;
+
+        let finalFare: number;
+        // If the trip ended early (e.g. covered less than 80% of estimated distance, like only 100m or 1km of a 15km trip)
+        if (recordedDistanceKm < quotedDistanceKm * 0.8) {
+          const unfinishedFareCents = calculateUnfinishedTripFare({
+            baseFareCents: Math.round(baseFare * 100),
+            pricePerKmCents: Math.round(pricePerKm * 100),
+            distanceTraveledKm: recordedDistanceKm,
+            waitingFeeCents,
+            pricingMultiplier,
+          });
+          const calculatedFare = Math.round(unfinishedFareCents) / 100;
+          // Ensure it does not exceed original quote but respects actual distance + waiting fee + base fare
+          finalFare = Math.min(Number(existingRide.price || calculatedFare), Math.max(baseFare + waitingFee, calculatedFare));
+        } else {
+          // Normal full trip with per-minute traffic duration adjustments
+          const minuteAdjustment = calculatePerMinuteAdjustment(
+            (existingRide as any).estimatedDurationMin ?? existingRide.durationMin,
+            actualDurationMin,
+          );
+          const previousAdjustment = Number((existingRide as any).perMinuteAdjustment || 0);
+          const additionalAdjustment = Math.max(0, minuteAdjustment.adjustmentAmount - previousAdjustment);
+          finalFare = Math.round((Number(existingRide.price || 0) + additionalAdjustment) * 100) / 100;
+        }
+
         updateData.completedAt = now;
         updateData.actualDurationMin = Math.round(actualDurationMin * 10) / 10;
-        updateData.perMinuteAdjustment = minuteAdjustment.adjustmentAmount;
-        updateData.price = Math.round((Number(existingRide.price || 0) + additionalAdjustment) * 100) / 100;
-        updateData.finalFare = updateData.price;
+        updateData.actualDistanceKm = Math.round(recordedDistanceKm * 100) / 100;
+        updateData.waitingFee = waitingFee;
+        updateData.price = finalFare;
+        updateData.finalFare = finalFare;
         updateData.settlementStatus = "completed";
       }
       if (status === "cancelled") {

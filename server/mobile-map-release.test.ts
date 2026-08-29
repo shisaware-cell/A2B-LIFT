@@ -238,6 +238,20 @@ test("driver app detects destination and pickup arrival within geofence with sno
   assert.match(chauffeurSource, /updateRideStatus\("chauffeur_arrived"\)/);
 });
 
+test("trip completion recalculates unfinished early completed trips based on distance covered", () => {
+  const routesSource = readProjectFile("server/routes.ts");
+  assert.match(routesSource, /calculateUnfinishedTripFare/);
+  assert.match(routesSource, /recordedDistanceKm < quotedDistanceKm \* 0\.8/);
+  assert.match(routesSource, /actualDistanceKm/);
+});
+
+test("driver app background location task handles Android permissions gracefully without crashing or aborting", () => {
+  const chauffeurSource = readProjectFile("app/chauffeur/index.tsx");
+  assert.match(chauffeurSource, /Location\.requestBackgroundPermissionsAsync/);
+  assert.match(chauffeurSource, /background permission notice/);
+  assert.match(chauffeurSource, /Location\.startLocationUpdatesAsync/);
+});
+
 test("driver app provides cash settlement with live overpayment and underpayment wallet adjustment", () => {
   const chauffeurSource = readProjectFile("app/chauffeur/index.tsx");
   assert.match(chauffeurSource, /submitCashSettlementAndContinue/);

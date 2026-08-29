@@ -1790,8 +1790,11 @@ export default function ChauffeurDashboard() {
       if (foreground.status !== "granted") return;
 
       if (Platform.OS === "android") {
-        const background = await Location.requestBackgroundPermissionsAsync();
-        if (background.status !== "granted") return;
+        try {
+          await Location.requestBackgroundPermissionsAsync();
+        } catch (bgErr: any) {
+          console.log("[driver-location-task] background permission notice:", bgErr?.message || bgErr);
+        }
       }
 
       const alreadyRunning = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK_NAME);
@@ -2150,6 +2153,7 @@ export default function ChauffeurDashboard() {
       const res = await apiRequest("PUT", `/api/rides/${currentRide.id}/status`, {
         status,
         ...(actualDurationMin ? { actualDurationMin } : {}),
+        ...(myLocation ? { driverLat: myLocation.lat, driverLng: myLocation.lng } : {}),
       });
       const ride = await res.json();
       const rideWithFallbackName = {
