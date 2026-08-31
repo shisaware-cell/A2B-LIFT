@@ -294,13 +294,7 @@
 
     window.addEventListener("pagehide", () => window.clearTimeout(fallbackTimer));
 
-    if (isIOS) {
-      if (iosStoreUrl) {
-        window.setTimeout(() => {
-          if (document.visibilityState !== "hidden") window.location.replace(iosStoreUrl);
-        }, 900);
-      }
-    } else {
+    if (isAndroid || isIOS) {
       window.setTimeout(openApp, 120);
     }
   </script>

@@ -35,7 +35,7 @@ export default function ChauffeurReferralsScreen() {
     );
   }
 
-  return <ClientReferralsScreen />;
+  return <ClientReferralsScreen appTarget="driver" />;
 }
 
 const styles = StyleSheet.create({

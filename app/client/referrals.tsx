@@ -19,6 +19,10 @@ import { router, useFocusEffect, useSegments } from "expo-router";
 import QRCode from "react-native-qrcode-svg";
 import { apiRequest } from "@/lib/query-client";
 import { useAuth } from "@/lib/auth-context";
+import {
+  buildReferralShareUrl,
+  type ReferralAppTarget,
+} from "@/lib/referral-links";
 import Colors from "@/constants/colors";
 import LiftClubMembershipRequiredModal from "@/components/LiftClubMembershipRequiredModal";
 
@@ -131,27 +135,17 @@ function transactionPrefix(type: string) {
   return "+";
 }
 
-type RewardAppTarget = "client" | "driver";
-
-function appendRewardSource(url: string, appTarget: RewardAppTarget) {
-  const publicUrl = url.replace(/^https:\/\/api\.a2blift\.com(?=\/)/i, "https://a2blift.com");
-  if (/[?&]app=/.test(publicUrl)) return publicUrl;
-  const separator = publicUrl.includes("?") ? "&" : "?";
-  return `${publicUrl}${separator}app=${encodeURIComponent(appTarget)}`;
-}
-
-function buildRewardLandingUrl(referralCode: string, appTarget: RewardAppTarget = "client") {
-  const normalizedCode = referralCode.trim().toUpperCase();
-  const base = String(REWARD_LINK_BASE_URL).replace(/\/$/, "");
-  return `${base}/r/${encodeURIComponent(normalizedCode)}?app=${encodeURIComponent(appTarget)}`;
-}
-
-function buildRewardShareUrl(referralCode?: string | null, shareUrl?: string | null, appTarget: RewardAppTarget = "client") {
-  const code = referralCode?.trim().toUpperCase();
-  const providedUrl = shareUrl?.trim();
-  if (providedUrl) return appendRewardSource(providedUrl, appTarget);
-  if (!code) return "";
-  return buildRewardLandingUrl(code, appTarget);
+function buildRewardShareUrl(
+  referralCode?: string | null,
+  shareUrl?: string | null,
+  appTarget: ReferralAppTarget = "client",
+) {
+  return buildReferralShareUrl({
+    baseUrl: REWARD_LINK_BASE_URL,
+    referralCode,
+    shareUrl,
+    appTarget,
+  });
 }
 
 function getReferralActivityDate(person: ReferredPerson) {
@@ -168,7 +162,7 @@ function getReferralActivityCopy(person: ReferredPerson) {
 function buildFallbackSummary(
   referralCode?: string | null,
   rewardsBalance?: number | null,
-  appTarget: RewardAppTarget = "client",
+  appTarget: ReferralAppTarget = "client",
 ): ReferralSummary | null {
   const normalizedCode = referralCode?.trim().toUpperCase();
   if (!normalizedCode) return null;
@@ -195,7 +189,7 @@ function getFriendlyRewardsError(error: any) {
   return "Rewards activity could not be refreshed right now.";
 }
 
-export default function ReferralsScreen() {
+export default function ReferralsScreen({ appTarget: appTargetOverride }: { appTarget?: ReferralAppTarget } = {}) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const segments = useSegments();
@@ -229,7 +223,8 @@ export default function ReferralsScreen() {
     enteredCashoutAmount >= MIN_CASHOUT_AMOUNT &&
     enteredCashoutAmount <= rewardsBalance;
   const backRoute = segments[0] === "chauffeur" ? "/chauffeur" : "/client/profile";
-  const appTarget: RewardAppTarget = segments[0] === "chauffeur" ? "driver" : "client";
+  const appTarget: ReferralAppTarget =
+    appTargetOverride || (segments[0] === "chauffeur" ? "driver" : "client");
   const referralPreview = referredPeople.slice(0, REFERRAL_PREVIEW_COUNT);
   const rewardLink = useMemo(
     () => buildRewardShareUrl(summary?.referralCode || user?.referralCode, summary?.shareUrl, appTarget),
