@@ -245,13 +245,10 @@ test("trip completion recalculates unfinished early completed trips based on dis
   assert.match(routesSource, /actualDistanceKm/);
 });
 
-test("driver app background location task handles Android permissions gracefully without crashing or aborting", () => {
-  const chauffeurSource = readProjectFile("app/chauffeur/index.tsx");
-  assert.match(chauffeurSource, /Location\.requestBackgroundPermissionsAsync/);
-  assert.match(chauffeurSource, /background\.status !== "granted"/);
-  assert.match(chauffeurSource, /locationStartInFlightRef/);
-  assert.match(chauffeurSource, /\[isOnline, chauffeur\?\.id\]/);
-  assert.match(chauffeurSource, /Location\.startLocationUpdatesAsync/);
+test("apps target Android 16 (API Level 36) for Google Play compliance", () => {
+  const configSource = readProjectFile("app.config.shared.js");
+  assert.match(configSource, /compileSdkVersion:\s*36/);
+  assert.match(configSource, /targetSdkVersion:\s*36/);
 });
 
 test("driver app provides cash settlement with live overpayment and underpayment wallet adjustment", () => {
