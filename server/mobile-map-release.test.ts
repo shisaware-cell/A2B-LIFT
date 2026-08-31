@@ -227,13 +227,13 @@ test("floating driver overlay indicates incoming trips and active trip live blin
   assert.match(serviceSource, /Trip in Progress/);
 });
 
-test("driver app detects destination and pickup arrival within geofence with snooze and proper lifecycle transitions", () => {
+test("driver app confirms destination and pickup arrival from validated live GPS samples", () => {
   const chauffeurSource = readProjectFile("app/chauffeur/index.tsx");
   assert.match(chauffeurSource, /Destination Arrival Geofence Detection/);
   assert.match(chauffeurSource, /Pickup Arrival Geofence Detection/);
-  assert.match(chauffeurSource, /pickupArrivalSnoozedUntilRef/);
-  assert.match(chauffeurSource, /destinationArrivalSnoozedUntilRef/);
-  assert.match(chauffeurSource, /distanceKm <= 0\.060/);
+  assert.match(chauffeurSource, /evaluateArrivalGeofence/);
+  assert.match(chauffeurSource, /driverLocationSample/);
+  assert.match(chauffeurSource, /dismissArrivalPrompt/);
   assert.match(chauffeurSource, /You have arrived at the pickup location/);
   assert.match(chauffeurSource, /updateRideStatus\("chauffeur_arrived"\)/);
 });
@@ -248,7 +248,9 @@ test("trip completion recalculates unfinished early completed trips based on dis
 test("driver app background location task handles Android permissions gracefully without crashing or aborting", () => {
   const chauffeurSource = readProjectFile("app/chauffeur/index.tsx");
   assert.match(chauffeurSource, /Location\.requestBackgroundPermissionsAsync/);
-  assert.match(chauffeurSource, /background permission notice/);
+  assert.match(chauffeurSource, /background\.status !== "granted"/);
+  assert.match(chauffeurSource, /locationStartInFlightRef/);
+  assert.match(chauffeurSource, /\[isOnline, chauffeur\?\.id\]/);
   assert.match(chauffeurSource, /Location\.startLocationUpdatesAsync/);
 });
 
@@ -464,7 +466,6 @@ test("driver overlay module and service contain robust crash protection for Andr
   assert.match(appConfigSource, /android\.permission\.FOREGROUND_SERVICE_SPECIAL_USE/);
   assert.match(appConfigSource, /android\.permission\.SYSTEM_ALERT_WINDOW/);
 });
-
 
 
 

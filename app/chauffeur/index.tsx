@@ -63,6 +63,13 @@ import {
   getNavigationPreferences,
   subscribeNavigationPreferences,
 } from "@/lib/navigation-preferences";
+import {
+  dismissArrivalPrompt,
+  EMPTY_ARRIVAL_GEOFENCE_STATE,
+  evaluateArrivalGeofence,
+  type ArrivalGeofenceState,
+  type ArrivalLocationSample,
+} from "@/lib/arrival-geofence";
 import { getVehicleCategoryTitle } from "@shared/fare-policy";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -245,15 +252,14 @@ export default function ChauffeurDashboard() {
   const [waitingElapsedSec, setWaitingElapsedSec] = useState(0);
   const [cashReceivedInput, setCashReceivedInput] = useState("");
   const [cashSettling, setCashSettling] = useState(false);
+  const [driverLocationSample, setDriverLocationSample] = useState<ArrivalLocationSample | null>(null);
 
   const soundRef = useRef<TripAlertSound | null>(null);
   const tripAlertTokenRef = useRef(0);
   const tripAlertEnabledRef = useRef(false);
   const seenRideIdRef = useRef<string | null>(null);
-  const destinationArrivalPromptedRideIdRef = useRef<string | null>(null);
-  const destinationArrivalSnoozedUntilRef = useRef<number>(0);
-  const pickupArrivalPromptedRideIdRef = useRef<string | null>(null);
-  const pickupArrivalSnoozedUntilRef = useRef<number>(0);
+  const destinationArrivalGeofenceRef = useRef<ArrivalGeofenceState>({ ...EMPTY_ARRIVAL_GEOFENCE_STATE });
+  const pickupArrivalGeofenceRef = useRef<ArrivalGeofenceState>({ ...EMPTY_ARRIVAL_GEOFENCE_STATE });
   const suppressedRideAlertIdRef = useRef<string | null>(null);
   const suppressedRideIdsRef = useRef<Record<string, number>>({});
   const clientSummaryCacheRef = useRef<Record<string, ClientSummary>>({});
@@ -269,6 +275,8 @@ export default function ChauffeurDashboard() {
   const notificationsRef = useRef<any>(null);
   const locationWatchRef = useRef<Location.LocationSubscription | null>(null);
   const locationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const locationStartInFlightRef = useRef<number | null>(null);
+  const locationSessionRef = useRef(0);
   const lastForegroundLocationAtRef = useRef(0);
   const lastLocationRestPostRef = useRef(0);
   const currentRideRef = useRef<any>(null);
@@ -281,6 +289,8 @@ export default function ChauffeurDashboard() {
   const isOnlineRef = useRef(false);
   const chauffeurRef = useRef<any>(null);
   const isExpoGoAndroid = Platform.OS === "android" && Constants.appOwnership === "expo";
+  const hasPendingStop =
+    currentRide?.status === "trip_started" && getActiveTripTarget(currentRide).type === "stop";
 
   useEffect(() => {
     let mounted = true;
@@ -1001,7 +1011,7 @@ export default function ChauffeurDashboard() {
       routeContextRef.current = null;
       lastRouteFetchRef.current = null;
       setCurrentRide(updatedRide);
-      destinationArrivalPromptedRideIdRef.current = null;
+      destinationArrivalGeofenceRef.current = { ...EMPTY_ARRIVAL_GEOFENCE_STATE };
       Alert.alert(
         "Destination Changed",
         `The rider changed the destination to:\n${data.dropoffAddress || "New location"}\n\nThe route and fare have been updated.`,
@@ -1075,14 +1085,14 @@ export default function ChauffeurDashboard() {
   // ─── Location tracking ────────────────────────────────────────────────────
   useEffect(() => {
     if (isOnline && chauffeur) {
-      startLocationUpdates();
+      startLocationUpdates(chauffeur.id);
     } else {
       stopLocationUpdates();
     }
     return () => {
       stopForegroundLocationUpdates();
     };
-  }, [isOnline, chauffeur]);
+  }, [isOnline, chauffeur?.id]);
 
   useEffect(() => {
     if (Platform.OS === "web") return;
@@ -1095,7 +1105,7 @@ export default function ChauffeurDashboard() {
         }
         restoreActiveRide();
         if (isOnlineRef.current && chauffeurRef.current?.id) {
-          startLocationUpdates();
+          startLocationUpdates(chauffeurRef.current.id);
         }
       }
     });
@@ -1398,7 +1408,7 @@ export default function ChauffeurDashboard() {
       !currentRide ||
       currentRide.status !== "trip_started" ||
       hasPendingStop ||
-      !myLocation ||
+      !driverLocationSample ||
       !currentRide.dropoffLat ||
       !currentRide.dropoffLng
     ) {
@@ -1407,12 +1417,15 @@ export default function ChauffeurDashboard() {
     const dropoffLat = parseFloat(currentRide.dropoffLat);
     const dropoffLng = parseFloat(currentRide.dropoffLng);
     if (!Number.isFinite(dropoffLat) || !Number.isFinite(dropoffLng)) return;
-    if (Date.now() < destinationArrivalSnoozedUntilRef.current) return;
 
-    const distanceKm = haversineDistance(myLocation.lat, myLocation.lng, dropoffLat, dropoffLng);
-    // If driver is within 60 meters of the destination and has not yet completed the trip
-    if (distanceKm <= 0.060 && destinationArrivalPromptedRideIdRef.current !== currentRide.id) {
-      destinationArrivalPromptedRideIdRef.current = currentRide.id;
+    const result = evaluateArrivalGeofence(
+      destinationArrivalGeofenceRef.current,
+      `${currentRide.id}:dropoff:${dropoffLat}:${dropoffLng}`,
+      driverLocationSample,
+      { lat: dropoffLat, lng: dropoffLng },
+    );
+    destinationArrivalGeofenceRef.current = result.state;
+    if (result.shouldPrompt) {
       if (Platform.OS !== "web") {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         try {
@@ -1427,15 +1440,15 @@ export default function ChauffeurDashboard() {
             text: "Not Yet",
             style: "cancel",
             onPress: () => {
-              destinationArrivalPromptedRideIdRef.current = null;
-              destinationArrivalSnoozedUntilRef.current = Date.now() + 45_000;
+              destinationArrivalGeofenceRef.current = dismissArrivalPrompt(
+                destinationArrivalGeofenceRef.current,
+              );
             },
           },
           {
             text: "End Trip",
             style: "default",
             onPress: () => {
-              destinationArrivalPromptedRideIdRef.current = currentRide.id;
               updateRideStatus("trip_completed");
             },
           },
@@ -1446,8 +1459,7 @@ export default function ChauffeurDashboard() {
     currentRide?.id,
     currentRide?.status,
     hasPendingStop,
-    myLocation?.lat,
-    myLocation?.lng,
+    driverLocationSample,
     currentRide?.dropoffLat,
     currentRide?.dropoffLng,
   ]);
@@ -1457,7 +1469,7 @@ export default function ChauffeurDashboard() {
     if (
       !currentRide ||
       (currentRide.status !== "chauffeur_assigned" && currentRide.status !== "chauffeur_arriving") ||
-      !myLocation ||
+      !driverLocationSample ||
       !currentRide.pickupLat ||
       !currentRide.pickupLng
     ) {
@@ -1466,12 +1478,15 @@ export default function ChauffeurDashboard() {
     const pLat = parseFloat(currentRide.pickupLat);
     const pLng = parseFloat(currentRide.pickupLng);
     if (!Number.isFinite(pLat) || !Number.isFinite(pLng)) return;
-    if (Date.now() < pickupArrivalSnoozedUntilRef.current) return;
 
-    const distanceKm = haversineDistance(myLocation.lat, myLocation.lng, pLat, pLng);
-    // If driver is within 60 meters of the pickup location and has not yet arrived
-    if (distanceKm <= 0.060 && pickupArrivalPromptedRideIdRef.current !== currentRide.id) {
-      pickupArrivalPromptedRideIdRef.current = currentRide.id;
+    const result = evaluateArrivalGeofence(
+      pickupArrivalGeofenceRef.current,
+      `${currentRide.id}:pickup:${pLat}:${pLng}`,
+      driverLocationSample,
+      { lat: pLat, lng: pLng },
+    );
+    pickupArrivalGeofenceRef.current = result.state;
+    if (result.shouldPrompt) {
       if (Platform.OS !== "web") {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         try {
@@ -1486,15 +1501,15 @@ export default function ChauffeurDashboard() {
             text: "Not Yet",
             style: "cancel",
             onPress: () => {
-              pickupArrivalPromptedRideIdRef.current = null;
-              pickupArrivalSnoozedUntilRef.current = Date.now() + 45_000;
+              pickupArrivalGeofenceRef.current = dismissArrivalPrompt(
+                pickupArrivalGeofenceRef.current,
+              );
             },
           },
           {
             text: "I've Arrived",
             style: "default",
             onPress: () => {
-              pickupArrivalPromptedRideIdRef.current = currentRide.id;
               updateRideStatus("chauffeur_arrived");
             },
           },
@@ -1504,8 +1519,7 @@ export default function ChauffeurDashboard() {
   }, [
     currentRide?.id,
     currentRide?.status,
-    myLocation?.lat,
-    myLocation?.lng,
+    driverLocationSample,
     currentRide?.pickupLat,
     currentRide?.pickupLng,
   ]);
@@ -1750,21 +1764,30 @@ export default function ChauffeurDashboard() {
 
   const JHB_FALLBACK = { lat: -26.2041, lng: 28.0473 };
 
-  function publishChauffeurLocation(
-    next: { lat: number; lng: number },
-    heading?: number | null,
-    speed?: number | null,
-  ) {
+  function publishChauffeurLocation(location: Location.LocationObject) {
+    const next = toLatLng(location);
+    const heading = location.coords?.heading;
+    const speed = location.coords?.speed;
     lastForegroundLocationAtRef.current = Date.now();
+    setDriverLocationSample({
+      ...next,
+      accuracyM: typeof location.coords?.accuracy === "number" && Number.isFinite(location.coords.accuracy)
+        ? location.coords.accuracy
+        : null,
+      timestamp: typeof location.timestamp === "number" && Number.isFinite(location.timestamp)
+        ? location.timestamp
+        : Date.now(),
+    });
     setMyLocation((current) => {
       if (current && haversineDistance(current.lat, current.lng, next.lat, next.lng) < 0.003) {
         return current;
       }
       return next;
     });
-    if (chauffeur?.id) {
+    const activeChauffeurId = chauffeurRef.current?.id || chauffeur?.id;
+    if (activeChauffeurId) {
       emit("chauffeur:location", {
-        chauffeurId: chauffeur.id,
+        chauffeurId: activeChauffeurId,
         lat: next.lat,
         lng: next.lng,
         heading: typeof heading === "number" && !isNaN(heading) && heading >= 0 ? heading : undefined,
@@ -1773,33 +1796,37 @@ export default function ChauffeurDashboard() {
       const now = Date.now();
       if (now - lastLocationRestPostRef.current >= DRIVER_LOCATION_REST_MIN_INTERVAL_MS) {
         lastLocationRestPostRef.current = now;
-        postChauffeurLocation(chauffeur.id, next.lat, next.lng).catch(() => {});
+        postChauffeurLocation(activeChauffeurId, next.lat, next.lng).catch(() => {});
       }
     }
   }
 
-  async function startBackgroundLocationTask(activeChauffeurId: string) {
+  async function startBackgroundLocationTask(activeChauffeurId: string, session: number) {
     if (Platform.OS === "web" || isExpoGoAndroid) return;
     try {
+      const foreground = await Location.requestForegroundPermissionsAsync();
+      if (session !== locationSessionRef.current || !isOnlineRef.current) return;
+      if (foreground.status !== "granted") return;
+
+      if (Platform.OS === "android") {
+        let background = await Location.getBackgroundPermissionsAsync();
+        if (session !== locationSessionRef.current || !isOnlineRef.current) return;
+        if (background.status !== "granted" && AppState.currentState === "active") {
+          background = await Location.requestBackgroundPermissionsAsync();
+        }
+        if (session !== locationSessionRef.current || !isOnlineRef.current) return;
+        if (background.status !== "granted") return;
+      }
+
+      const alreadyRunning = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK_NAME);
+      if (session !== locationSessionRef.current || !isOnlineRef.current) return;
+      if (alreadyRunning) return;
+
       await AsyncStorage.setItem(
         DRIVER_LOCATION_TASK_STATE_KEY,
         JSON.stringify({ chauffeurId: activeChauffeurId, isOnline: true }),
       );
-
-      const foreground = await Location.requestForegroundPermissionsAsync();
-      if (foreground.status !== "granted") return;
-
-      if (Platform.OS === "android") {
-        try {
-          await Location.requestBackgroundPermissionsAsync();
-        } catch (bgErr: any) {
-          console.log("[driver-location-task] background permission notice:", bgErr?.message || bgErr);
-        }
-      }
-
-      const alreadyRunning = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK_NAME);
-      if (alreadyRunning) return;
-
+      if (session !== locationSessionRef.current || !isOnlineRef.current) return;
       await Location.startLocationUpdatesAsync(DRIVER_LOCATION_TASK_NAME, {
         accuracy: Location.Accuracy.High,
         timeInterval: 10_000,
@@ -1829,41 +1856,67 @@ export default function ChauffeurDashboard() {
     }
   }
 
-  async function startLocationUpdates() {
+  async function startLocationUpdates(activeChauffeurId: string) {
+    if (
+      locationStartInFlightRef.current !== null ||
+      locationWatchRef.current ||
+      locationIntervalRef.current
+    ) {
+      return;
+    }
+
+    const session = ++locationSessionRef.current;
+    locationStartInFlightRef.current = session;
     try {
-      stopForegroundLocationUpdates();
       const { status } = await Location.requestForegroundPermissionsAsync();
+      if (session !== locationSessionRef.current) return;
       if (status !== "granted") { setMyLocation(JHB_FALLBACK); return; }
-      if (chauffeur?.id) {
-        void startBackgroundLocationTask(chauffeur.id);
-      }
+      void startBackgroundLocationTask(activeChauffeurId, session);
 
       try {
         const loc = await getBestAvailablePosition();
-        publishChauffeurLocation(toLatLng(loc), loc.coords?.heading, loc.coords?.speed);
+        if (session !== locationSessionRef.current) return;
+        publishChauffeurLocation(loc);
       } catch {
         setMyLocation(JHB_FALLBACK);
       }
 
       try {
-        locationWatchRef.current = await watchBestPosition((loc) => {
-          publishChauffeurLocation(toLatLng(loc), loc.coords?.heading, loc.coords?.speed);
+        const watch = await watchBestPosition((loc) => {
+          if (session === locationSessionRef.current) publishChauffeurLocation(loc);
         });
+        if (session !== locationSessionRef.current) {
+          watch.remove();
+          return;
+        }
+        locationWatchRef.current = watch;
       } catch {}
 
+      if (session !== locationSessionRef.current) return;
       const interval = setInterval(async () => {
+        if (session !== locationSessionRef.current) return;
         if (Date.now() - lastForegroundLocationAtRef.current < 20_000) return;
         try {
           const loc = await getBestAvailablePosition();
-          publishChauffeurLocation(toLatLng(loc), loc.coords?.heading, loc.coords?.speed);
+          if (session === locationSessionRef.current) publishChauffeurLocation(loc);
         } catch {}
       }, 15000);
       locationIntervalRef.current = interval;
-    } catch { setMyLocation(JHB_FALLBACK); }
+    } catch {
+      if (session === locationSessionRef.current) setMyLocation(JHB_FALLBACK);
+    } finally {
+      if (locationStartInFlightRef.current === session) {
+        locationStartInFlightRef.current = null;
+      }
+    }
   }
 
   function stopForegroundLocationUpdates() {
-    locationWatchRef.current?.remove();
+    locationSessionRef.current += 1;
+    locationStartInFlightRef.current = null;
+    try {
+      locationWatchRef.current?.remove();
+    } catch {}
     locationWatchRef.current = null;
     if (locationIntervalRef.current) {
       clearInterval(locationIntervalRef.current);
@@ -2424,8 +2477,6 @@ export default function ChauffeurDashboard() {
   const currentRideStops = normalizeRideStops(currentRide?.stops);
   const completedStopCount = getCompletedStopCount(currentRide);
   const activeTripTarget = currentRide ? getActiveTripTarget(currentRide) : null;
-  const hasPendingStop =
-    currentRide?.status === "trip_started" && activeTripTarget?.type === "stop";
   const tripProgressLoading =
     stopProgressLoading || rideStatusUpdating === "trip_completed";
   const rideStatusLabel =

@@ -48,13 +48,14 @@ test("reward use requires an approved Lift Club membership", () => {
   assert.match(rideSource, /lockedRewardsWouldCoverFare/);
 });
 
-test("Android driver overlay survives task removal when the user enables it", () => {
+test("Android driver overlay survives task removal without restarting from background", () => {
   const layoutSource = readProjectFile("app/chauffeur/_layout.tsx");
   const settingsSource = readProjectFile("app/chauffeur/settings.tsx");
   const manifestSource = readProjectFile("modules/driver-overlay/android/src/main/AndroidManifest.xml");
 
   assert.match(layoutSource, /DRIVER_OVERLAY_ENABLED_KEY/);
-  assert.match(layoutSource, /state === "active" \|\| state === "background"/);
+  assert.match(layoutSource, /if \(state === "active"\) void keepDriverServiceActive\(\)/);
+  assert.doesNotMatch(layoutSource, /state === "active" \|\| state === "background"/);
   assert.match(settingsSource, /Platform\.OS === "android"/);
   assert.match(settingsSource, /Install the latest Driver build to enable/);
   assert.match(settingsSource, /disabled=\{!overlayAvailable\}/);

@@ -182,7 +182,7 @@ export default function ChauffeurLayout() {
 
     void keepDriverServiceActive();
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active" || state === "background") void keepDriverServiceActive();
+      if (state === "active") void keepDriverServiceActive();
     });
     return () => subscription.remove();
   }, []);
