@@ -10,7 +10,7 @@ import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Application from "expo-application";
 import * as Linking from "expo-linking";
-import { apiRequest, isUnauthorizedError } from "@/lib/query-client";
+import { apiRequest, isUnauthorizedError, cleanErrorMessage } from "@/lib/query-client";
 
 interface AuthUser {
   id: string;

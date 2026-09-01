@@ -207,7 +207,7 @@ function getActiveTripTarget(ride: any) {
 
 export default function ChauffeurDashboard() {
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { on, off, emit } = useSocket();
 
   const [chauffeur, setChauffeur] = useState<any>(null);
@@ -760,7 +760,9 @@ export default function ChauffeurDashboard() {
 
   useEffect(() => {
     return () => {
-      Speech.stop();
+      try {
+        Speech.stop();
+      } catch {}
     };
   }, []);
 
@@ -1023,17 +1025,37 @@ export default function ChauffeurDashboard() {
       }
     };
 
+    const handleForceLogout = async (data?: any) => {
+      const myDeviceId = await AsyncStorage.getItem("a2b_device_id");
+      if (data?.newDeviceId && data.newDeviceId === myDeviceId) return;
+      Alert.alert(
+        "Signed Out",
+        data?.reason || "You have been logged out because your account was signed in on another device.",
+      );
+      if (logout) {
+        await logout();
+      }
+    };
+
     on("ride:statusUpdate", handleRideUpdate);
     on("ride:cancelled", handleRideUpdate);
     on("ride:accepted", handleRideAccepted);
     on("ride:stopsUpdated", handleStopsUpdated);
     on("ride:destinationUpdated", handleDestinationUpdated);
+    on("auth:forceLogout", handleForceLogout);
+    if (chauffeur?.id) {
+      on(`chauffeur:${chauffeur.id}:forceLogout`, handleForceLogout);
+    }
     return () => {
       off("ride:statusUpdate", handleRideUpdate);
       off("ride:cancelled", handleRideUpdate);
       off("ride:accepted", handleRideAccepted);
       off("ride:stopsUpdated", handleStopsUpdated);
       off("ride:destinationUpdated", handleDestinationUpdated);
+      off("auth:forceLogout", handleForceLogout);
+      if (chauffeur?.id) {
+        off(`chauffeur:${chauffeur.id}:forceLogout`, handleForceLogout);
+      }
     };
   }, [chauffeur?.id]);
 
@@ -1326,7 +1348,9 @@ export default function ChauffeurDashboard() {
   useEffect(() => {
     if (navigationVoiceEnabled !== true) {
       lastSpokenNavKeyRef.current = null;
-      Speech.stop();
+      try {
+        Speech.stop();
+      } catch {}
       return;
     }
     if (!currentRide || navSteps.length === 0) return;
@@ -1343,11 +1367,13 @@ export default function ChauffeurDashboard() {
       try {
         Speech.stop();
       } catch {}
-      Speech.speak(instruction, {
-        language: "en-ZA",
-        rate: 0.95,
-        pitch: 1,
-      });
+      try {
+        Speech.speak(instruction, {
+          language: "en-ZA",
+          rate: 0.95,
+          pitch: 1,
+        });
+      } catch {}
     }
   }, [currentRide?.id, currentRide?.status, currentStepIdx, navSteps, navigationVoiceEnabled]);
 
@@ -1356,7 +1382,9 @@ export default function ChauffeurDashboard() {
       lastSpokenNavKeyRef.current = null;
       routeContextRef.current = null;
       lastRouteFetchRef.current = null;
-      Speech.stop();
+      try {
+        Speech.stop();
+      } catch {}
     }
   }, [currentRide?.id]);
 

@@ -35,15 +35,15 @@ const CATEGORY_ALIASES: Record<string, string> = {
   "v-class": "luxury_van",
 };
 
-// Lite and Budget are the only interchangeable categories. Premium vehicles
-// must not receive economy requests simply because they are more expensive.
+// Lite/Budget cross-match each other.
+// VIP (business) and V-Class (luxury_van) cross-match each other so available VIP/V-Class drivers can take both.
 const MULTI_CATEGORY_MATCHES: Record<string, string[]> = {
   budget: ["a2b_lite"],
   a2b_lite: ["budget"],
+  business: ["luxury_van"],
+  luxury_van: ["business"],
 };
 
-// Do not cross-match premium sedans (e.g. Mercedes S-Class / VIP) with V-Class vans.
-// Each category must strictly dispatch to vehicles belonging to the requested category.
 const FALLBACK_CATEGORY_MATCHES: Record<string, string[]> = {};
 
 export function normalizeVehicleType(vehicleType?: string | null) {

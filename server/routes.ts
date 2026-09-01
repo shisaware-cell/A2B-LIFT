@@ -1768,32 +1768,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      // ─── Single-Device Lock for Drivers ────────────────────────────────────
+      // ─── Single-Device Driver Session Auto-Transfer ─────────────────────────
       try {
         const incomingDeviceId = String(req.body.deviceId || req.headers["x-device-id"] || "").trim();
         const isDriverLogin = req.body.appVariant === "driver" || req.headers["x-app-variant"] === "driver" || user.role === "chauffeur";
         if (isDriverLogin) {
           const chauffeur = await storage.getChauffeurByUserId(user.id);
           if (chauffeur) {
-            const currentActiveDevice = chauffeur.activeDeviceId;
-            if (currentActiveDevice && incomingDeviceId && currentActiveDevice !== incomingDeviceId) {
-              console.warn(`[auth/login] driver "${user.username}" session conflict: active on ${currentActiveDevice}, attempt from ${incomingDeviceId}`);
-              return res.status(409).json({
-                message: "This driver account is already active on another device. Please log out from your previous device first, or contact an administrator to reset your device session.",
-                code: "DRIVER_SESSION_CONFLICT",
-              });
-            }
+            const previousDevice = chauffeur.activeDeviceId;
             if (incomingDeviceId) {
               await storage.updateChauffeur(chauffeur.id, {
                 activeDeviceId: incomingDeviceId,
                 lastDriverLoginAt: new Date(),
               });
             }
+            // If the driver was previously logged in on another device, notify that device to auto-logout
+            if (previousDevice && previousDevice !== incomingDeviceId) {
+              console.log(`[auth/login] driver "${user.username}" switched device from ${previousDevice} to ${incomingDeviceId || "new"}. Auto-logging out previous device.`);
+              io.emit(`chauffeur:${chauffeur.id}:forceLogout`, {
+                reason: "Your account was signed in on another device.",
+                newDeviceId: incomingDeviceId,
+              });
+              io.emit("auth:forceLogout", {
+                userId: user.id,
+                chauffeurId: chauffeur.id,
+                newDeviceId: incomingDeviceId,
+              });
+            }
           }
         }
       } catch (driverLockErr: any) {
-        console.warn("[auth/login] driver lock non-fatal check:", driverLockErr?.message || driverLockErr);
-        // If column missing on live db, try to ensure column asynchronously without blocking login
+        console.warn("[auth/login] driver session check:", driverLockErr?.message || driverLockErr);
         pool.query("ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS active_device_id text; ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS last_driver_login_at timestamp;").catch(() => {});
       }
 
@@ -5627,13 +5632,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  function resolveChauffeurProfilePhoto(
+    chauffeur?: { profilePhoto?: string | null } | null,
+    user?: { profilePhoto?: string | null } | null,
+    application?: { profilePhoto?: string | null; selfieUrl?: string | null; documents?: any } | null,
+  ): string | null {
+    if (chauffeur?.profilePhoto && typeof chauffeur.profilePhoto === "string" && chauffeur.profilePhoto.trim()) {
+      return chauffeur.profilePhoto.trim();
+    }
+    if (user?.profilePhoto && typeof user.profilePhoto === "string" && user.profilePhoto.trim()) {
+      return user.profilePhoto.trim();
+    }
+    if (application?.profilePhoto && typeof application.profilePhoto === "string" && application.profilePhoto.trim()) {
+      return application.profilePhoto.trim();
+    }
+    if (application?.selfieUrl && typeof application.selfieUrl === "string" && application.selfieUrl.trim()) {
+      return application.selfieUrl.trim();
+    }
+    if (Array.isArray(application?.documents)) {
+      const docPhoto = application.documents.find(
+        (d: any) => d?.id === "driver_photo" || d?.id === "photo" || d?.id === "profile_photo"
+      );
+      if (docPhoto?.url && typeof docPhoto.url === "string" && docPhoto.url.trim()) {
+        return docPhoto.url.trim();
+      }
+    }
+    return null;
+  }
+
   app.get("/api/chauffeurs/user/:userId", async (req: Request, res: Response) => {
     try {
       const chauffeur = await storage.getChauffeurByUserId(req.params.userId);
       if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
-      const application = await storage.getDriverApplicationByUserId(req.params.userId).catch(() => undefined);
+      const [user, application] = await Promise.all([
+        storage.getUser(req.params.userId).catch(() => null),
+        storage.getDriverApplicationByUserId(req.params.userId).catch(() => undefined),
+      ]);
+      const resolvedPhoto = resolveChauffeurProfilePhoto(chauffeur, user, application);
+      if (!chauffeur.profilePhoto && resolvedPhoto) {
+        storage.updateChauffeur(chauffeur.id, { profilePhoto: resolvedPhoto }).catch(() => {});
+      }
       return res.json({
         ...chauffeur,
+        profilePhoto: resolvedPhoto,
         applicationStatus: application?.status || (chauffeur.isApproved ? "approved" : "pending"),
         applicationNotes: application?.notes || null,
         waitlistReason: application?.status === "waitlisted" ? application?.notes || null : null,
@@ -5669,13 +5710,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const chauffeur = await storage.getChauffeur(req.params.id);
       if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
-      const [ratings, earningsList] = await Promise.all([
+      const [user, application, ratings, earningsList] = await Promise.all([
+        chauffeur.userId ? storage.getUser(chauffeur.userId).catch(() => null) : null,
+        chauffeur.userId ? storage.getDriverApplicationByUserId(chauffeur.userId).catch(() => undefined) : undefined,
         storage.getRatingsByChauffeur(req.params.id),
         storage.getEarningsByChauffeur(req.params.id).catch(() => []),
       ]);
-      const application = chauffeur.userId
-        ? await storage.getDriverApplicationByUserId(chauffeur.userId).catch(() => undefined)
-        : undefined;
+      const resolvedPhoto = resolveChauffeurProfilePhoto(chauffeur, user, application);
+      if (!chauffeur.profilePhoto && resolvedPhoto) {
+        storage.updateChauffeur(chauffeur.id, { profilePhoto: resolvedPhoto }).catch(() => {});
+      }
       const computedRating =
         ratings.length > 0
           ? parseFloat((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1))
@@ -5698,6 +5742,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const todayEarnings = Math.round(todayCardEarnings + todayCashFares);
       return res.json({
         ...chauffeur,
+        profilePhoto: resolvedPhoto,
         computedRating,
         totalRatings: ratings.length,
         cardEarningsTotal,
@@ -5727,12 +5772,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const application = chauffeur.userId
       ? await storage.getDriverApplicationByUserId(chauffeur.userId).catch(() => undefined)
       : undefined;
-    const resolvedPhoto =
-      chauffeur.profilePhoto ||
-      user?.profilePhoto ||
-      (application as any)?.profilePhoto ||
-      (application as any)?.selfieUrl ||
-      null;
+    const resolvedPhoto = resolveChauffeurProfilePhoto(chauffeur, user, application);
+    if (!chauffeur.profilePhoto && resolvedPhoto) {
+      storage.updateChauffeur(chauffeur.id, { profilePhoto: resolvedPhoto }).catch(() => {});
+    }
     return {
       id: chauffeur.id,
       driverName: user?.name || "Driver",
@@ -5757,11 +5800,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const resolved = await getResolvedChauffeurDetails(req.params.id);
       if (!resolved) return res.status(404).json({ message: "Chauffeur not found" });
       const chauffeur = await storage.getChauffeur(req.params.id);
-      const user = chauffeur?.userId ? await storage.getUser(chauffeur.userId).catch(() => null) : null;
       return res.json({
         ...chauffeur,
         ...resolved,
-        profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null,
+        profilePhoto: resolved.profilePhoto,
       });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -5811,7 +5853,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         totalRatings: ratings.length,
         completedTrips,
         distribution,
-        profilePhoto: chauffeur.profilePhoto || user?.profilePhoto || null,
+        profilePhoto: resolved?.profilePhoto || null,
         carMake: resolved?.carMake || chauffeur.carMake,
         vehicleModel: resolved?.vehicleModel || chauffeur.vehicleModel,
         carColor: resolved?.carColor || chauffeur.carColor,
@@ -6133,8 +6175,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 storage.getDriverApplicationByUserId(c.userId).catch(() => undefined),
               ])
             : [null, undefined];
+          const resolvedPhoto = resolveChauffeurProfilePhoto(c, user, application);
           return {
             ...c,
+            profilePhoto: resolvedPhoto,
             userName: user?.name || "—",
             userPhone: user?.phone || c.phone || "—",
             userEmail: user?.username || "—",

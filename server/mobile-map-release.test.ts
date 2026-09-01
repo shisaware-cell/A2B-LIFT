@@ -251,6 +251,24 @@ test("apps target Android 16 (API Level 36) for Google Play compliance", () => {
   assert.match(configSource, /targetSdkVersion:\s*36/);
 });
 
+test("VIP and V-Class categories cross-match each other so available drivers can take both", () => {
+  const rideOpsSource = readProjectFile("server/rideOperations.ts");
+  assert.match(rideOpsSource, /business:\s*\["luxury_van"\]/);
+  assert.match(rideOpsSource, /luxury_van:\s*\["business"\]/);
+});
+
+test("cleanErrorMessage strips HTTP status code prefixes from all error dialogs", () => {
+  const queryClientSource = readProjectFile("lib/query-client.ts");
+  assert.match(queryClientSource, /export function cleanErrorMessage/);
+  assert.match(queryClientSource, /replace\(\/\^\(\?:Error\\s\*\)\?\(\?:\[1-5\]\\d\{2\}\)\\s\*:\\s\*\/i/);
+});
+
+test("chauffeur profile photo resolution searches chauffeur, user, application, and documents", () => {
+  const routesSource = readProjectFile("server/routes.ts");
+  assert.match(routesSource, /function resolveChauffeurProfilePhoto/);
+  assert.match(routesSource, /driver_photo/);
+});
+
 test("driver app provides cash settlement with live overpayment and underpayment wallet adjustment", () => {
   const chauffeurSource = readProjectFile("app/chauffeur/index.tsx");
   assert.match(chauffeurSource, /submitCashSettlementAndContinue/);

@@ -1973,7 +1973,9 @@ var CATEGORY_ALIASES2 = {
 };
 var MULTI_CATEGORY_MATCHES = {
   budget: ["a2b_lite"],
-  a2b_lite: ["budget"]
+  a2b_lite: ["budget"],
+  business: ["luxury_van"],
+  luxury_van: ["business"]
 };
 var FALLBACK_CATEGORY_MATCHES = {};
 function normalizeVehicleType2(vehicleType) {
@@ -4285,24 +4287,29 @@ async function registerRoutes(app2) {
         if (isDriverLogin) {
           const chauffeur2 = await storage.getChauffeurByUserId(user.id);
           if (chauffeur2) {
-            const currentActiveDevice = chauffeur2.activeDeviceId;
-            if (currentActiveDevice && incomingDeviceId && currentActiveDevice !== incomingDeviceId) {
-              console.warn(`[auth/login] driver "${user.username}" session conflict: active on ${currentActiveDevice}, attempt from ${incomingDeviceId}`);
-              return res.status(409).json({
-                message: "This driver account is already active on another device. Please log out from your previous device first, or contact an administrator to reset your device session.",
-                code: "DRIVER_SESSION_CONFLICT"
-              });
-            }
+            const previousDevice = chauffeur2.activeDeviceId;
             if (incomingDeviceId) {
               await storage.updateChauffeur(chauffeur2.id, {
                 activeDeviceId: incomingDeviceId,
                 lastDriverLoginAt: /* @__PURE__ */ new Date()
               });
             }
+            if (previousDevice && previousDevice !== incomingDeviceId) {
+              console.log(`[auth/login] driver "${user.username}" switched device from ${previousDevice} to ${incomingDeviceId || "new"}. Auto-logging out previous device.`);
+              io.emit(`chauffeur:${chauffeur2.id}:forceLogout`, {
+                reason: "Your account was signed in on another device.",
+                newDeviceId: incomingDeviceId
+              });
+              io.emit("auth:forceLogout", {
+                userId: user.id,
+                chauffeurId: chauffeur2.id,
+                newDeviceId: incomingDeviceId
+              });
+            }
           }
         }
       } catch (driverLockErr) {
-        console.warn("[auth/login] driver lock non-fatal check:", driverLockErr?.message || driverLockErr);
+        console.warn("[auth/login] driver session check:", driverLockErr?.message || driverLockErr);
         pool2.query("ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS active_device_id text; ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS last_driver_login_at timestamp;").catch(() => {
         });
       }
@@ -7510,13 +7517,45 @@ If you did not request this, you can ignore this email.`,
       return res.status(500).json({ message: error.message || "Failed to send test SMS" });
     }
   });
+  function resolveChauffeurProfilePhoto(chauffeur2, user, application) {
+    if (chauffeur2?.profilePhoto && typeof chauffeur2.profilePhoto === "string" && chauffeur2.profilePhoto.trim()) {
+      return chauffeur2.profilePhoto.trim();
+    }
+    if (user?.profilePhoto && typeof user.profilePhoto === "string" && user.profilePhoto.trim()) {
+      return user.profilePhoto.trim();
+    }
+    if (application?.profilePhoto && typeof application.profilePhoto === "string" && application.profilePhoto.trim()) {
+      return application.profilePhoto.trim();
+    }
+    if (application?.selfieUrl && typeof application.selfieUrl === "string" && application.selfieUrl.trim()) {
+      return application.selfieUrl.trim();
+    }
+    if (Array.isArray(application?.documents)) {
+      const docPhoto = application.documents.find(
+        (d) => d?.id === "driver_photo" || d?.id === "photo" || d?.id === "profile_photo"
+      );
+      if (docPhoto?.url && typeof docPhoto.url === "string" && docPhoto.url.trim()) {
+        return docPhoto.url.trim();
+      }
+    }
+    return null;
+  }
   app2.get("/api/chauffeurs/user/:userId", async (req, res) => {
     try {
       const chauffeur2 = await storage.getChauffeurByUserId(req.params.userId);
       if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
-      const application = await storage.getDriverApplicationByUserId(req.params.userId).catch(() => void 0);
+      const [user, application] = await Promise.all([
+        storage.getUser(req.params.userId).catch(() => null),
+        storage.getDriverApplicationByUserId(req.params.userId).catch(() => void 0)
+      ]);
+      const resolvedPhoto = resolveChauffeurProfilePhoto(chauffeur2, user, application);
+      if (!chauffeur2.profilePhoto && resolvedPhoto) {
+        storage.updateChauffeur(chauffeur2.id, { profilePhoto: resolvedPhoto }).catch(() => {
+        });
+      }
       return res.json({
         ...chauffeur2,
+        profilePhoto: resolvedPhoto,
         applicationStatus: application?.status || (chauffeur2.isApproved ? "approved" : "pending"),
         applicationNotes: application?.notes || null,
         waitlistReason: application?.status === "waitlisted" ? application?.notes || null : null
@@ -7549,11 +7588,17 @@ If you did not request this, you can ignore this email.`,
     try {
       const chauffeur2 = await storage.getChauffeur(req.params.id);
       if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
-      const [ratings, earningsList] = await Promise.all([
+      const [user, application, ratings, earningsList] = await Promise.all([
+        chauffeur2.userId ? storage.getUser(chauffeur2.userId).catch(() => null) : null,
+        chauffeur2.userId ? storage.getDriverApplicationByUserId(chauffeur2.userId).catch(() => void 0) : void 0,
         storage.getRatingsByChauffeur(req.params.id),
         storage.getEarningsByChauffeur(req.params.id).catch(() => [])
       ]);
-      const application = chauffeur2.userId ? await storage.getDriverApplicationByUserId(chauffeur2.userId).catch(() => void 0) : void 0;
+      const resolvedPhoto = resolveChauffeurProfilePhoto(chauffeur2, user, application);
+      if (!chauffeur2.profilePhoto && resolvedPhoto) {
+        storage.updateChauffeur(chauffeur2.id, { profilePhoto: resolvedPhoto }).catch(() => {
+        });
+      }
       const computedRating = ratings.length > 0 ? parseFloat((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1)) : null;
       const cardEarningsTotal = earningsList.filter((e) => e.type === "card" || e.type === "wallet").reduce((s, e) => s + (e.amount || 0), 0);
       const todayStart = /* @__PURE__ */ new Date();
@@ -7564,6 +7609,7 @@ If you did not request this, you can ignore this email.`,
       const todayEarnings = Math.round(todayCardEarnings + todayCashFares);
       return res.json({
         ...chauffeur2,
+        profilePhoto: resolvedPhoto,
         computedRating,
         totalRatings: ratings.length,
         cardEarningsTotal,
@@ -7585,7 +7631,11 @@ If you did not request this, you can ignore this email.`,
     const ratings = await storage.getRatingsByChauffeur(chauffeurId).catch(() => []);
     const avgRating = ratings.length > 0 ? parseFloat((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1)) : user?.rating ?? 5;
     const application = chauffeur2.userId ? await storage.getDriverApplicationByUserId(chauffeur2.userId).catch(() => void 0) : void 0;
-    const resolvedPhoto = chauffeur2.profilePhoto || user?.profilePhoto || application?.profilePhoto || application?.selfieUrl || null;
+    const resolvedPhoto = resolveChauffeurProfilePhoto(chauffeur2, user, application);
+    if (!chauffeur2.profilePhoto && resolvedPhoto) {
+      storage.updateChauffeur(chauffeur2.id, { profilePhoto: resolvedPhoto }).catch(() => {
+      });
+    }
     return {
       id: chauffeur2.id,
       driverName: user?.name || "Driver",
@@ -7609,11 +7659,10 @@ If you did not request this, you can ignore this email.`,
       const resolved = await getResolvedChauffeurDetails(req.params.id);
       if (!resolved) return res.status(404).json({ message: "Chauffeur not found" });
       const chauffeur2 = await storage.getChauffeur(req.params.id);
-      const user = chauffeur2?.userId ? await storage.getUser(chauffeur2.userId).catch(() => null) : null;
       return res.json({
         ...chauffeur2,
         ...resolved,
-        profilePhoto: chauffeur2.profilePhoto || user?.profilePhoto || null
+        profilePhoto: resolved.profilePhoto
       });
     } catch (error) {
       return res.status(500).json({ message: error.message });
@@ -7655,7 +7704,7 @@ If you did not request this, you can ignore this email.`,
         totalRatings: ratings.length,
         completedTrips,
         distribution,
-        profilePhoto: chauffeur2.profilePhoto || user?.profilePhoto || null,
+        profilePhoto: resolved?.profilePhoto || null,
         carMake: resolved?.carMake || chauffeur2.carMake,
         vehicleModel: resolved?.vehicleModel || chauffeur2.vehicleModel,
         carColor: resolved?.carColor || chauffeur2.carColor,
@@ -7955,8 +8004,10 @@ If you did not request this, you can ignore this email.`,
             storage.getUser(c.userId).catch(() => null),
             storage.getDriverApplicationByUserId(c.userId).catch(() => void 0)
           ]) : [null, void 0];
+          const resolvedPhoto = resolveChauffeurProfilePhoto(c, user, application);
           return {
             ...c,
+            profilePhoto: resolvedPhoto,
             userName: user?.name || "\u2014",
             userPhone: user?.phone || c.phone || "\u2014",
             userEmail: user?.username || "\u2014",

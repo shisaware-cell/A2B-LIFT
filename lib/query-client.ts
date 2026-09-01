@@ -41,6 +41,13 @@ export function getApiUrl(): string {
   return `${protocol}://${domain}/`;
 }
 
+export function cleanErrorMessage(message?: string | null): string {
+  if (!message) return "An unexpected error occurred. Please try again.";
+  return String(message)
+    .replace(/^(?:Error\s*)?(?:[1-5]\d{2})\s*:\s*/i, "")
+    .trim() || "An unexpected error occurred. Please try again.";
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     // Clone the response before reading to avoid consuming the body
@@ -49,20 +56,24 @@ async function throwIfResNotOk(res: Response) {
     let text = "";
     if (contentType.includes("application/json")) {
       const body = await clonedRes.json().catch(() => null);
-      text = body?.message || body?.error || JSON.stringify(body || {});
+      text = body?.message || body?.error || "";
     } else {
       text = (await clonedRes.text()) || res.statusText;
       const preMatch = text.match(/<pre>(.*?)<\/pre>/is);
       if (preMatch?.[1]) text = preMatch[1];
       text = text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
     }
-    throw new Error(`${res.status}: ${text || res.statusText}`);
+    const cleanMsg = cleanErrorMessage(text || res.statusText);
+    const error: any = new Error(cleanMsg);
+    error.status = res.status;
+    throw error;
   }
 }
 
 export function isUnauthorizedError(error: unknown): boolean {
+  if (error && typeof error === "object" && (error as any).status === 401) return true;
   const message = error instanceof Error ? error.message : String(error || "");
-  return /^401\b/.test(message) || message.toLowerCase().includes("unauthorized");
+  return /^401\b/.test(message) || message.toLowerCase().includes("unauthorized") || message.toLowerCase().includes("session expired");
 }
 
 async function getAuthHeader(): Promise<Record<string, string>> {

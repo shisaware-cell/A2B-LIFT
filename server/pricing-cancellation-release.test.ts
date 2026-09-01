@@ -221,8 +221,8 @@ test("shows driver photos to riders from either driver profile record", () => {
   const detailsSource = routesSource.slice(detailsStart, profileStart);
   const profileSource = routesSource.slice(profileStart, clientProfileStart);
 
-  assert.match(detailsSource, /profilePhoto: chauffeur\.profilePhoto \|\| user\?\.profilePhoto \|\| null/);
-  assert.match(profileSource, /profilePhoto: chauffeur\.profilePhoto \|\| user\?\.profilePhoto \|\| null/);
+  assert.match(detailsSource, /profilePhoto:\s*resolved\.profilePhoto/);
+  assert.match(profileSource, /profilePhoto:\s*resolved\?\.profilePhoto\s*\|\|\s*null/);
   assert.match(clientSource, /source=\{\{ uri: chauffeurDetails\.profilePhoto \}\}/);
   assert.match(clientSource, /source=\{\{ uri: driverProfile\.profilePhoto \}\}/);
 });

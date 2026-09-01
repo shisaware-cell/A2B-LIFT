@@ -40,13 +40,14 @@ test("normalizes legacy premium fleet values before dispatch", () => {
   assert.equal(isVehicleEligibleForRide("VIP", "Executive"), true);
 });
 
-test("keeps VIP sedans and V-Class vans strictly separated without cross-dispatch", () => {
+test("cross-matches VIP sedans and V-Class vans interchangeably", () => {
   assert.equal(isVehicleEligibleForRide("VIP", "VIP"), true);
   assert.equal(isVehicleEligibleForRide("VIP", "Executive"), true);
-  assert.equal(isVehicleEligibleForRide("VIP", "V-Class"), false);
-  assert.equal(isVehicleEligibleForRide("V-Class", "VIP"), false);
+  assert.equal(isVehicleEligibleForRide("VIP", "V-Class"), true);
+  assert.equal(isVehicleEligibleForRide("V-Class", "VIP"), true);
   assert.equal(getVehicleDispatchPriority("VIP", "VIP"), 0);
-  assert.equal(getVehicleDispatchPriority("VIP", "V-Class"), null);
+  assert.equal(getVehicleDispatchPriority("VIP", "V-Class"), 1);
+  assert.equal(getVehicleDispatchPriority("V-Class", "VIP"), 1);
 });
 
 test("reconciles production fleet models whose stored category is stale", () => {
