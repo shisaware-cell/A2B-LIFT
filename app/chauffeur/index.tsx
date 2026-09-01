@@ -224,7 +224,7 @@ export default function ChauffeurDashboard() {
   const [incomingRide, setIncomingRide] = useState<any>(null);
   const [incomingOfferSeconds, setIncomingOfferSeconds] = useState<number>(45);
   const [currentRide, setCurrentRide] = useState<any>(null);
-  const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [myLocation, setMyLocation] = useState<{ lat: number; lng: number; heading?: number; speed?: number } | null>(null);
   const [routePolyline, setRoutePolyline] = useState<string | null>(null);
   const [showNavModal, setShowNavModal] = useState(false);
   const [navSteps, setNavSteps] = useState<Array<{ instruction: string; distance: string; maneuver: string; endLat: number; endLng: number }>>([]);
@@ -1806,11 +1806,12 @@ export default function ChauffeurDashboard() {
 
   function publishChauffeurLocation(location: Location.LocationObject) {
     const next = toLatLng(location);
-    const heading = location.coords?.heading;
-    const speed = location.coords?.speed;
+    const heading = next.heading;
+    const speed = next.speed;
     lastForegroundLocationAtRef.current = Date.now();
     setDriverLocationSample({
-      ...next,
+      lat: next.lat,
+      lng: next.lng,
       accuracyM: typeof location.coords?.accuracy === "number" && Number.isFinite(location.coords.accuracy)
         ? location.coords.accuracy
         : null,
@@ -1819,7 +1820,11 @@ export default function ChauffeurDashboard() {
         : Date.now(),
     });
     setMyLocation((current) => {
-      if (current && haversineDistance(current.lat, current.lng, next.lat, next.lng) < 0.003) {
+      if (
+        current &&
+        haversineDistance(current.lat, current.lng, next.lat, next.lng) < 0.001 &&
+        (heading === undefined || Math.abs((current.heading || 0) - (heading || 0)) < 2)
+      ) {
         return current;
       }
       return next;

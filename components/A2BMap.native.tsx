@@ -81,8 +81,54 @@ function calculateBearingDegrees(
   return (brng + 360) % 360;
 }
 
+export function findNearestSegmentBearing(
+  lat: number,
+  lng: number,
+  routePoints?: { latitude: number; longitude: number }[],
+): number | null {
+  if (!routePoints || routePoints.length < 2) return null;
+  let minDistanceSq = Infinity;
+  let bestBearing: number | null = null;
+
+  for (let i = 0; i < routePoints.length - 1; i++) {
+    const p1 = routePoints[i];
+    const p2 = routePoints[i + 1];
+
+    const dx = p2.longitude - p1.longitude;
+    const dy = p2.latitude - p1.latitude;
+    const segLenSq = dx * dx + dy * dy;
+    if (segLenSq < 1e-14) continue;
+
+    const t = Math.max(0, Math.min(1, ((lng - p1.longitude) * dx + (lat - p1.latitude) * dy) / segLenSq));
+    const projLat = p1.latitude + t * dy;
+    const projLng = p1.longitude + t * dx;
+
+    const distSq = (lat - projLat) * (lat - projLat) + (lng - projLng) * (lng - projLng);
+    if (distSq < minDistanceSq) {
+      minDistanceSq = distSq;
+      bestBearing = calculateBearingDegrees(p1.latitude, p1.longitude, p2.latitude, p2.longitude);
+    }
+  }
+
+  // If driver is within ~250m (0.0025 deg) of the route polyline, snap to road direction
+  if (minDistanceSq < 0.0025 * 0.0025 && bestBearing !== null) {
+    return bestBearing;
+  }
+  return null;
+}
+
 const DriverMarker = React.memo(
-  ({ latitude, longitude, heading }: { latitude: number; longitude: number; heading?: number }) => {
+  ({
+    latitude,
+    longitude,
+    heading,
+    routeCoords,
+  }: {
+    latitude: number;
+    longitude: number;
+    heading?: number;
+    routeCoords?: { latitude: number; longitude: number }[];
+  }) => {
     const prevCoordRef = useRef({ latitude, longitude });
     const [rotation, setRotation] = useState(heading ?? 0);
 
@@ -92,14 +138,22 @@ const DriverMarker = React.memo(
       const dLng = longitude - prev.longitude;
       const dist = Math.sqrt(dLat * dLat + dLng * dLng);
 
+      // 1. High-confidence device GPS heading
       if (typeof heading === "number" && !isNaN(heading) && heading >= 0) {
         setRotation(heading);
-      } else if (dist > 0.00005) {
-        const computedBearing = calculateBearingDegrees(prev.latitude, prev.longitude, latitude, longitude);
-        setRotation(computedBearing);
+      } else {
+        // 2. Active route polyline alignment along the road
+        const routeBearing = findNearestSegmentBearing(latitude, longitude, routeCoords);
+        if (routeBearing !== null) {
+          setRotation(routeBearing);
+        } else if (dist > 0.00003) {
+          // 3. Fall back to movement vector bearing between GPS updates
+          const computedBearing = calculateBearingDegrees(prev.latitude, prev.longitude, latitude, longitude);
+          setRotation(computedBearing);
+        }
       }
       prevCoordRef.current = { latitude, longitude };
-    }, [latitude, longitude, heading]);
+    }, [latitude, longitude, heading, routeCoords]);
 
     return (
       <Marker
@@ -529,6 +583,7 @@ export function A2BMap({
             latitude={driverLocation.lat}
             longitude={driverLocation.lng}
             heading={driverLocation.heading}
+            routeCoords={routeCoords}
           />
         )}
 

@@ -3,8 +3,8 @@ import * as Location from "expo-location";
 
 export const RIDE_MATCH_RADIUS_KM = 4;
 export const LOCATION_STALE_WINDOW_MS = 10 * 60 * 1000;
-export const LOCATION_DISTANCE_INTERVAL_M = 5;
-export const LOCATION_TIME_INTERVAL_MS = 3000;
+export const LOCATION_DISTANCE_INTERVAL_M = 2;
+export const LOCATION_TIME_INTERVAL_MS = 1000;
 
 export const HIGH_ACCURACY =
   Platform.select({
@@ -14,9 +14,16 @@ export const HIGH_ACCURACY =
   }) ?? Location.Accuracy.High;
 
 export function toLatLng(location: Pick<Location.LocationObject, "coords">) {
+  const coords = location.coords;
   return {
-    lat: location.coords.latitude,
-    lng: location.coords.longitude,
+    lat: coords.latitude,
+    lng: coords.longitude,
+    heading: typeof coords.heading === "number" && Number.isFinite(coords.heading) && coords.heading >= 0
+      ? coords.heading
+      : undefined,
+    speed: typeof coords.speed === "number" && Number.isFinite(coords.speed) && coords.speed >= 0
+      ? coords.speed
+      : undefined,
   };
 }
 

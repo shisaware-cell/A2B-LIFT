@@ -233,6 +233,16 @@ test("calculates accurate bearing rotation angle between GPS coordinates", () =>
   assert.ok(Math.abs(southBearing - 180) < 2);
 });
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+test("accurately aligns driver car marker along active route polyline segments", () => {
+  const mapNativeSource = readFileSync(resolve(process.cwd(), "components/A2BMap.native.tsx"), "utf-8");
+  assert.match(mapNativeSource, /export function findNearestSegmentBearing/);
+  assert.match(mapNativeSource, /routeCoords=\{routeCoords\}/);
+  assert.match(mapNativeSource, /findNearestSegmentBearing\(latitude,\s*longitude,\s*routeCoords\)/);
+});
+
 test("resolves vehicle make, model and plate number from active fleet vehicle over stale chauffeur columns", () => {
   function resolveVehicleDetails(chauffeur: any, activeVehicle?: any) {
     return {
