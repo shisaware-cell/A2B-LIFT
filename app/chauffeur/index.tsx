@@ -692,34 +692,42 @@ export default function ChauffeurDashboard() {
     try {
       if (Platform.OS === "web") return;
       const Audio = await getExpoAudioModule();
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldDuckAndroid: false,
-        playThroughEarpieceAndroid: false,
-      });
+      try {
+        await Audio.setAudioModeAsync({
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: true,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+        });
+      } catch {}
       if (tripAlertTokenRef.current !== alertToken || !tripAlertEnabledRef.current) {
         return;
       }
       if (soundRef.current) {
-        await soundRef.current.setIsLoopingAsync(true);
-        if (tripAlertTokenRef.current !== alertToken || !tripAlertEnabledRef.current) {
-          return;
-        }
-        await soundRef.current.replayAsync();
+        try {
+          await soundRef.current.setIsLoopingAsync(true);
+          if (tripAlertTokenRef.current !== alertToken || !tripAlertEnabledRef.current) {
+            return;
+          }
+          await soundRef.current.replayAsync();
+        } catch {}
       } else {
-        const { sound } = await Audio.Sound.createAsync(
-          require("../../assets/driverSound.wav"),
-          { shouldPlay: false, volume: 1.0, isLooping: true }
-        );
-        if (tripAlertTokenRef.current !== alertToken || !tripAlertEnabledRef.current) {
-          await sound.unloadAsync();
-          return;
-        }
-        soundRef.current = sound;
-        await sound.playAsync();
+        try {
+          const { sound } = await Audio.Sound.createAsync(
+            require("../../assets/trip_alert.mp3"),
+            { shouldPlay: false, volume: 1.0, isLooping: true }
+          );
+          if (tripAlertTokenRef.current !== alertToken || !tripAlertEnabledRef.current) {
+            await sound.unloadAsync().catch(() => {});
+            return;
+          }
+          soundRef.current = sound;
+          await sound.playAsync();
+        } catch {}
       }
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      try {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch {}
     } catch {}
   }
 
@@ -728,9 +736,10 @@ export default function ChauffeurDashboard() {
     tripAlertTokenRef.current += 1;
     try {
       if (soundRef.current) {
-        await soundRef.current.stopAsync();
-        await soundRef.current.unloadAsync();
+        const sound = soundRef.current;
         soundRef.current = null;
+        await sound.stopAsync().catch(() => {});
+        await sound.unloadAsync().catch(() => {});
       }
     } catch {}
   }
@@ -856,30 +865,33 @@ export default function ChauffeurDashboard() {
   // ─── Socket: incoming ride ────────────────────────────────────────────────
   useEffect(() => {
     const handleNewRide = (ride: any) => {
-      if (isOnline && chauffeur?.isApproved && !currentRide) {
-        if (isRideAlertSuppressed(ride?.id)) return;
-        if (ride?.currentOfferedChauffeurId && ride.currentOfferedChauffeurId !== chauffeur.id) return;
-        if (ride?.currentOfferExpiresAt && new Date(ride.currentOfferExpiresAt).getTime() <= Date.now()) return;
-        seenRideIdRef.current = ride.id || null;
-        setAvailableTrips((prev) => prev.filter((trip) => trip.id !== ride.id));
-        if (isDriverOverlayAvailable()) {
-          void setDriverOverlayEventCount(1);
-        }
-        if (notificationsRef.current && AppState.currentState !== "active") {
-          void notificationsRef.current.scheduleNotificationAsync({
-            content: {
-              title: "🚗 Incoming Trip Request!",
-              body: `New ride offer: ${ride.pickupAddress || "Nearby pickup"} · Tap to accept`,
-              data: { type: "ride:new", rideId: ride.id },
-              sound: "trip_alert.wav",
-              priority: "max",
-            },
-            trigger: null,
+      try {
+        if (isOnline && chauffeur?.isApproved && !currentRide) {
+          if (isRideAlertSuppressed(ride?.id)) return;
+          if (ride?.currentOfferedChauffeurId && ride.currentOfferedChauffeurId !== chauffeur.id) return;
+          if (ride?.currentOfferExpiresAt && new Date(ride.currentOfferExpiresAt).getTime() <= Date.now()) return;
+          seenRideIdRef.current = ride.id || null;
+          setAvailableTrips((prev) => prev.filter((trip) => trip.id !== ride.id));
+          try {
+            if (notificationsRef.current && AppState.currentState !== "active") {
+              notificationsRef.current.scheduleNotificationAsync?.({
+                content: {
+                  title: "🚗 Incoming Trip Request!",
+                  body: `New ride offer: ${ride.pickupAddress || "Nearby pickup"} · Tap to accept`,
+                  data: { type: "ride:new", rideId: ride.id },
+                  sound: "trip_alert.wav",
+                  priority: "max",
+                },
+                trigger: null,
+              })?.catch?.(() => {});
+            }
+          } catch {}
+          void presentIncomingRide(ride).then((presentedRide) => {
+            if (presentedRide && ride.id !== suppressedRideAlertIdRef.current) playTripAlert();
           }).catch(() => {});
         }
-        void presentIncomingRide(ride).then((presentedRide) => {
-          if (presentedRide && ride.id !== suppressedRideAlertIdRef.current) playTripAlert();
-        });
+      } catch (err) {
+        console.warn("[chauffeur/handleNewRide] Error handling incoming ride:", err);
       }
     };
     on("ride:new", handleNewRide);

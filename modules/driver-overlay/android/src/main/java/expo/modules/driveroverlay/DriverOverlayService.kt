@@ -64,7 +64,12 @@ class DriverOverlayService : Service() {
     try {
       val notification = buildNotification(isIncomingTrip = count > 0 && !tripActive, isTripActive = tripActive, tripLabel = tripLabel)
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        try {
+          startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } catch (e: Throwable) {
+          Log.w(TAG, "Special-use startForeground failed, trying fallback: ${e.message}")
+          startForeground(NOTIFICATION_ID, notification)
+        }
       } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE)
       } else {
