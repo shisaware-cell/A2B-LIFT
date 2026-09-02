@@ -43,18 +43,23 @@ export default function EarningsScreen() {
         setChauffeur(c);
       }
     });
-    apiRequest("GET", "/api/operator-profile/me")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.profile) setOperatorProfile(data.profile);
-      })
-      .catch(() => {});
   }, []);
 
+  const { data: profileData } = useQuery({
+    queryKey: ["/api/operator-profile/me"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/operator-profile/me");
+      return res.ok ? res.json() : null;
+    },
+    staleTime: 1000 * 60 * 5,
+  });
+
+  const effectiveProfile = profileData?.profile || operatorProfile;
+
   const isPartner =
-    operatorProfile?.type === "partner" ||
-    operatorProfile?.type === "fleet" ||
-    (operatorProfile?.status === "approved" && operatorProfile?.type !== "driver");
+    effectiveProfile?.type === "partner" ||
+    effectiveProfile?.type === "fleet" ||
+    (effectiveProfile?.status === "approved" && effectiveProfile?.type !== "driver");
 
   // Partner fleet earnings query
   const {
@@ -67,7 +72,7 @@ export default function EarningsScreen() {
       const res = await apiRequest("GET", "/api/fleet/earnings-summary");
       return res.json();
     },
-    enabled: isPartner,
+    enabled: !!isPartner,
   });
 
   // Solo driver queries
@@ -78,7 +83,7 @@ export default function EarningsScreen() {
 
   const { data: withdrawals } = useQuery({
     queryKey: ["/api/withdrawals/chauffeur", chauffeurId || ""],
-    enabled: !!chauffeurId || isPartner,
+    enabled: !!chauffeurId || !!isPartner,
   });
 
   const { data: annualShare } = useQuery({
@@ -224,6 +229,8 @@ export default function EarningsScreen() {
                   ZAR {(fleetEarningsData?.endBalance || 0).toFixed(2)}
                 </Text>
               </View>
+
+              <View style={styles.summaryDividerBold} />
             </View>
 
             {/* Information Notice Card */}
