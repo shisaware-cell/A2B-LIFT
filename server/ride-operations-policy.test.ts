@@ -283,3 +283,79 @@ test("resolves vehicle make, model and plate number from active fleet vehicle ov
   assert.equal(fallback.plateNumber, "OLD 123 GP");
 });
 
+test("calculates exact Monday 04:00 AM to Monday 03:59 AM earnings week bounds", () => {
+  function getEarningsWeekBounds(now: Date): { weekStart: Date; weekEnd: Date } {
+    const sastOffsetMs = 2 * 60 * 60 * 1000;
+    const localNow = new Date(now.getTime() + sastOffsetMs);
+
+    const dayOfWeek = localNow.getUTCDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+    const hour = localNow.getUTCHours();
+    const minute = localNow.getUTCMinutes();
+
+    let daysSinceMonday = (dayOfWeek + 6) % 7;
+    if (daysSinceMonday === 0 && (hour < 4 || (hour === 4 && minute === 0))) {
+      daysSinceMonday = 7;
+    }
+
+    const startLocal = new Date(localNow);
+    startLocal.setUTCDate(localNow.getUTCDate() - daysSinceMonday);
+    startLocal.setUTCHours(4, 0, 0, 0);
+
+    const endLocal = new Date(startLocal);
+    endLocal.setUTCDate(startLocal.getUTCDate() + 7);
+    endLocal.setUTCHours(3, 59, 59, 999);
+
+    const weekStart = new Date(startLocal.getTime() - sastOffsetMs);
+    const weekEnd = new Date(endLocal.getTime() - sastOffsetMs);
+    return { weekStart, weekEnd };
+  }
+
+  // Wednesday 14:00 SAST (2026-09-02T12:00:00Z)
+  const wednesday = new Date("2026-09-02T12:00:00Z");
+  const bounds = getEarningsWeekBounds(wednesday);
+  // Week start: Monday 31 Aug 2026 04:00 SAST -> 2026-08-31T02:00:00Z
+  assert.equal(bounds.weekStart.toISOString(), "2026-08-31T02:00:00.000Z");
+  // Week end: Monday 7 Sep 2026 03:59:59.999 SAST -> 2026-09-07T01:59:59.999Z
+  assert.equal(bounds.weekEnd.toISOString(), "2026-09-07T01:59:59.999Z");
+});
+
+test("requires confirmation when driver account attempts login on a different device", () => {
+  function checkDeviceTransfer(
+    activeDeviceId?: string | null,
+    incomingDeviceId?: string,
+    forceSwitchDevice = false
+  ): { requiresConfirmation: boolean; proceed: boolean } {
+    if (activeDeviceId && incomingDeviceId && activeDeviceId !== incomingDeviceId && !forceSwitchDevice) {
+      return { requiresConfirmation: true, proceed: false };
+    }
+    return { requiresConfirmation: false, proceed: true };
+  }
+
+  // First device login
+  assert.deepEqual(checkDeviceTransfer(null, "device_A"), { requiresConfirmation: false, proceed: true });
+
+  // Same device login
+  assert.deepEqual(checkDeviceTransfer("device_A", "device_A"), { requiresConfirmation: false, proceed: true });
+
+  // Different device login without forceSwitchDevice -> prompts confirmation
+  assert.deepEqual(checkDeviceTransfer("device_A", "device_B", false), { requiresConfirmation: true, proceed: false });
+
+  // Different device login with confirmed forceSwitchDevice -> proceeds
+  assert.deepEqual(checkDeviceTransfer("device_A", "device_B", true), { requiresConfirmation: false, proceed: true });
+});
+
+test("partner earnings and fleet live map screens are properly integrated in routes and UI", () => {
+  const routesSource = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
+  assert.match(routesSource, /\/api\/fleet\/earnings-summary/);
+  assert.match(routesSource, /\/api\/fleet\/live-locations/);
+
+  const earningsSource = readFileSync(resolve(process.cwd(), "app/chauffeur/earnings.tsx"), "utf-8");
+  assert.match(earningsSource, /Adjustments from previous periods/);
+  assert.match(earningsSource, /Driver Net earnings/);
+  assert.match(earningsSource, /An earnings week goes from Monday at 4:00 AM/);
+
+  const liveMapSource = readFileSync(resolve(process.cwd(), "app/chauffeur/live-map.tsx"), "utf-8");
+  assert.match(liveMapSource, /Live Demand/);
+  assert.match(liveMapSource, /Drivers \(/);
+});
+

@@ -45,7 +45,7 @@ interface AuthContextValue {
   accessToken: string | null;
   isLoading: boolean;
   pendingReferralCode: string | null;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string, forceSwitchDevice?: boolean) => Promise<{ requiresDeviceTransferConfirmation?: boolean; message?: string } | void>;
   register: (data: {
     username: string;
     password: string;
@@ -233,7 +233,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function login(username: string, password: string) {
+  async function login(username: string, password: string, forceSwitchDevice = false): Promise<{ requiresDeviceTransferConfirmation?: boolean; message?: string } | void> {
     const deviceId = await getOrCreateDeviceId();
     const appVariant = process.env.EXPO_PUBLIC_APP_VARIANT || (Platform.OS === "web" ? "web" : "driver");
     const res = await apiRequest("POST", "/api/auth/login", {
@@ -241,10 +241,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       password,
       deviceId,
       appVariant,
+      forceSwitchDevice,
     });
-    const payload = (await res.json()) as LoginResponse;
+    const payload = (await res.json()) as any;
+    if (payload?.requiresDeviceTransferConfirmation) {
+      return {
+        requiresDeviceTransferConfirmation: true,
+        message: payload.message || "This account is currently active on another device. Signing in here will log out the other device. Do you want to proceed?",
+      };
+    }
     if (!res.ok) {
-      throw new Error((payload as any).message || "Invalid credentials");
+      throw new Error(payload?.message || "Invalid credentials");
     }
     const normalized = normalizeAuthPayload(payload);
     setUser(normalized.user);

@@ -86,7 +86,33 @@ export default function LoginScreen() {
     setLoading(true); setError(""); setResetMessage("");
     try {
       await AsyncStorage.setItem("a2b_last_mode", showClientModeChoice ? clientLoginMode : APP_VARIANT === "driver" ? "chauffeur" : "client");
-      await login(username.trim(), password);
+      const result = await login(username.trim(), password);
+      if (result?.requiresDeviceTransferConfirmation) {
+        setLoading(false);
+        Alert.alert(
+          "Active Session Detected",
+          result.message || "This account is currently active on another device. Signing in here will log out the other device. Do you want to proceed?",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Sign In & Switch Device",
+              style: "destructive",
+              onPress: async () => {
+                setLoading(true);
+                setError("");
+                try {
+                  await login(username.trim(), password, true);
+                } catch (err: any) {
+                  setError(err?.message || "Login failed. Please try again.");
+                } finally {
+                  setLoading(false);
+                }
+              },
+            },
+          ]
+        );
+        return;
+      }
       // AuthGate handles navigation when user state changes
     } catch (e: any) {
       const raw = (e?.message || "").toLowerCase();

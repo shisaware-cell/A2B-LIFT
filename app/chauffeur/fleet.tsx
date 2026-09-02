@@ -248,12 +248,33 @@ export default function FleetScreen() {
       <View style={styles.header}>
         <Pressable style={styles.backBtn} onPress={() => router.back()}><Ionicons name="arrow-back" size={22} color={Colors.white} /></Pressable>
         <Text style={styles.title}>Fleet</Text>
-        <View style={styles.backBtn} />
+        <Pressable
+          style={styles.liveMapHeaderBtn}
+          onPress={() => router.push("/chauffeur/live-map" as never)}
+          accessibilityLabel="Open Live Map"
+        >
+          <Ionicons name="map-outline" size={18} color={Colors.white} />
+          <Text style={styles.liveMapHeaderBtnText}>Live Map</Text>
+        </Pressable>
       </View>
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.white} />}
       >
+        <Pressable
+          style={styles.liveMapBanner}
+          onPress={() => router.push("/chauffeur/live-map" as never)}
+        >
+          <View style={styles.liveMapBannerIcon}>
+            <Ionicons name="map" size={20} color="#10B981" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.liveMapBannerTitle}>Fleet Live Map</Text>
+            <Text style={styles.liveMapBannerSub}>Track your drivers and vehicles in real time</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+        </Pressable>
+
         <View style={styles.overviewGrid}>
           {[
             ["Vehicles", overview.vehicles],
@@ -517,6 +538,49 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 12 },
   backBtn: { width: 38, height: 38, alignItems: "center", justifyContent: "center" },
   title: { fontSize: 18, fontFamily: "Inter_700Bold", color: Colors.white },
+  liveMapHeaderBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+  },
+  liveMapHeaderBtnText: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.white,
+  },
+  liveMapBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: Colors.card,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  liveMapBannerIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(16,185,129,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  liveMapBannerTitle: {
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
+    color: Colors.white,
+  },
+  liveMapBannerSub: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
   content: { paddingHorizontal: 20, gap: 14 },
   overviewGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   overviewCard: { width: "48%", minHeight: 74, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.card, alignItems: "center", justifyContent: "center" },

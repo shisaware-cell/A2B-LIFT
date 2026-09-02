@@ -1768,14 +1768,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      // ─── Single-Device Driver Session Auto-Transfer ─────────────────────────
+      // ─── Single-Device Driver Session Auto-Transfer & Confirmation ───────────
       try {
         const incomingDeviceId = String(req.body.deviceId || req.headers["x-device-id"] || "").trim();
+        const forceSwitchDevice = req.body.forceSwitchDevice === true || req.headers["x-force-switch-device"] === "true";
         const isDriverLogin = req.body.appVariant === "driver" || req.headers["x-app-variant"] === "driver" || user.role === "chauffeur";
         if (isDriverLogin) {
           const chauffeur = await storage.getChauffeurByUserId(user.id);
           if (chauffeur) {
             const previousDevice = chauffeur.activeDeviceId;
+            if (previousDevice && incomingDeviceId && previousDevice !== incomingDeviceId && !forceSwitchDevice) {
+              return res.status(200).json({
+                requiresDeviceTransferConfirmation: true,
+                message: "This account is currently active on another device. Signing in here will log out the other device. Do you want to proceed?",
+                previousDeviceId: previousDevice,
+              });
+            }
             if (incomingDeviceId) {
               await storage.updateChauffeur(chauffeur.id, {
                 activeDeviceId: incomingDeviceId,
@@ -5344,6 +5352,265 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
       }));
       return res.json({ assignments: enriched });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  function getEarningsWeekBounds(now = new Date()): { weekStart: Date; weekEnd: Date; periodLabel: string } {
+    const sastOffsetMs = 2 * 60 * 60 * 1000;
+    const localNow = new Date(now.getTime() + sastOffsetMs);
+
+    const dayOfWeek = localNow.getUTCDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+    const hour = localNow.getUTCHours();
+    const minute = localNow.getUTCMinutes();
+
+    let daysSinceMonday = (dayOfWeek + 6) % 7; // Monday = 0, ..., Sunday = 6
+    if (daysSinceMonday === 0 && (hour < 4 || (hour === 4 && minute === 0))) {
+      daysSinceMonday = 7;
+    }
+
+    const startLocal = new Date(localNow);
+    startLocal.setUTCDate(localNow.getUTCDate() - daysSinceMonday);
+    startLocal.setUTCHours(4, 0, 0, 0);
+
+    const endLocal = new Date(startLocal);
+    endLocal.setUTCDate(startLocal.getUTCDate() + 7);
+    endLocal.setUTCHours(3, 59, 59, 999);
+
+    const weekStart = new Date(startLocal.getTime() - sastOffsetMs);
+    const weekEnd = new Date(endLocal.getTime() - sastOffsetMs);
+
+    const options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+    const periodLabel = `${startLocal.toLocaleDateString("en-ZA", options)} - ${endLocal.toLocaleDateString("en-ZA", options)}`;
+
+    return { weekStart, weekEnd, periodLabel };
+  }
+
+  app.get("/api/fleet/earnings-summary", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const profile = await ensureDriverOperatorForChauffeur(req.auth!.sub);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+
+      const vehicles = await storage.getVehiclesByOwnerOperator(profile.id);
+      const vehicleIds = new Set(vehicles.map((v) => v.id));
+
+      const assignments = await storage.getVehicleAssignments({
+        assignedByOperatorProfileId: profile.id,
+      });
+      assignments.forEach((a) => vehicleIds.add(a.vehicleId));
+
+      const { weekStart, weekEnd, periodLabel } = getEarningsWeekBounds();
+
+      const driverProfiles = await Promise.all(
+        assignments.map((a) => storage.getOperatorProfile(a.driverOperatorProfileId))
+      );
+      const validDriverProfiles = driverProfiles.filter(Boolean) as any[];
+
+      const driverMap = new Map<string, any>();
+      for (const dp of validDriverProfiles) {
+        if (!driverMap.has(dp.id)) {
+          const user = await storage.getUser(dp.userId);
+          const chauffeur = await storage.getChauffeurByUserId(dp.userId);
+          const activeVehicleAssignment = assignments.find((a) => a.driverOperatorProfileId === dp.id && a.status === "active");
+          const vehicle = activeVehicleAssignment ? await storage.getVehicle(activeVehicleAssignment.vehicleId) : null;
+          driverMap.set(dp.id, {
+            profile: dp,
+            user,
+            chauffeur,
+            vehicle,
+          });
+        }
+      }
+
+      if (profile.type === "driver" && !driverMap.has(profile.id)) {
+        const user = await storage.getUser(profile.userId);
+        const chauffeur = await storage.getChauffeurByUserId(profile.userId);
+        driverMap.set(profile.id, {
+          profile,
+          user,
+          chauffeur,
+          vehicle: vehicles[0] || null,
+        });
+      }
+
+      const allRides = await storage.getAllRides();
+      const allWithdrawals = await storage.getWithdrawalsByUserId(req.auth!.sub).catch(() => []);
+
+      const driverEarningsList = await Promise.all(
+        Array.from(driverMap.values()).map(async ({ profile: dp, user, chauffeur, vehicle }) => {
+          const chauffeurId = chauffeur?.id;
+          const chauffeurRides = allRides.filter((r: any) =>
+            (chauffeurId && r.chauffeurId === chauffeurId) || (r.vehicleId && vehicleIds.has(r.vehicleId))
+          );
+          const completedRides = chauffeurRides.filter((r: any) => r.status === "trip_completed");
+          const weekCompletedRides = completedRides.filter((r: any) => {
+            const date = new Date(r.completedAt || r.updatedAt || r.createdAt);
+            return date >= weekStart && date <= weekEnd;
+          });
+
+          const totalTrips = weekCompletedRides.length;
+          const grossFares = weekCompletedRides.reduce((sum: number, r: any) => sum + (parseFloat(r.price) || 0), 0);
+          const netEarnings = weekCompletedRides.reduce((sum: number, r: any) => {
+            const fare = parseFloat(r.price) || 0;
+            const calc = calculateChauffeurEarnings(fare, r.commissionRate);
+            return sum + calc.chauffeurEarnings;
+          }, 0);
+          const commissionTotal = weekCompletedRides.reduce((sum: number, r: any) => {
+            const fare = parseFloat(r.price) || 0;
+            const calc = calculateChauffeurEarnings(fare, r.commissionRate);
+            return sum + calc.commission;
+          }, 0);
+          const cashFares = weekCompletedRides
+            .filter((r: any) => r.paymentMethod === "cash")
+            .reduce((sum: number, r: any) => sum + (parseFloat(r.price) || 0), 0);
+
+          const photo = chauffeur?.profilePhoto || user?.profilePhoto || null;
+
+          return {
+            driverOperatorProfileId: dp.id,
+            chauffeurId: chauffeurId || null,
+            userId: user?.id || null,
+            driverName: user?.name || user?.username || "Driver",
+            driverPhone: user?.phone || chauffeur?.phone || "",
+            profilePhoto: photo,
+            vehicle: vehicle ? `${vehicle.make} ${vehicle.model} (${vehicle.plateNumber})` : null,
+            totalTrips,
+            allTimeTrips: completedRides.length,
+            grossFares: Math.round(grossFares * 100) / 100,
+            commissionTotal: Math.round(commissionTotal * 100) / 100,
+            netEarnings: Math.round(netEarnings * 100) / 100,
+            cashFares: Math.round(cashFares * 100) / 100,
+            digitalEarnings: Math.round(Math.max(0, netEarnings - cashFares) * 100) / 100,
+          };
+        })
+      );
+
+      const totalFleetNetEarnings = driverEarningsList.reduce((sum, d) => sum + d.netEarnings, 0);
+      const totalPayouts = (allWithdrawals || [])
+        .filter((w: any) => w.status === "completed" || w.status === "approved" || w.status === "paid")
+        .reduce((sum: number, w: any) => sum + (parseFloat(w.amount) || 0), 0);
+
+      const adjustmentsFromPreviousPeriods = 0.00;
+      const endBalance = Math.max(0, Math.round((totalFleetNetEarnings - totalPayouts + adjustmentsFromPreviousPeriods) * 100) / 100);
+
+      return res.json({
+        period: periodLabel,
+        weekStart: weekStart.toISOString(),
+        weekEnd: weekEnd.toISOString(),
+        adjustmentsFromPreviousPeriods,
+        payout: Math.round(totalPayouts * 100) / 100,
+        endBalance,
+        totalNetEarnings: Math.round(totalFleetNetEarnings * 100) / 100,
+        driverCount: driverEarningsList.length,
+        drivers: driverEarningsList,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/fleet/live-locations", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const profile = await ensureDriverOperatorForChauffeur(req.auth!.sub);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+
+      const vehicles = await storage.getVehiclesByOwnerOperator(profile.id);
+      const vehicleMap = new Map<string, any>(vehicles.map((v) => [v.id, v]));
+
+      const assignments = await storage.getVehicleAssignments({
+        assignedByOperatorProfileId: profile.id,
+      });
+
+      const allRides = await storage.getAllRides();
+      const activeStatuses = new Set(["chauffeur_assigned", "chauffeur_arriving", "trip_started"]);
+
+      const driverProfiles = await Promise.all(
+        assignments.map((a) => storage.getOperatorProfile(a.driverOperatorProfileId))
+      );
+      const validDriverProfiles = driverProfiles.filter(Boolean) as any[];
+
+      const liveDrivers = await Promise.all(
+        validDriverProfiles.map(async (dp) => {
+          const [user, chauffeur] = await Promise.all([
+            storage.getUser(dp.userId),
+            storage.getChauffeurByUserId(dp.userId),
+          ]);
+          const assignment = assignments.find((a) => a.driverOperatorProfileId === dp.id && a.status === "active");
+          const vehicle = assignment ? vehicleMap.get(assignment.vehicleId) || await storage.getVehicle(assignment.vehicleId) : null;
+
+          const currentRide = chauffeur ? allRides.find((r: any) => r.chauffeurId === chauffeur.id && activeStatuses.has(r.status)) : null;
+
+          const lat = chauffeur?.lat ? parseFloat(chauffeur.lat) : null;
+          const lng = chauffeur?.lng ? parseFloat(chauffeur.lng) : null;
+          const heading = typeof chauffeur?.heading === "number" ? chauffeur.heading : undefined;
+          const isOnline = chauffeur?.isOnline === true;
+          const status = currentRide ? "in_trip" : isOnline ? "online" : "offline";
+
+          return {
+            id: dp.id,
+            chauffeurId: chauffeur?.id || null,
+            userId: user?.id || null,
+            name: user?.name || user?.username || "Driver",
+            phone: user?.phone || chauffeur?.phone || "",
+            profilePhoto: chauffeur?.profilePhoto || user?.profilePhoto || null,
+            lat,
+            lng,
+            heading,
+            speed: chauffeur?.speed,
+            isOnline,
+            status,
+            todayEarnings: chauffeur?.todayEarnings || 0,
+            activeRide: currentRide ? {
+              id: currentRide.id,
+              status: currentRide.status,
+              pickupAddress: currentRide.pickupAddress,
+              dropoffAddress: currentRide.dropoffAddress,
+              price: currentRide.price,
+            } : null,
+            vehicle: vehicle ? {
+              id: vehicle.id,
+              make: vehicle.make,
+              model: vehicle.model,
+              plateNumber: vehicle.plateNumber,
+              color: vehicle.color,
+              category: vehicle.category,
+            } : null,
+          };
+        })
+      );
+
+      const allFleetVehicles = await Promise.all(
+        vehicles.map(async (v) => {
+          const activeAssignment = assignments.find((a) => a.vehicleId === v.id && a.status === "active");
+          const assignedDriver = activeAssignment ? liveDrivers.find((d) => d.id === activeAssignment.driverOperatorProfileId) : null;
+          return {
+            id: v.id,
+            make: v.make,
+            model: v.model,
+            plateNumber: v.plateNumber,
+            color: v.color,
+            category: v.category,
+            status: v.status,
+            assignedDriver: assignedDriver ? {
+              id: assignedDriver.id,
+              name: assignedDriver.name,
+              status: assignedDriver.status,
+              lat: assignedDriver.lat,
+              lng: assignedDriver.lng,
+            } : null,
+          };
+        })
+      );
+
+      return res.json({
+        drivers: liveDrivers,
+        vehicles: allFleetVehicles,
+        totalDrivers: liveDrivers.length,
+        onlineDrivers: liveDrivers.filter((d) => d.status === "online" || d.status === "in_trip").length,
+        inTripDrivers: liveDrivers.filter((d) => d.status === "in_trip").length,
+        totalVehicles: allFleetVehicles.length,
+      });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }

@@ -2504,6 +2504,7 @@ export default function ChauffeurDashboard() {
   // ─── Menu items ───────────────────────────────────────────────────────────
   const menuItems = [
     { icon: isOnline ? "stop-circle-outline" : "play-circle-outline", label: isOnline ? "Go Offline" : "Go Online", onPress: toggleOnline, color: isOnline ? "#ff6b6b" : Colors.success },
+    { icon: "map-outline", label: "Fleet Live Map", onPress: () => { router.push("/chauffeur/live-map" as never); closeMenu(); }, color: "#10B981" },
     { icon: "car-outline", label: "Vehicles", onPress: () => { router.push("/chauffeur/vehicles" as never); closeMenu(); }, color: Colors.white },
     { icon: "people-outline", label: "Fleet & Drivers", onPress: () => { router.push("/chauffeur/fleet" as never); closeMenu(); }, color: Colors.white },
     { icon: "car-sport-outline", label: "My Rides", onPress: () => { router.push("/chauffeur/rides"); closeMenu(); }, color: Colors.white },
