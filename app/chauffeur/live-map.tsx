@@ -16,11 +16,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import { apiRequest } from "@/lib/query-client";
 import Colors from "@/constants/colors";
-
-const NEARBY_CAR_MARKER = require("../../assets/images/nearby-car-marker.png");
+import { FleetMap, FleetMapRef } from "@/components/FleetMap";
 
 // Johannesburg default center
 const DEFAULT_MAP_CENTER = {
@@ -32,7 +30,7 @@ const DEFAULT_MAP_CENTER = {
 
 export default function FleetLiveMapScreen() {
   const insets = useSafeAreaInsets();
-  const mapRef = useRef<MapView>(null);
+  const mapRef = useRef<FleetMapRef>(null);
 
   const [filterType, setFilterType] = useState<"Driver" | "Vehicle">("Driver");
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
@@ -105,19 +103,11 @@ export default function FleetLiveMapScreen() {
   }, [fleetData.vehicles, searchQuery]);
 
   function zoomIn() {
-    mapRef.current?.getCamera().then((cam) => {
-      if (cam && typeof cam.zoom === "number") {
-        mapRef.current?.animateCamera({ zoom: cam.zoom + 1 });
-      }
-    });
+    mapRef.current?.zoomIn();
   }
 
   function zoomOut() {
-    mapRef.current?.getCamera().then((cam) => {
-      if (cam && typeof cam.zoom === "number") {
-        mapRef.current?.animateCamera({ zoom: Math.max(1, cam.zoom - 1) });
-      }
-    });
+    mapRef.current?.zoomOut();
   }
 
   function focusOnLocation(lat: number, lng: number) {
@@ -144,49 +134,13 @@ export default function FleetLiveMapScreen() {
   return (
     <View style={styles.container}>
       {/* ─── Full-Screen Interactive Map ─── */}
-      <MapView
+      <FleetMap
         ref={mapRef}
-        style={StyleSheet.absoluteFillObject}
-        provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
+        drivers={filteredDrivers}
+        selectedItem={selectedItem}
+        onSelectDriver={(driver) => setSelectedItem(driver)}
         initialRegion={DEFAULT_MAP_CENTER}
-        showsUserLocation={false}
-        showsCompass={false}
-        toolbarEnabled={false}
-      >
-        {filteredDrivers.map((driver: any) => {
-          if (!Number.isFinite(driver.lat) || !Number.isFinite(driver.lng) || driver.lat === 0) return null;
-          const isSelected = selectedItem?.id === driver.id;
-          return (
-            <Marker
-              key={`driver-${driver.id}`}
-              coordinate={{ latitude: driver.lat, longitude: driver.lng }}
-              anchor={{ x: 0.5, y: 0.5 }}
-              flat={true}
-              rotation={driver.heading || 0}
-              onPress={() => setSelectedItem(driver)}
-            >
-              <View style={styles.markerContainer}>
-                {driver.status === "in_trip" ? (
-                  <View style={styles.inTripBadge}>
-                    <Ionicons name="navigate" size={10} color="#FFFFFF" />
-                  </View>
-                ) : driver.status === "online" ? (
-                  <View style={styles.onlinePulseDot} />
-                ) : null}
-                <Image
-                  source={NEARBY_CAR_MARKER}
-                  style={[
-                    styles.carMarkerImage,
-                    driver.status === "offline" && { opacity: 0.5 },
-                    isSelected && styles.selectedMarkerGlow,
-                  ]}
-                  resizeMode="contain"
-                />
-              </View>
-            </Marker>
-          );
-        })}
-      </MapView>
+      />
 
       {/* ─── Header & Top Control Bar (Image 2 reference) ─── */}
       <View style={[styles.topOverlay, { paddingTop: insets.top + (Platform.OS === "web" ? 67 : 10) }]}>

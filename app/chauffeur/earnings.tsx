@@ -166,37 +166,37 @@ export default function EarningsScreen() {
   };
 
   return (
-    <View style={[styles.mainContainer, { paddingTop: insets.top + (Platform.OS === "web" ? 67 : 12) }]}>
+    <View style={[styles.mainContainer, !isPartner && { backgroundColor: Colors.primary }]}>
       {/* ─── Header ─── */}
-      <View style={styles.headerBar}>
+      <View style={[styles.headerBar, !isPartner && { borderBottomColor: Colors.border }]}>
         <Pressable
           style={styles.headerBtn}
           onPress={() => router.back()}
           accessibilityLabel="Back"
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Ionicons name="arrow-back" size={24} color="#000000" />
+          <Ionicons name="arrow-back" size={24} color={isPartner ? "#000000" : Colors.white} />
         </Pressable>
-        <Text style={styles.headerTitle}>Earnings</Text>
+        <Text style={[styles.headerTitle, !isPartner && { color: Colors.white }]}>Earnings</Text>
         <Pressable
-          style={styles.payoutActionBtn}
+          style={[styles.payoutActionBtn, !isPartner && { backgroundColor: "rgba(255,255,255,0.12)" }]}
           onPress={() => setShowWithdraw(true)}
           accessibilityLabel="Request Payout"
         >
-          <Ionicons name="cash-outline" size={18} color="#000000" />
-          <Text style={styles.payoutActionText}>Payout</Text>
+          <Ionicons name="cash-outline" size={18} color={isPartner ? "#000000" : Colors.white} />
+          <Text style={[styles.payoutActionText, !isPartner && { color: Colors.white }]}>Payout</Text>
         </Pressable>
       </View>
 
       <ScrollView
-        style={styles.container}
+        style={[styles.container, !isPartner && { backgroundColor: Colors.primary }]}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 40 }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={isPartner ? fleetLoading : driverLoading}
             onRefresh={handleRefresh}
-            tintColor="#000000"
+            tintColor={isPartner ? "#000000" : Colors.white}
           />
         }
       >
