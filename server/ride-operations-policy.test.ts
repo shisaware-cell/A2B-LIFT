@@ -405,3 +405,36 @@ test("driver single-device session conflict alert and website photo upload are e
   assert.match(websiteDriverRegister, /\/api\/upload-document/);
 });
 
+test("website login and account registration scripts are syntactically valid and properly handle credentials", () => {
+  const loginHtml = readFileSync(resolve(process.cwd(), "website/login.html"), "utf-8");
+  const driverRegHtml = readFileSync(resolve(process.cwd(), "website/driver-register.html"), "utf-8");
+  const routesSource = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
+
+  // 1. website/login.html script must be valid JavaScript
+  const loginScriptMatch = loginHtml.match(/<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/i);
+  assert.ok(loginScriptMatch, "website/login.html should contain inline script");
+  assert.doesNotThrow(() => {
+    new Function(loginScriptMatch[1]);
+  }, "website/login.html inline script should have no syntax errors");
+
+  // 2. website/driver-register.html script must be valid JavaScript
+  const driverRegScriptMatch = driverRegHtml.match(/<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/i);
+  assert.ok(driverRegScriptMatch, "website/driver-register.html should contain inline script");
+  assert.doesNotThrow(() => {
+    new Function(driverRegScriptMatch[1]);
+  }, "website/driver-register.html inline script should have no syntax errors");
+
+  // 3. Functions handleLogin and handleRegister are defined in login.html
+  assert.match(loginHtml, /async function handleLogin/);
+  assert.match(loginHtml, /async function handleRegister/);
+  assert.match(loginHtml, /function switchTab/);
+
+  // 4. driver registration passes username and handles accessToken/token
+  assert.match(driverRegHtml, /username:\s*payload\.email/);
+  assert.match(driverRegHtml, /regData\.accessToken\s*\|\|\s*regData\.token/);
+
+  // 5. backend register route handles both username and email, and returns accessToken and token
+  assert.match(routesSource, /const\s*\{\s*username,\s*email:\s*bodyEmail/);
+  assert.match(routesSource, /accessToken:\s*token,\s*token/);
+});
+

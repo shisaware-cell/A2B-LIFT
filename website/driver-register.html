@@ -686,13 +686,16 @@
 
       try {
         // Step 1: create account / register
-        const API = 'https://a2blift.com';
+        const API = (typeof window !== 'undefined' && window.location && window.location.origin && window.location.protocol.startsWith('http'))
+          ? window.location.origin
+          : 'https://a2blift.com';
         const regRes = await fetch(`${API}/api/auth/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            name: payload.name,
+            username: payload.email,
             email: payload.email,
+            name: payload.name,
             phone: payload.phone,
             role: 'chauffeur',
             referralCode: payload.referralCode,
@@ -706,7 +709,9 @@
           throw new Error(err.message || 'Registration failed');
         }
 
-        const { token, user } = await regRes.json();
+        const regData = await regRes.json().catch(() => ({}));
+        const token = regData.accessToken || regData.token;
+        const user = regData.user;
 
         // Step 2: create chauffeur profile
         await fetch(`${API}/api/chauffeurs`, {

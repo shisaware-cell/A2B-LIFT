@@ -139,7 +139,9 @@
 
   <script src="main.js"></script>
   <script>
-    const API = 'https://a2blift.com';
+    const API = (typeof window !== 'undefined' && window.location && window.location.origin && window.location.protocol.startsWith('http'))
+      ? window.location.origin
+      : 'https://a2blift.com';
 
     function switchTab(tab) {
       document.getElementById('panelReset').style.display = 'none';
@@ -203,29 +205,31 @@
         });
       }
 
-      let res = await doLogin(false);
-      let data = await res.json();
+      try {
+        let res = await doLogin(false);
+        let data = await res.json().catch(() => ({}));
 
-      if (data?.requiresDeviceTransferConfirmation) {
-        const proceed = confirm(data.message || 'This account is currently active on another device. Signing in here will log out the other device. Do you want to proceed?');
-        if (proceed) {
-          res = await doLogin(true);
-          data = await res.json();
-        } else {
-          btn.textContent = 'Log in'; btn.disabled = false;
-          return;
+        if (data?.requiresDeviceTransferConfirmation) {
+          const proceed = confirm(data.message || 'This account is currently active on another device. Signing in here will log out the other device. Do you want to proceed?');
+          if (proceed) {
+            res = await doLogin(true);
+            data = await res.json().catch(() => ({}));
+          } else {
+            btn.textContent = 'Log in'; btn.disabled = false;
+            return;
+          }
         }
-      }
 
-      if (res.ok && data.accessToken) {
-        localStorage.setItem('a2b_token', data.accessToken);
-        if (data.user) localStorage.setItem('a2b_user', JSON.stringify(data.user));
-        const next = new URLSearchParams(window.location.search).get('next') || 'dashboard.html';
-        window.location.href = next;
-      } else {
-        alert(data.message || 'Login failed. Please check your credentials.');
-        btn.textContent = 'Log in'; btn.disabled = false;
-      }
+        const token = data?.accessToken || data?.token;
+        if (res.ok && token) {
+          localStorage.setItem('a2b_token', token);
+          if (data.user) localStorage.setItem('a2b_user', JSON.stringify(data.user));
+          const next = new URLSearchParams(window.location.search).get('next') || 'dashboard.html';
+          window.location.href = next;
+        } else {
+          alert(data?.message || 'Login failed. Please check your credentials.');
+          btn.textContent = 'Log in'; btn.disabled = false;
+        }
       } catch {
         alert('Unable to reach the server. Please try again.');
         btn.textContent = 'Log in'; btn.disabled = false;
@@ -294,8 +298,10 @@
       const btn = e.target.querySelector('[type=submit]');
       const firstName = document.getElementById('regFirst').value.trim();
       const lastName = document.getElementById('regLast').value.trim();
+      const email = document.getElementById('regEmail').value.trim().toLowerCase();
       const body = {
-        username: document.getElementById('regEmail').value.trim().toLowerCase(),
+        username: email,
+        email: email,
         name: [firstName, lastName].filter(Boolean).join(' '),
         phone: document.getElementById('regPhone').value.trim(),
         password: document.getElementById('regPassword').value,
@@ -310,14 +316,15 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
         });
-        const data = await res.json();
-        if (res.ok && data.accessToken) {
-          localStorage.setItem('a2b_token', data.accessToken);
+        const data = await res.json().catch(() => ({}));
+        const token = data?.accessToken || data?.token;
+        if (res.ok && token) {
+          localStorage.setItem('a2b_token', token);
           if (data.user) localStorage.setItem('a2b_user', JSON.stringify(data.user));
           const next = new URLSearchParams(window.location.search).get('next') || 'dashboard.html';
           window.location.href = next;
         } else {
-          alert(data.message || 'Registration failed. Please try again.');
+          alert(data?.message || 'Registration failed. Please try again.');
           btn.textContent = 'Create account'; btn.disabled = false;
         }
       } catch {

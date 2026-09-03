@@ -1672,10 +1672,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // -----------------------------
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
-      const { username, password, name, phone, role, referralCode } = req.body;
+      const { username, email: bodyEmail, password, name, phone, role, referralCode } = req.body;
+      const rawEmail = typeof username === "string" && username.trim()
+        ? username.trim()
+        : (typeof bodyEmail === "string" ? bodyEmail.trim() : "");
       const normalizedPhone = typeof phone === "string" ? phone.trim() : "";
 
-      if (!username || !password || !name) {
+      if (!rawEmail || !password || !name) {
         return res.status(400).json({ message: "Email, password, name, and phone number are required" });
       }
       if (!normalizedPhone) {
@@ -1683,7 +1686,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Normalise email — username field now stores email address
-      const emailValidation = validateEmailAddress(username);
+      const emailValidation = validateEmailAddress(rawEmail);
       const email = emailValidation.normalized;
       if (!emailValidation.valid) {
         return res.status(400).json({ message: emailValidation.message || "Please enter a valid email address" });
@@ -1730,7 +1733,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const token = signAccessToken({ sub: user.id, role: user.role as UserRole, email: user.username, name: user.name });
       setAuthCookie(res, token);
       const safeUser = await hydrateAuthUser(user);
-      return res.json({ user: safeUser, accessToken: token });
+      return res.json({ user: safeUser, accessToken: token, token });
     } catch (error: any) {
       if (error instanceof UserIdentityConflictError) {
         return res.status(409).json({ code: `DUPLICATE_${error.field.toUpperCase()}`, message: error.message });
