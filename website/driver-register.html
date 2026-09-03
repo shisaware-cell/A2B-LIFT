@@ -392,46 +392,146 @@
               <div class="file-upload-icon">📸</div>
               <strong>Tap to take photo or upload</strong>
               <p>JPG or PNG · Clear face view</p>
+              <div class="photo-preview" id="prev-photo" style="display:none;margin-top:10px;">
+                <img src="" style="width:84px;height:84px;border-radius:50%;object-fit:cover;margin:0 auto;display:block;border:2px solid var(--black);" />
+              </div>
             </div>
           </div>
 
           <div class="form-group">
-            <label>South African ID or Passport</label>
+            <label>South African ID or Passport *</label>
             <div class="file-upload" id="fu-id">
               <input type="file" accept="image/*,application/pdf" id="doc-id" name="doc_id" />
               <div class="file-upload-icon">🪪</div>
               <strong>Tap to upload</strong>
               <p>JPG, PNG or PDF · Max 5 MB</p>
+              <div class="photo-preview" id="prev-id" style="display:none;margin-top:10px;">
+                <img src="" style="max-height:90px;border-radius:6px;object-fit:cover;width:100%;" />
+              </div>
             </div>
           </div>
 
           <div class="form-group">
-            <label>Professional Driving Permit (PrDP)</label>
+            <label>Professional Driving Permit (PrDP) *</label>
             <div class="file-upload" id="fu-prdp">
               <input type="file" accept="image/*,application/pdf" id="doc-prdp" name="doc_prdp" />
               <div class="file-upload-icon">🪪</div>
               <strong>Tap to upload</strong>
               <p>JPG, PNG or PDF · Max 5 MB</p>
+              <div class="photo-preview" id="prev-prdp" style="display:none;margin-top:10px;">
+                <img src="" style="max-height:90px;border-radius:6px;object-fit:cover;width:100%;" />
+              </div>
             </div>
           </div>
 
           <div class="form-group">
-            <label>Vehicle registration papers</label>
+            <label>Vehicle registration papers *</label>
             <div class="file-upload" id="fu-reg">
               <input type="file" accept="image/*,application/pdf" id="doc-reg" name="doc_reg" />
               <div class="file-upload-icon">📄</div>
               <strong>Tap to upload</strong>
               <p>JPG, PNG or PDF · Max 5 MB</p>
+              <div class="photo-preview" id="prev-reg" style="display:none;margin-top:10px;">
+                <img src="" style="max-height:90px;border-radius:6px;object-fit:cover;width:100%;" />
+              </div>
             </div>
           </div>
 
           <div class="form-group">
             <label>Roadworthy certificate (optional but recommended)</label>
-            <div class="file-upload">
+            <div class="file-upload" id="fu-roadworthy">
               <input type="file" accept="image/*,application/pdf" id="doc-roadworthy" name="doc_roadworthy" />
               <div class="file-upload-icon">✅</div>
               <strong>Tap to upload</strong>
               <p>JPG, PNG or PDF · Max 5 MB</p>
+              <div class="photo-preview" id="prev-roadworthy" style="display:none;margin-top:10px;">
+                <img src="" style="max-height:90px;border-radius:6px;object-fit:cover;width:100%;" />
+              </div>
+            </div>
+          </div>
+
+          <!-- ── VEHICLE INSPECTION PHOTOS (5 ANGLES) ── -->
+          <div style="margin: 32px 0 20px; padding-top: 24px; border-top: 1.5px solid var(--grey-200);">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+              <span style="font-size: 20px;">🚘</span>
+              <h3 style="font-size: 16px; font-weight: 800; color: var(--grey-900); margin: 0;">Vehicle Photos (5 Required Angles)</h3>
+            </div>
+            <p style="font-size: 13px; color: var(--grey-600); margin: 0 0 18px; line-height: 1.5;">
+              Just like on the driver app, please submit clear, well-lit photos of your vehicle from each required angle.
+            </p>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px;">
+              
+              <!-- 1. Front Exterior -->
+              <div class="form-group" style="margin-bottom: 0;">
+                <label>1. Front Exterior *</label>
+                <div class="file-upload" id="fu-car-front" style="padding: 16px;">
+                  <input type="file" accept="image/*" id="doc-car-front" name="doc_car_front" />
+                  <div class="file-upload-icon" style="font-size: 24px; margin-bottom: 4px;">🚗</div>
+                  <strong style="font-size: 13px;">Front Exterior</strong>
+                  <p style="font-size: 11px; margin: 4px 0 0;">Grille, bumper &amp; plate</p>
+                  <div class="photo-preview" id="prev-car-front" style="display:none;margin-top:8px;">
+                    <img src="" style="max-height:80px;border-radius:6px;object-fit:cover;width:100%;" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. Rear Exterior -->
+              <div class="form-group" style="margin-bottom: 0;">
+                <label>2. Rear Exterior *</label>
+                <div class="file-upload" id="fu-car-back" style="padding: 16px;">
+                  <input type="file" accept="image/*" id="doc-car-back" name="doc_car_back" />
+                  <div class="file-upload-icon" style="font-size: 24px; margin-bottom: 4px;">🚘</div>
+                  <strong style="font-size: 13px;">Rear Exterior</strong>
+                  <p style="font-size: 11px; margin: 4px 0 0;">Boot, taillights &amp; plate</p>
+                  <div class="photo-preview" id="prev-car-back" style="display:none;margin-top:8px;">
+                    <img src="" style="max-height:80px;border-radius:6px;object-fit:cover;width:100%;" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3. Driver Side (Left) -->
+              <div class="form-group" style="margin-bottom: 0;">
+                <label>3. Driver Side (Left) *</label>
+                <div class="file-upload" id="fu-car-left" style="padding: 16px;">
+                  <input type="file" accept="image/*" id="doc-car-left" name="doc_car_left" />
+                  <div class="file-upload-icon" style="font-size: 24px; margin-bottom: 4px;">🚙</div>
+                  <strong style="font-size: 13px;">Driver Side (Left)</strong>
+                  <p style="font-size: 11px; margin: 4px 0 0;">Full side profile &amp; wheels</p>
+                  <div class="photo-preview" id="prev-car-left" style="display:none;margin-top:8px;">
+                    <img src="" style="max-height:80px;border-radius:6px;object-fit:cover;width:100%;" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- 4. Passenger Side (Right) -->
+              <div class="form-group" style="margin-bottom: 0;">
+                <label>4. Passenger Side (Right) *</label>
+                <div class="file-upload" id="fu-car-right" style="padding: 16px;">
+                  <input type="file" accept="image/*" id="doc-car-right" name="doc_car_right" />
+                  <div class="file-upload-icon" style="font-size: 24px; margin-bottom: 4px;">🚙</div>
+                  <strong style="font-size: 13px;">Passenger Side (Right)</strong>
+                  <p style="font-size: 11px; margin: 4px 0 0;">Full side profile &amp; wheels</p>
+                  <div class="photo-preview" id="prev-car-right" style="display:none;margin-top:8px;">
+                    <img src="" style="max-height:80px;border-radius:6px;object-fit:cover;width:100%;" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- 5. Inside / Interior -->
+              <div class="form-group" style="margin-bottom: 0; grid-column: 1 / -1;">
+                <label>5. Inside / Interior *</label>
+                <div class="file-upload" id="fu-car-inside" style="padding: 16px;">
+                  <input type="file" accept="image/*" id="doc-car-inside" name="doc_car_inside" />
+                  <div class="file-upload-icon" style="font-size: 24px; margin-bottom: 4px;">💺</div>
+                  <strong style="font-size: 13px;">Inside / Interior</strong>
+                  <p style="font-size: 11px; margin: 4px 0 0;">Dashboard &amp; passenger seats</p>
+                  <div class="photo-preview" id="prev-car-inside" style="display:none;margin-top:8px;">
+                    <img src="" style="max-height:80px;border-radius:6px;object-fit:cover;width:100%;" />
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
 
@@ -540,6 +640,9 @@
 
     function buildSummary() {
       const get = id => document.getElementById(id)?.value?.trim() || '—';
+      const carPhotosCount = ['doc-car-front', 'doc-car-back', 'doc-car-left', 'doc-car-right', 'doc-car-inside'].filter(id => document.getElementById(id)?.files?.length).length;
+      const docsCount = ['doc-photo', 'doc-id', 'doc-prdp', 'doc-reg', 'doc-roadworthy'].filter(id => document.getElementById(id)?.files?.length).length;
+
       document.getElementById('summaryBox').innerHTML = `
         <strong style="color:var(--black);display:block;margin-bottom:8px">Your details</strong>
         <b>Name:</b> ${get('firstName')} ${get('lastName')}<br>
@@ -548,6 +651,8 @@
         <b>City:</b> ${get('city') || '—'}<br>
         <b>Vehicle:</b> ${get('vehicleYear')} ${get('vehicleMake')} ${get('vehicleModel')} · ${get('licensePlate')}<br>
         <b>Seats:</b> ${get('seats') || '—'}<br>
+        <b>Documents attached:</b> ${docsCount} uploaded<br>
+        <b>Vehicle inspection photos:</b> ${carPhotosCount}/5 attached<br>
         ${get('referralCode') !== '—' ? `<b>Reward code:</b> ${get('referralCode')}<br>` : ''}
       `;
     }
@@ -618,21 +723,30 @@
           })
         });
 
-        // Step 3: upload driver documents & photos
+        // Step 3: upload driver documents & vehicle inspection photos (5 angles)
         const docConfigs = [
-          { inputId: 'doc-photo', type: 'driver:driver_photo', docType: 'driver_photo' },
-          { inputId: 'doc-id', type: 'driver:drivers_license', docType: 'driver_drivers_license' },
-          { inputId: 'doc-prdp', type: 'driver:pdrp_certificate', docType: 'driver_pdrp_certificate' },
-          { inputId: 'doc-reg', type: 'vehicle:registration', docType: 'vehicle_registration' },
-          { inputId: 'doc-roadworthy', type: 'vehicle:roadworthy', docType: 'vehicle_roadworthy' },
+          { inputId: 'doc-photo', type: 'driver:driver_photo', docType: 'driver_photo', label: 'Driver Photo' },
+          { inputId: 'doc-id', type: 'driver:drivers_license', docType: 'driver_drivers_license', label: 'ID / Passport' },
+          { inputId: 'doc-prdp', type: 'driver:pdrp_certificate', docType: 'driver_pdrp_certificate', label: 'PrDP Permit' },
+          { inputId: 'doc-reg', type: 'vehicle:registration', docType: 'vehicle_registration', label: 'Vehicle Registration' },
+          { inputId: 'doc-roadworthy', type: 'vehicle:roadworthy', docType: 'vehicle_roadworthy', label: 'Roadworthy Certificate' },
+          { inputId: 'doc-car-front', type: 'vehicle:photo_front', docType: 'vehicle_photo_front', label: 'Front Exterior Photo' },
+          { inputId: 'doc-car-back', type: 'vehicle:photo_back', docType: 'vehicle_photo_back', label: 'Rear Exterior Photo' },
+          { inputId: 'doc-car-left', type: 'vehicle:photo_left', docType: 'vehicle_photo_left', label: 'Driver Side Photo' },
+          { inputId: 'doc-car-right', type: 'vehicle:photo_right', docType: 'vehicle_photo_right', label: 'Passenger Side Photo' },
+          { inputId: 'doc-car-inside', type: 'vehicle:photo_inside', docType: 'vehicle_photo_inside', label: 'Inside / Interior Photo' },
         ];
 
-        for (const cfg of docConfigs) {
+        const filesToUpload = docConfigs.filter(cfg => document.getElementById(cfg.inputId)?.files?.[0]);
+        let uploadedCount = 0;
+
+        for (const cfg of filesToUpload) {
           const input = document.getElementById(cfg.inputId);
           const file = input?.files?.[0];
           if (!file) continue;
           try {
-            btn.textContent = `Uploading ${file.name}…`;
+            uploadedCount++;
+            btn.textContent = `Uploading ${cfg.label} (${uploadedCount}/${filesToUpload.length})…`;
             let base64Data = '';
             if (file.type && file.type.startsWith('image/')) {
               base64Data = await new Promise((resolve) => {
@@ -651,6 +765,8 @@
                   canvas.width = w;
                   canvas.height = h;
                   const ctx = canvas.getContext('2d');
+                  ctx.imageSmoothingEnabled = true;
+                  ctx.imageSmoothingQuality = 'high';
                   ctx.drawImage(img, 0, 0, w, h);
                   const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
                   resolve(dataUrl.replace(/^data:[^;]+;base64,/, ''));
@@ -697,6 +813,22 @@
                   },
                   body: JSON.stringify({ type: cfg.type, url: upData.url })
                 }).catch(() => {});
+
+                // Also save to /api/driver/documents for legacy admin compatibility
+                if (user?.id) {
+                  await fetch(`${API}/api/driver/documents`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                      userId: user.id,
+                      type: cfg.type,
+                      url: upData.url
+                    })
+                  }).catch(() => {});
+                }
               }
             }
           } catch (uploadErr) {
@@ -715,15 +847,32 @@
       }
     }
 
-    // File upload labels
+    // Live file upload labels & instant photo previews
     document.querySelectorAll('.file-upload input[type=file]').forEach(input => {
       input.addEventListener('change', e => {
         const file = e.target.files[0];
         if (file) {
           const wrap = e.target.closest('.file-upload');
-          wrap.querySelector('strong').textContent = file.name;
-          wrap.querySelector('p').textContent = `${(file.size / 1024 / 1024).toFixed(2)} MB`;
-          wrap.style.borderColor = 'var(--black)';
+          const strong = wrap?.querySelector('strong');
+          const p = wrap?.querySelector('p');
+          if (strong) strong.textContent = file.name;
+          if (p) p.textContent = `${(file.size / 1024 / 1024).toFixed(2)} MB · Selected`;
+          if (wrap) {
+            wrap.style.borderColor = 'var(--black)';
+            wrap.style.background = '#f9fafb';
+          }
+
+          // Live image preview
+          const preview = wrap?.querySelector('.photo-preview');
+          const img = preview?.querySelector('img');
+          if (preview && img && file.type && file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+              img.src = evt.target.result;
+              preview.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+          }
         }
       });
     });

@@ -6767,16 +6767,38 @@ If you did not request this, you can ignore this email.`,
       if (url.startsWith("file:") || url.startsWith("content:")) {
         return res.status(400).json({ message: "Invalid document URL. Documents must be uploaded via /api/upload-document." });
       }
-      if (!type.startsWith("driver:") && !type.startsWith("partner:")) {
-        return res.status(400).json({ message: "Document type must start with driver: or partner:" });
+      if (!type.startsWith("driver:") && !type.startsWith("partner:") && !type.startsWith("vehicle:")) {
+        return res.status(400).json({ message: "Document type must start with driver:, partner:, or vehicle:" });
+      }
+      let vehicleId = null;
+      if (type.startsWith("vehicle:")) {
+        try {
+          const profile = await ensureDriverOperatorForChauffeur(req.auth.sub);
+          if (profile) {
+            const vehicles2 = await storage.getVehiclesByOwnerOperator(profile.id);
+            if (vehicles2.length > 0) {
+              vehicleId = vehicles2[0].id;
+            }
+          }
+        } catch {
+        }
+      }
+      if (type === "driver:driver_photo") {
+        try {
+          await storage.updateUser(req.auth.sub, { profilePhoto: url });
+          const ch = await storage.getChauffeurByUserId(req.auth.sub);
+          if (ch) await storage.updateChauffeur(ch.id, { profilePhoto: url });
+        } catch {
+        }
       }
       const existingDocs = await storage.getDocumentsByUser(req.auth.sub);
       const existing = existingDocs.find(
-        (doc2) => doc2.type === type && !doc2.applicationId && !doc2.chauffeurId && !doc2.vehicleId
+        (doc2) => doc2.type === type && !doc2.applicationId && !doc2.chauffeurId
       );
       if (existing) {
         const updated = await storage.updateDocument(existing.id, {
           url,
+          vehicleId: vehicleId || existing.vehicleId || null,
           status: "pending",
           reviewedAt: null,
           reviewerAdminId: null
@@ -6787,7 +6809,7 @@ If you did not request this, you can ignore this email.`,
         userId: req.auth.sub,
         applicationId: null,
         chauffeurId: null,
-        vehicleId: null,
+        vehicleId,
         type,
         url,
         status: "pending"

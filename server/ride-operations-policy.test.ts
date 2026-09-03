@@ -392,9 +392,16 @@ test("driver single-device session conflict alert and website photo upload are e
   const routesSource = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
   assert.match(routesSource, /isDriverAccount/);
   assert.match(routesSource, /DEVICE_TRANSFERRED/);
+  assert.match(routesSource, /type\.startsWith\("vehicle:"\)/);
 
   const websiteDriverRegister = readFileSync(resolve(process.cwd(), "website/driver-register.html"), "utf-8");
   assert.match(websiteDriverRegister, /doc-photo/);
+  assert.match(websiteDriverRegister, /doc-car-front/);
+  assert.match(websiteDriverRegister, /doc-car-back/);
+  assert.match(websiteDriverRegister, /doc-car-left/);
+  assert.match(websiteDriverRegister, /doc-car-right/);
+  assert.match(websiteDriverRegister, /doc-car-inside/);
+  assert.match(websiteDriverRegister, /vehicle:photo_front/);
   assert.match(websiteDriverRegister, /\/api\/upload-document/);
 });
 
