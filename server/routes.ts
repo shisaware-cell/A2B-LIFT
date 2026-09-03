@@ -5896,6 +5896,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sendSms({ to: driverPhone, message: smsText }),
       ]);
 
+      function formatEmailError(err?: string | null): string | null {
+        if (!err) return null;
+        if (err.includes("associated domain with your API key is not verified")) {
+          return "Resend API key domain is unverified. Create a Full Access API key in Resend (resend.com/api-keys) or verify your domain DNS records.";
+        }
+        return err;
+      }
+
       // Persist the delivery outcome (email is the primary channel the UI reflects).
       const emailStatus = emailResult.status === "sent"
         ? "sent"
@@ -5904,9 +5912,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           : emailResult.status === "skipped"
             ? "skipped"
             : "failed";
-      const emailError = emailResult.status === "sent" || emailResult.status === "skipped"
+      const rawError = emailResult.status === "sent" || emailResult.status === "skipped"
         ? (smsResult.status === "sent" ? null : smsResult.error || null)
         : emailResult.error || null;
+      const emailError = formatEmailError(rawError);
+
       invite = (await storage.updateFleetDriverInvite(invite.id, {
         emailStatus,
         emailError,
@@ -5924,6 +5934,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       return res.status(201).json({ invite: await serializeFleetInvite(invite) });
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/fleet/invites/:id/resend", requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      const invite = await storage.getFleetDriverInvite(req.params.id);
+      if (!invite) return res.status(404).json({ message: "Invite not found" });
+      if (invite.invitedByOperatorProfileId !== profile.id && invite.invitedByUserId !== req.auth!.sub) {
+        return res.status(403).json({ message: "You are not authorized to resend this invite." });
+      }
+      if (invite.status !== "pending") {
+        return res.status(400).json({ message: `Cannot resend an invite that is already ${invite.status}.` });
+      }
+
+      const driverProfile = await storage.getOperatorProfile(invite.driverOperatorProfileId);
+      if (!driverProfile) return res.status(404).json({ message: "Driver profile not found" });
+
+      const [driverUser, inviterUser, inviterPartner] = await Promise.all([
+        storage.getUser(driverProfile.userId).catch(() => undefined),
+        storage.getUser(profile.userId).catch(() => undefined),
+        profile.type === "partner" ? storage.getPartnerProfileByOperatorId(profile.id).catch(() => undefined) : Promise.resolve(null),
+      ]);
+      const driverChauffeur = await storage.getChauffeurByUserId(driverProfile.userId).catch(() => undefined);
+      const inviterName = inviterPartner?.companyName || inviterUser?.name || "An A2B LIFT operator";
+      const driverEmail = driverUser?.username && driverUser.username.includes("@") ? driverUser.username : "";
+      const driverPhone = driverUser?.phone || (driverChauffeur as any)?.phone || "";
+      const driverName = driverUser?.name || "there";
+
+      const driverAppUrl = process.env.DRIVER_APP_URL || "https://a2blift.com/driver";
+      const smsInviter = inviterName.length > 18 ? inviterName.slice(0, 17) + "…" : inviterName;
+      const emailBody = `<p>Hi ${driverName},</p>
+        <p><strong>${inviterName}</strong> wants you to become one of their drivers on A2B LIFT and drive one of their vehicles.</p>
+        ${invite.message ? `<p style="padding:12px 14px;background:#f4f4f6;border-radius:10px;">"${invite.message}"</p>` : ""}
+        <p>Open the A2B LIFT driver app and go to <strong>Fleet → Invitations</strong> to accept or decline.</p>
+        <p>Don't have the app yet? Get it here: <a href="${driverAppUrl}">${driverAppUrl}</a></p>`;
+      const smsText = `A2B LIFT: ${smsInviter} invited you to drive for their fleet. Accept in the A2B driver app > Fleet: ${driverAppUrl}`;
+
+      const [emailResult, smsResult] = await Promise.all([
+        sendEmail({
+          to: driverEmail,
+          subject: `${inviterName} invited you to their A2B LIFT fleet`,
+          html: renderBrandedEmail({ heading: "Fleet invitation", bodyHtml: emailBody }),
+        }),
+        sendSms({ to: driverPhone, message: smsText }),
+      ]);
+
+      function formatEmailError(err?: string | null): string | null {
+        if (!err) return null;
+        if (err.includes("associated domain with your API key is not verified")) {
+          return "Resend API key domain is unverified. Create a Full Access API key in Resend (resend.com/api-keys) or verify your domain DNS records.";
+        }
+        return err;
+      }
+
+      const emailStatus = emailResult.status === "sent"
+        ? "sent"
+        : emailResult.status === "pending_configuration"
+          ? "pending_configuration"
+          : emailResult.status === "skipped"
+            ? "skipped"
+            : "failed";
+      const rawError = emailResult.status === "sent" || emailResult.status === "skipped"
+        ? (smsResult.status === "sent" ? null : smsResult.error || null)
+        : emailResult.error || null;
+      const emailError = formatEmailError(rawError);
+
+      const updated = (await storage.updateFleetDriverInvite(invite.id, {
+        emailStatus,
+        emailError,
+        resendId: emailResult.id || null,
+        sentAt: emailResult.status === "sent" ? new Date() : invite.sentAt,
+      })) || invite;
+
+      return res.json({ invite: await serializeFleetInvite(updated) });
     } catch (error: any) {
       return res.status(400).json({ message: error.message });
     }

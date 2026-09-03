@@ -164,14 +164,35 @@ export default function FleetScreen() {
       if (emailStatus === "sent") {
         Alert.alert("Invite sent", "The driver has been emailed and notified in the app.");
       } else if (emailStatus === "pending_configuration") {
-        Alert.alert("Invite saved", "The invite was created, but Resend is not configured yet. Add RESEND_API_KEY to send emails.");
+        Alert.alert("Invite saved", "The in-app invite is active. To enable outbound emails, configure RESEND_API_KEY in Railway.");
       } else {
-        Alert.alert("Invite saved", data?.invite?.emailError || "The invite was created, but the email could not be sent yet.");
+        Alert.alert(
+          "Invite saved",
+          "The invite is active and the driver was notified in the app.\n\nOutbound email delivery is pending Resend domain verification. You can also call or email the driver directly."
+        );
       }
     } catch (e: any) {
       Alert.alert("Could not send invite", e.message || "Please try again.");
     } finally {
       setSendingInviteId(null);
+    }
+  }
+
+  async function resendInviteEmail(inviteId: string) {
+    try {
+      const res = await apiRequest("POST", `/api/fleet/invites/${inviteId}/resend`);
+      const data = await res.json();
+      await load();
+      if (data?.invite?.emailStatus === "sent") {
+        Alert.alert("Email sent", "The invite email was successfully delivered.");
+      } else {
+        Alert.alert(
+          "Email delivery pending",
+          data?.invite?.emailError || "Email could not be delivered yet. Please verify your Resend domain DNS records."
+        );
+      }
+    } catch (e: any) {
+      Alert.alert("Could not resend", e.message || "Please try again.");
     }
   }
 
@@ -395,6 +416,8 @@ export default function FleetScreen() {
                 setSelectedDriverId(invite.driver.id);
                 assignDriver(invite.driver.id);
               }}
+              onResendEmail={resendInviteEmail}
+              onEmailDriver={(email) => emailDriver(email)}
               canAssign
               saving={saving}
             />
@@ -533,6 +556,8 @@ function InviteList({
   statusColor,
   formatDate,
   onAssign,
+  onResendEmail,
+  onEmailDriver,
   canAssign,
   saving,
 }: {
@@ -542,6 +567,8 @@ function InviteList({
   statusColor: (status?: string) => string;
   formatDate: (date?: string | null) => string;
   onAssign: (invite: FleetInvite) => void;
+  onResendEmail?: (inviteId: string) => void;
+  onEmailDriver?: (email?: string | null) => void;
   canAssign?: boolean;
   saving?: boolean;
 }) {
@@ -550,21 +577,58 @@ function InviteList({
       <Text style={styles.sectionTitle}>{title}</Text>
       {invites.length === 0 ? (
         <Text style={styles.emptyText}>{empty}</Text>
-      ) : invites.map((invite) => (
-        <View key={invite.id} style={styles.inviteCard}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.assignmentTitle}>{invite.driver?.user?.name || "Approved driver"}</Text>
-            <Text style={styles.assignmentMeta}>Invited {formatDate(invite.createdAt)} · Email {invite.emailStatus}</Text>
-            <Text style={[styles.assignmentPhone, { color: statusColor(invite.status) }]}>{invite.status}</Text>
-            {!!invite.emailError && <Text style={styles.errorText}>{invite.emailError}</Text>}
+      ) : invites.map((invite) => {
+        const rawError = invite.emailError || "";
+        const isDomainError = rawError.includes("associated domain with your API key is not verified") || rawError.includes("Resend API key domain is unverified");
+        const displayError = isDomainError
+          ? "Outbound email pending domain verification on Resend. In-app invite is active."
+          : rawError;
+        const driverEmail = invite.driver?.user?.username?.includes("@") ? invite.driver.user.username : null;
+
+        return (
+          <View key={invite.id} style={[styles.inviteCard, { flexDirection: "column", alignItems: "stretch" }]}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.assignmentTitle}>{invite.driver?.user?.name || "Approved driver"}</Text>
+                <Text style={styles.assignmentMeta}>Invited {formatDate(invite.createdAt)} · Email {invite.emailStatus}</Text>
+                <Text style={[styles.assignmentPhone, { color: statusColor(invite.status) }]}>{invite.status}</Text>
+              </View>
+              {canAssign && invite.status === "accepted" && (
+                <Pressable style={[styles.smallAssignBtn, saving && { opacity: 0.7 }]} onPress={() => onAssign(invite)} disabled={saving}>
+                  <Text style={styles.smallAssignText}>Assign</Text>
+                </Pressable>
+              )}
+            </View>
+
+            {!!displayError && (
+              <Text style={[styles.errorText, { marginTop: 8, fontSize: 12, lineHeight: 16 }]}>{displayError}</Text>
+            )}
+
+            {invite.status === "pending" && (
+              <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+                {onResendEmail && invite.emailStatus === "failed" && (
+                  <Pressable
+                    style={[styles.smallAssignBtn, { backgroundColor: "rgba(255,255,255,0.08)", borderColor: Colors.border, borderWidth: 1 }]}
+                    onPress={() => onResendEmail(invite.id)}
+                  >
+                    <Ionicons name="refresh-outline" size={14} color={Colors.white} />
+                    <Text style={[styles.smallAssignText, { color: Colors.white, marginLeft: 4 }]}>Retry Email</Text>
+                  </Pressable>
+                )}
+                {onEmailDriver && driverEmail && (
+                  <Pressable
+                    style={[styles.smallAssignBtn, { backgroundColor: "rgba(255,255,255,0.08)", borderColor: Colors.border, borderWidth: 1 }]}
+                    onPress={() => onEmailDriver(driverEmail)}
+                  >
+                    <Ionicons name="mail-outline" size={14} color={Colors.white} />
+                    <Text style={[styles.smallAssignText, { color: Colors.white, marginLeft: 4 }]}>Send Direct Email</Text>
+                  </Pressable>
+                )}
+              </View>
+            )}
           </View>
-          {canAssign && invite.status === "accepted" && (
-            <Pressable style={[styles.smallAssignBtn, saving && { opacity: 0.7 }]} onPress={() => onAssign(invite)} disabled={saving}>
-              <Text style={styles.smallAssignText}>Assign</Text>
-            </Pressable>
-          )}
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
