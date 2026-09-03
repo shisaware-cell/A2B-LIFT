@@ -55,6 +55,20 @@ export default function FleetLiveMapScreen() {
     totalVehicles: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [operatorProfile, setOperatorProfile] = useState<any>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+
+  useEffect(() => {
+    apiRequest("GET", "/api/operator-profile/me")
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          setOperatorProfile(data.profile || null);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setProfileLoading(false));
+  }, []);
 
   async function fetchLiveFleet() {
     try {
@@ -131,14 +145,39 @@ export default function FleetLiveMapScreen() {
     Linking.openURL(`tel:${phone}`).catch(() => Alert.alert("Could not start call", phone));
   }
 
+  const isApprovedPartner = operatorProfile?.type === "partner" && operatorProfile?.status === "approved";
+
+  if (!profileLoading && !isApprovedPartner) {
+    return (
+      <View style={[styles.container, styles.restrictedCenter, { paddingTop: insets.top + 40 }]}>
+        <View style={styles.restrictedIconWrap}>
+          <Ionicons name="business-outline" size={44} color="#111827" />
+        </View>
+        <Text style={styles.restrictedTitle}>Partner Access Required</Text>
+        <Text style={styles.restrictedDesc}>
+          Live GPS Fleet Tracking is exclusively available to approved A2B fleet partners.
+        </Text>
+        <Pressable
+          style={styles.restrictedBackBtn}
+          onPress={() => router.replace("/chauffeur" as never)}
+        >
+          <Text style={styles.restrictedBackBtnText}>Back to Dashboard</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* ─── Full-Screen Interactive Map ─── */}
       <FleetMap
         ref={mapRef}
+        mode={filterType}
         drivers={filteredDrivers}
+        vehicles={filteredVehicles}
         selectedItem={selectedItem}
         onSelectDriver={(driver) => setSelectedItem(driver)}
+        onSelectVehicle={(vehicle) => setSelectedItem(vehicle)}
         initialRegion={DEFAULT_MAP_CENTER}
       />
 
@@ -155,7 +194,14 @@ export default function FleetLiveMapScreen() {
             <Ionicons name="arrow-back" size={24} color="#000000" />
           </Pressable>
           <Text style={styles.headerTitle}>Live Map</Text>
-          <View style={{ width: 40 }} />
+          
+          {/* Live Demand Badge (Top Right next to title) */}
+          <View style={styles.headerDemandBadge}>
+            <View style={styles.headerDemandIconWrap}>
+              <Ionicons name="flame" size={14} color="#FFFFFF" />
+            </View>
+            <Text style={styles.headerDemandText}>Live Demand</Text>
+          </View>
         </View>
 
         {/* Search & Filter Bar */}
@@ -175,7 +221,7 @@ export default function FleetLiveMapScreen() {
             <Ionicons name="search" size={18} color="#6B7280" style={{ marginRight: 8 }} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Name"
+              placeholder={filterType === "Driver" ? "Search driver name or phone..." : "Search plate, make, model..."}
               placeholderTextColor="#9CA3AF"
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -192,6 +238,8 @@ export default function FleetLiveMapScreen() {
               style={[styles.dropdownMenuItem, filterType === "Driver" && styles.dropdownMenuItemActive]}
               onPress={() => {
                 setFilterType("Driver");
+                setSelectedItem(null);
+                setSearchQuery("");
                 setShowFilterDropdown(false);
               }}
             >
@@ -203,6 +251,8 @@ export default function FleetLiveMapScreen() {
               style={[styles.dropdownMenuItem, filterType === "Vehicle" && styles.dropdownMenuItemActive]}
               onPress={() => {
                 setFilterType("Vehicle");
+                setSelectedItem(null);
+                setSearchQuery("");
                 setShowFilterDropdown(false);
               }}
             >
@@ -210,19 +260,6 @@ export default function FleetLiveMapScreen() {
                 Vehicle
               </Text>
             </Pressable>
-          </View>
-        )}
-
-        {/* Live Demand Card Floating Badge */}
-        {showDemandBadge && (
-          <View style={styles.liveDemandCard}>
-            <View style={styles.liveDemandIconWrap}>
-              <Text style={styles.liveDemandIconText}>$</Text>
-            </View>
-            <View>
-              <Text style={styles.liveDemandTitle}>Live</Text>
-              <Text style={styles.liveDemandTitle}>Demand</Text>
-            </View>
           </View>
         )}
       </View>
@@ -255,82 +292,165 @@ export default function FleetLiveMapScreen() {
       </View>
 
       {/* ─── Selected Driver / Vehicle Bottom Card ─── */}
-      {selectedItem && (
-        <View style={[styles.selectedCard, { bottom: insets.bottom + 80 }]}>
-          <View style={styles.selectedCardHeader}>
-            {selectedItem.profilePhoto ? (
-              <Image source={{ uri: selectedItem.profilePhoto }} style={styles.selectedAvatar} />
-            ) : (
-              <View style={styles.selectedAvatarPlaceholder}>
-                <Ionicons name="person" size={20} color="#6B7280" />
+      {selectedItem && (() => {
+        const isVehicle = filterType === "Vehicle" || (!selectedItem.phone && selectedItem.plateNumber);
+        if (isVehicle) {
+          const vehicleMake = selectedItem.make || selectedItem.carMake || "";
+          const vehicleModel = selectedItem.model || selectedItem.vehicleModel || "";
+          const vehiclePlate = selectedItem.plateNumber || "";
+          const vehicleLabel = [vehicleMake, vehicleModel].filter(Boolean).join(" ").trim() || (vehiclePlate ? "Vehicle" : "Fleet Vehicle");
+          const assignedDriverName = selectedItem.assignedDriver?.name;
+          const assignedDriverPhone = selectedItem.assignedDriver?.phone;
+          const lat = selectedItem.lat || selectedItem.assignedDriver?.lat;
+          const lng = selectedItem.lng || selectedItem.assignedDriver?.lng;
+
+          return (
+            <View style={[styles.selectedCard, { bottom: insets.bottom + 80 }]}>
+              <View style={styles.selectedCardHeader}>
+                <View style={styles.selectedAvatarPlaceholder}>
+                  <Ionicons name="car" size={22} color="#111827" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.selectedName}>{vehicleLabel}</Text>
+                  <Text style={styles.selectedSub}>
+                    {vehiclePlate ? `Plate: ${vehiclePlate}` : "Registered Vehicle"}
+                    {selectedItem.color ? ` · ${selectedItem.color}` : ""}
+                    {selectedItem.category ? ` · ${selectedItem.category}` : ""}
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.statusBadge,
+                    selectedItem.assignedDriver
+                      ? { backgroundColor: "#D1FAE5" }
+                      : { backgroundColor: "#F3F4F6" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.statusBadgeText,
+                      selectedItem.assignedDriver
+                        ? { color: "#047857" }
+                        : { color: "#6B7280" },
+                    ]}
+                  >
+                    {selectedItem.assignedDriver ? "Assigned" : "Unassigned"}
+                  </Text>
+                </View>
+                <Pressable onPress={() => setSelectedItem(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="close" size={20} color="#9CA3AF" />
+                </Pressable>
               </View>
-            )}
-            <View style={{ flex: 1 }}>
-              <Text style={styles.selectedName}>{selectedItem.name}</Text>
-              <Text style={styles.selectedSub}>
-                {selectedItem.vehicle
-                  ? `${selectedItem.vehicle.make} ${selectedItem.vehicle.model} (${selectedItem.vehicle.plateNumber})`
-                  : "No vehicle assigned"}
-              </Text>
+
+              {assignedDriverName ? (
+                <View style={styles.activeRideBox}>
+                  <Ionicons name="person" size={14} color="#1D4ED8" />
+                  <Text style={styles.activeRideText} numberOfLines={1}>
+                    Driver: {assignedDriverName} ({selectedItem.assignedDriver.status || "offline"})
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.selectedActionsRow}>
+                {assignedDriverPhone ? (
+                  <Pressable style={styles.actionCallBtn} onPress={() => callDriver(assignedDriverPhone)}>
+                    <Ionicons name="call" size={16} color="#FFFFFF" />
+                    <Text style={styles.actionCallText}>Call Driver</Text>
+                  </Pressable>
+                ) : null}
+                {lat && lng ? (
+                  <Pressable style={styles.actionLocateBtn} onPress={() => focusOnLocation(lat, lng)}>
+                    <Ionicons name="locate" size={16} color="#000000" />
+                    <Text style={styles.actionLocateText}>Center Map</Text>
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
-            <View
-              style={[
-                styles.statusBadge,
-                selectedItem.status === "in_trip"
-                  ? { backgroundColor: "#DBEAFE" }
-                  : selectedItem.status === "online"
-                  ? { backgroundColor: "#D1FAE5" }
-                  : { backgroundColor: "#F3F4F6" },
-              ]}
-            >
-              <Text
+          );
+        }
+
+        // Driver card
+        const vehicleMake = selectedItem.vehicle?.make || selectedItem.vehicle?.carMake || selectedItem.carMake || "";
+        const vehicleModel = selectedItem.vehicle?.model || selectedItem.vehicle?.vehicleModel || selectedItem.vehicleModel || "";
+        const vehiclePlate = selectedItem.vehicle?.plateNumber || selectedItem.plateNumber || "";
+        const vehicleLabel = [vehicleMake, vehicleModel].filter(Boolean).join(" ").trim() || (vehiclePlate ? "Vehicle" : "No vehicle assigned");
+        const vehicleDisplay = vehiclePlate ? `${vehicleLabel} (${vehiclePlate})` : vehicleLabel;
+
+        return (
+          <View style={[styles.selectedCard, { bottom: insets.bottom + 80 }]}>
+            <View style={styles.selectedCardHeader}>
+              {selectedItem.profilePhoto ? (
+                <Image source={{ uri: selectedItem.profilePhoto }} style={styles.selectedAvatar} />
+              ) : (
+                <View style={styles.selectedAvatarPlaceholder}>
+                  <Ionicons name="person" size={20} color="#6B7280" />
+                </View>
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.selectedName}>{selectedItem.name}</Text>
+                <Text style={styles.selectedSub}>{vehicleDisplay}</Text>
+              </View>
+              <View
                 style={[
-                  styles.statusBadgeText,
+                  styles.statusBadge,
                   selectedItem.status === "in_trip"
-                    ? { color: "#1D4ED8" }
+                    ? { backgroundColor: "#DBEAFE" }
                     : selectedItem.status === "online"
-                    ? { color: "#047857" }
-                    : { color: "#6B7280" },
+                    ? { backgroundColor: "#D1FAE5" }
+                    : { backgroundColor: "#F3F4F6" },
                 ]}
               >
-                {selectedItem.status === "in_trip"
-                  ? "In Trip"
-                  : selectedItem.status === "online"
-                  ? "Online"
-                  : "Offline"}
-              </Text>
-            </View>
-            <Pressable onPress={() => setSelectedItem(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="close" size={20} color="#9CA3AF" />
-            </Pressable>
-          </View>
-
-          {selectedItem.activeRide && (
-            <View style={styles.activeRideBox}>
-              <Ionicons name="navigate" size={14} color="#1D4ED8" />
-              <Text style={styles.activeRideText} numberOfLines={1}>
-                {selectedItem.activeRide.dropoffAddress || "Active trip in progress"}
-              </Text>
-            </View>
-          )}
-
-          <View style={styles.selectedActionsRow}>
-            {selectedItem.phone ? (
-              <Pressable style={styles.actionCallBtn} onPress={() => callDriver(selectedItem.phone)}>
-                <Ionicons name="call" size={16} color="#FFFFFF" />
-                <Text style={styles.actionCallText}>Call Driver</Text>
+                <Text
+                  style={[
+                    styles.statusBadgeText,
+                    selectedItem.status === "in_trip"
+                      ? { color: "#1D4ED8" }
+                      : selectedItem.status === "online"
+                      ? { color: "#047857" }
+                      : { color: "#6B7280" },
+                  ]}
+                >
+                  {selectedItem.status === "in_trip"
+                    ? "In Trip"
+                    : selectedItem.status === "online"
+                    ? "Online"
+                    : "Offline"}
+                </Text>
+              </View>
+              <Pressable onPress={() => setSelectedItem(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="close" size={20} color="#9CA3AF" />
               </Pressable>
-            ) : null}
-            <Pressable
-              style={styles.actionLocateBtn}
-              onPress={() => focusOnLocation(selectedItem.lat, selectedItem.lng)}
-            >
-              <Ionicons name="locate" size={16} color="#000000" />
-              <Text style={styles.actionLocateText}>Center Map</Text>
-            </Pressable>
+            </View>
+
+            {selectedItem.activeRide && (
+              <View style={styles.activeRideBox}>
+                <Ionicons name="navigate" size={14} color="#1D4ED8" />
+                <Text style={styles.activeRideText} numberOfLines={1}>
+                  {selectedItem.activeRide.dropoffAddress || "Active trip in progress"}
+                </Text>
+              </View>
+            )}
+
+            <View style={styles.selectedActionsRow}>
+              {selectedItem.phone ? (
+                <Pressable style={styles.actionCallBtn} onPress={() => callDriver(selectedItem.phone)}>
+                  <Ionicons name="call" size={16} color="#FFFFFF" />
+                  <Text style={styles.actionCallText}>Call Driver</Text>
+                </Pressable>
+              ) : null}
+              {selectedItem.lat && selectedItem.lng ? (
+                <Pressable
+                  style={styles.actionLocateBtn}
+                  onPress={() => focusOnLocation(selectedItem.lat, selectedItem.lng)}
+                >
+                  <Ionicons name="locate" size={16} color="#000000" />
+                  <Text style={styles.actionLocateText}>Center Map</Text>
+                </Pressable>
+              ) : null}
+            </View>
           </View>
-        </View>
-      )}
+        );
+      })()}
 
       {/* ─── Full List Drawer Modal ─── */}
       <Modal visible={showListDrawer} animationType="slide" transparent onRequestClose={() => setShowListDrawer(false)}>
@@ -345,85 +465,98 @@ export default function FleetLiveMapScreen() {
 
             <ScrollView style={styles.drawerList}>
               {filterType === "Driver"
-                ? filteredDrivers.map((driver: any) => (
-                    <Pressable
-                      key={driver.id}
-                      style={styles.drawerItem}
-                      onPress={() => {
-                        setShowListDrawer(false);
-                        setSelectedItem(driver);
-                        if (driver.lat && driver.lng) focusOnLocation(driver.lat, driver.lng);
-                      }}
-                    >
-                      {driver.profilePhoto ? (
-                        <Image source={{ uri: driver.profilePhoto }} style={styles.drawerAvatar} />
-                      ) : (
-                        <View style={styles.drawerAvatarPlaceholder}>
-                          <Ionicons name="person" size={18} color="#6B7280" />
-                        </View>
-                      )}
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.drawerItemName}>{driver.name}</Text>
-                        <Text style={styles.drawerItemSub}>
-                          {driver.vehicle
-                            ? `${driver.vehicle.make} ${driver.vehicle.model} · ${driver.vehicle.plateNumber}`
-                            : driver.phone || "No vehicle linked"}
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.statusBadge,
-                          driver.status === "in_trip"
-                            ? { backgroundColor: "#DBEAFE" }
-                            : driver.status === "online"
-                            ? { backgroundColor: "#D1FAE5" }
-                            : { backgroundColor: "#F3F4F6" },
-                        ]}
+                ? filteredDrivers.map((driver: any) => {
+                    const vehicleMake = driver.vehicle?.make || driver.vehicle?.carMake || "";
+                    const vehicleModel = driver.vehicle?.model || driver.vehicle?.vehicleModel || "";
+                    const vehiclePlate = driver.vehicle?.plateNumber || "";
+                    const vehicleLabel = [vehicleMake, vehicleModel].filter(Boolean).join(" ").trim() || (vehiclePlate ? "Vehicle" : "No vehicle linked");
+                    const vehicleDisplay = vehiclePlate ? `${vehicleLabel} · ${vehiclePlate}` : vehicleLabel;
+
+                    return (
+                      <Pressable
+                        key={driver.id}
+                        style={styles.drawerItem}
+                        onPress={() => {
+                          setShowListDrawer(false);
+                          setSelectedItem(driver);
+                          if (driver.lat && driver.lng) focusOnLocation(driver.lat, driver.lng);
+                        }}
                       >
-                        <Text
+                        {driver.profilePhoto ? (
+                          <Image source={{ uri: driver.profilePhoto }} style={styles.drawerAvatar} />
+                        ) : (
+                          <View style={styles.drawerAvatarPlaceholder}>
+                            <Ionicons name="person" size={18} color="#6B7280" />
+                          </View>
+                        )}
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.drawerItemName}>{driver.name}</Text>
+                          <Text style={styles.drawerItemSub}>{vehicleDisplay}</Text>
+                        </View>
+                        <View
                           style={[
-                            styles.statusBadgeText,
+                            styles.statusBadge,
                             driver.status === "in_trip"
-                              ? { color: "#1D4ED8" }
+                              ? { backgroundColor: "#DBEAFE" }
                               : driver.status === "online"
-                              ? { color: "#047857" }
-                              : { color: "#6B7280" },
+                              ? { backgroundColor: "#D1FAE5" }
+                              : { backgroundColor: "#F3F4F6" },
                           ]}
                         >
-                          {driver.status === "in_trip"
-                            ? "In Trip"
-                            : driver.status === "online"
-                            ? "Online"
-                            : "Offline"}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  ))
-                : filteredVehicles.map((vehicle: any) => (
-                    <Pressable
-                      key={vehicle.id}
-                      style={styles.drawerItem}
-                      onPress={() => {
-                        setShowListDrawer(false);
-                        if (vehicle.assignedDriver?.lat && vehicle.assignedDriver?.lng) {
-                          focusOnLocation(vehicle.assignedDriver.lat, vehicle.assignedDriver.lng);
-                        }
-                      }}
-                    >
-                      <View style={styles.vehicleIconWrap}>
-                        <Ionicons name="car" size={20} color="#111827" />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.drawerItemName}>{vehicle.make} {vehicle.model}</Text>
-                        <Text style={styles.drawerItemSub}>
-                          {vehicle.plateNumber} · {vehicle.color} · {vehicle.category}
-                        </Text>
-                        <Text style={[styles.drawerItemSub, { color: "#059669", marginTop: 2 }]}>
-                          Driver: {vehicle.assignedDriver?.name || "Unassigned"}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  ))}
+                          <Text
+                            style={[
+                              styles.statusBadgeText,
+                              driver.status === "in_trip"
+                                ? { color: "#1D4ED8" }
+                                : driver.status === "online"
+                                ? { color: "#047857" }
+                                : { color: "#6B7280" },
+                            ]}
+                          >
+                            {driver.status === "in_trip"
+                              ? "In Trip"
+                              : driver.status === "online"
+                              ? "Online"
+                              : "Offline"}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })
+                : filteredVehicles.map((vehicle: any) => {
+                    const vehicleMake = vehicle.make || vehicle.carMake || "";
+                    const vehicleModel = vehicle.model || vehicle.vehicleModel || "";
+                    const vehicleLabel = [vehicleMake, vehicleModel].filter(Boolean).join(" ").trim() || "Vehicle";
+                    const lat = vehicle.lat || vehicle.assignedDriver?.lat;
+                    const lng = vehicle.lng || vehicle.assignedDriver?.lng;
+
+                    return (
+                      <Pressable
+                        key={vehicle.id}
+                        style={styles.drawerItem}
+                        onPress={() => {
+                          setShowListDrawer(false);
+                          setSelectedItem(vehicle);
+                          if (lat && lng) {
+                            focusOnLocation(lat, lng);
+                          }
+                        }}
+                      >
+                        <View style={styles.vehicleIconWrap}>
+                          <Ionicons name="car" size={20} color="#111827" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.drawerItemName}>{vehicleLabel}</Text>
+                          <Text style={styles.drawerItemSub}>
+                            {vehicle.plateNumber} · {vehicle.color || ""} · {vehicle.category || ""}
+                          </Text>
+                          <Text style={[styles.drawerItemSub, { color: "#059669", marginTop: 2 }]}>
+                            Driver: {vehicle.assignedDriver?.name || "Unassigned"}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
             </ScrollView>
           </View>
         </View>
@@ -577,42 +710,79 @@ const styles = StyleSheet.create({
     color: "#000000",
   },
 
-  // Live Demand Badge (Image 2 reference)
-  liveDemandCard: {
-    position: "absolute",
-    top: 120,
-    right: 16,
+  // Live Demand Header Badge
+  headerDemandBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
     backgroundColor: "#FFFFFF",
-    borderRadius: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    borderRadius: 20,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 4,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: "#FEE2E2",
   },
-  liveDemandIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
+  headerDemandIconWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
     backgroundColor: "#EF4444",
     alignItems: "center",
     justifyContent: "center",
   },
-  liveDemandIconText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  liveDemandTitle: {
+  headerDemandText: {
     fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
+    fontFamily: "Inter_700Bold",
     color: "#111827",
-    lineHeight: 14,
+  },
+
+  // Access Restricted View
+  restrictedCenter: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+    backgroundColor: "#F9FAFB",
+  },
+  restrictedIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#E5E7EB",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  restrictedTitle: {
+    color: "#111827",
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  restrictedDesc: {
+    color: "#6B7280",
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  restrictedBackBtn: {
+    backgroundColor: "#111827",
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    alignItems: "center",
+  },
+  restrictedBackBtnText: {
+    color: "#FFFFFF",
+    fontFamily: "Inter_700Bold",
+    fontSize: 14,
   },
 
   // Zoom Controls (Image 2 reference)

@@ -2421,8 +2421,8 @@ export default function ChauffeurDashboard() {
     );
   }
 
-  if (operatorProfile?.type === "partner" && partnerDashboardMode === "partner") {
-    const isApprovedPartner = operatorProfile.status === "approved";
+  if (operatorProfile?.type === "partner" && operatorProfile?.status === "approved" && partnerDashboardMode === "partner") {
+    const isApprovedPartner = true;
 
     return (
       <View style={[styles.partnerMainContainer, { paddingTop: insets.top + (Platform.OS === "web" ? 64 : 12) }]}>
@@ -2753,9 +2753,11 @@ export default function ChauffeurDashboard() {
     );
   }
 
+  const isApprovedPartner = operatorProfile?.type === "partner" && operatorProfile?.status === "approved";
+
   // ─── Menu items ───────────────────────────────────────────────────────────
   const menuItems = [
-    ...(operatorProfile?.type === "partner"
+    ...(isApprovedPartner
       ? [
           {
             icon: "business-outline",
@@ -2767,12 +2769,28 @@ export default function ChauffeurDashboard() {
             },
             color: "#10B981",
           },
+          {
+            icon: "map-outline",
+            label: "Fleet Live Map",
+            onPress: () => {
+              router.push("/chauffeur/live-map" as never);
+              closeMenu();
+            },
+            color: "#10B981",
+          },
+          {
+            icon: "people-outline",
+            label: "Fleet & Drivers",
+            onPress: () => {
+              router.push("/chauffeur/fleet" as never);
+              closeMenu();
+            },
+            color: Colors.white,
+          },
         ]
       : []),
     { icon: isOnline ? "stop-circle-outline" : "play-circle-outline", label: isOnline ? "Go Offline" : "Go Online", onPress: toggleOnline, color: isOnline ? "#ff6b6b" : Colors.success },
-    { icon: "map-outline", label: "Fleet Live Map", onPress: () => { router.push("/chauffeur/live-map" as never); closeMenu(); }, color: "#10B981" },
     { icon: "car-outline", label: "Vehicles", onPress: () => { router.push("/chauffeur/vehicles" as never); closeMenu(); }, color: Colors.white },
-    { icon: "people-outline", label: "Fleet & Drivers", onPress: () => { router.push("/chauffeur/fleet" as never); closeMenu(); }, color: Colors.white },
     { icon: "car-sport-outline", label: "My Rides", onPress: () => { router.push("/chauffeur/rides"); closeMenu(); }, color: Colors.white },
     { icon: "map-outline", label: "Long Distance", onPress: () => { router.push("/chauffeur/long-distance" as never); closeMenu(); }, color: Colors.white },
     { icon: "calendar-outline", label: "Daily Lift Club", onPress: () => { router.push("/chauffeur/lift-club" as never); closeMenu(); }, color: "#F7C948" },
@@ -2972,7 +2990,7 @@ export default function ChauffeurDashboard() {
       </Pressable>
 
       {/* ─── Partner Fleet Dashboard Button (Top-Center for partner users in driver mode) ─── */}
-      {operatorProfile?.type === "partner" && (
+      {isApprovedPartner && (
         <Pressable
           style={[styles.partnerFleetPill, { top: insets.top + 16 }]}
           onPress={async () => {

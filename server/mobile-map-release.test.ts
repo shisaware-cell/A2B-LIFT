@@ -482,6 +482,48 @@ test("driver overlay module and service contain robust crash protection for Andr
   assert.match(appConfigSource, /android\.permission\.SYSTEM_ALERT_WINDOW/);
 });
 
+test("partner-only fleet access control, live map UI enhancements, and earnings safe area are enforced", () => {
+  const chauffeurSource = readProjectFile("app/chauffeur/index.tsx");
+  const fleetSource = readProjectFile("app/chauffeur/fleet.tsx");
+  const liveMapSource = readProjectFile("app/chauffeur/live-map.tsx");
+  const earningsSource = readProjectFile("app/chauffeur/earnings.tsx");
+  const vehiclesSource = readProjectFile("app/chauffeur/vehicles.tsx");
+  const routesSource = readProjectFile("server/routes.ts");
 
+  // 1. Partner-only fleet menu items & pill button in driver app
+  assert.match(chauffeurSource, /const isApprovedPartner = operatorProfile\?\.type === "partner" && operatorProfile\?\.status === "approved"/);
+  assert.match(chauffeurSource, /isApprovedPartner\s*\?\s*\[[\s\S]*?Partner Dashboard[\s\S]*?Fleet Live Map[\s\S]*?Fleet & Drivers/);
+  assert.match(chauffeurSource, /\{isApprovedPartner && \([\s\S]*?styles\.partnerFleetPill/);
+  assert.match(chauffeurSource, /operatorProfile\?\.type === "partner" && operatorProfile\?\.status === "approved" && partnerDashboardMode === "partner"/);
 
+  // 2. Vehicles screen restricts Manage Drivers button to approved partners only
+  assert.match(vehiclesSource, /operatorProfile\?\.type === "partner" && operatorProfile\?\.status === "approved" && ownsVehicle/);
 
+  // 3. Screen-level access gates for Fleet Management and Live Map
+  assert.match(fleetSource, /const isApprovedPartner = profile\?\.type === "partner" && profile\?\.status === "approved"/);
+  assert.match(fleetSource, /Partner Access Required/);
+  assert.match(liveMapSource, /const isApprovedPartner = operatorProfile\?\.type === "partner" && operatorProfile\?\.status === "approved"/);
+  assert.match(liveMapSource, /Partner Access Required/);
+
+  // 4. Backend routes restrict fleet endpoints to approved partners
+  assert.match(routesSource, /if \(profile\.type !== "partner" \|\| profile\.status !== "approved"\) \{[\s\S]*?Fleet earnings summary is reserved for approved fleet partners/);
+  assert.match(routesSource, /if \(profile\.type !== "partner" \|\| profile\.status !== "approved"\) \{[\s\S]*?Fleet live tracking is reserved for approved fleet partners/);
+
+  // 5. Live map fixes "undefined undefined" vehicle label
+  assert.match(routesSource, /const vehicleMake = vehicle\?\.carMake \|\| \(vehicle as any\)\?\.make \|\| chauffeur\?\.carMake/);
+  assert.match(liveMapSource, /vehiclePlate \? `\$\{vehicleLabel\} \(\$\{vehiclePlate\}\)` : vehicleLabel/);
+  assert.doesNotMatch(liveMapSource, /`\$\{selectedItem\.vehicle\.make\} \$\{selectedItem\.vehicle\.model\}/);
+
+  // 6. Live Demand badge is moved next to the header title with flame icon (no dollar sign)
+  assert.match(liveMapSource, /<View style=\{styles\.headerRow\}>[\s\S]*?<Text style=\{styles\.headerTitle\}>Live Map<\/Text>[\s\S]*?styles\.headerDemandBadge[\s\S]*?<Ionicons name="flame" size=\{14\} color="#FFFFFF"/);
+  assert.doesNotMatch(liveMapSource, /liveDemandCard/);
+  assert.doesNotMatch(liveMapSource, /liveDemandIconText/);
+
+  // 7. Driver and Vehicle dropdown dynamically switches placeholders and drawer
+  assert.match(liveMapSource, /placeholder=\{filterType === "Driver" \? "Search driver name or phone\.\.\." : "Search plate, make, model\.\.\."\}/);
+  assert.match(liveMapSource, /filterType === "Driver"\s*\?\s*`Drivers \(\$\{fleetData\.onlineDrivers\}\/\$\{fleetData\.totalDrivers\}\)`\s*:\s*`Vehicles \(\$\{fleetData\.totalVehicles\}\)`/);
+
+  // 8. Earnings screen applies safe area top insets to prevent header hiding on mobile devices
+  assert.match(earningsSource, /paddingTop: Math\.max\(insets\.top, Platform\.OS === "android" \? 28 : 16\)/);
+  assert.match(earningsSource, /effectiveProfile\?\.type === "partner" && effectiveProfile\?\.status === "approved"/);
+});

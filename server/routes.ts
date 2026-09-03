@@ -5442,8 +5442,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/fleet/earnings-summary", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
-      const profile = await ensureDriverOperatorForChauffeur(req.auth!.sub);
+      const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
       if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      if (profile.type !== "partner" || profile.status !== "approved") {
+        return res.status(403).json({ message: "Fleet earnings summary is reserved for approved fleet partners." });
+      }
 
       const vehicles = await storage.getVehiclesByOwnerOperator(profile.id);
       const vehicleIds = new Set(vehicles.map((v) => v.id));
@@ -5493,32 +5496,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const driverEarningsList = await Promise.all(
         Array.from(driverMap.values()).map(async ({ profile: dp, user, chauffeur, vehicle }) => {
           const chauffeurId = chauffeur?.id;
-          const chauffeurRides = allRides.filter((r: any) =>
-            (chauffeurId && r.chauffeurId === chauffeurId) || (r.vehicleId && vehicleIds.has(r.vehicleId))
-          );
-          const completedRides = chauffeurRides.filter((r: any) => r.status === "trip_completed");
-          const weekCompletedRides = completedRides.filter((r: any) => {
-            const date = new Date(r.completedAt || r.updatedAt || r.createdAt);
-            return date >= weekStart && date <= weekEnd;
+          const completedRides = allRides.filter((r: any) => {
+            if (r.chauffeurId !== chauffeurId && r.driverOperatorProfileId !== dp.id) return false;
+            if (r.status !== "trip_completed" && r.status !== "completed") return false;
+            return true;
           });
 
-          const totalTrips = weekCompletedRides.length;
-          const grossFares = weekCompletedRides.reduce((sum: number, r: any) => sum + (parseFloat(r.price) || 0), 0);
-          const netEarnings = weekCompletedRides.reduce((sum: number, r: any) => {
+          const currentWeekRides = completedRides.filter((r: any) => {
+            const completedAt = r.completedAt ? new Date(r.completedAt) : r.createdAt ? new Date(r.createdAt) : null;
+            if (!completedAt) return false;
+            return completedAt >= weekStart && completedAt < weekEnd;
+          });
+
+          const grossFares = currentWeekRides.reduce((sum: number, r: any) => sum + (parseFloat(r.price) || 0), 0);
+          const commissionTotal = currentWeekRides.reduce((sum: number, r: any) => {
             const fare = parseFloat(r.price) || 0;
-            const calc = calculateChauffeurEarnings(fare, r.commissionRate);
-            return sum + calc.chauffeurEarnings;
+            const rate = parseFloat(r.commissionRate) || 0.15;
+            return sum + (fare * rate);
           }, 0);
-          const commissionTotal = weekCompletedRides.reduce((sum: number, r: any) => {
-            const fare = parseFloat(r.price) || 0;
-            const calc = calculateChauffeurEarnings(fare, r.commissionRate);
-            return sum + calc.commission;
-          }, 0);
-          const cashFares = weekCompletedRides
+          const netEarnings = Math.max(0, grossFares - commissionTotal);
+
+          const cashFares = currentWeekRides
             .filter((r: any) => r.paymentMethod === "cash")
             .reduce((sum: number, r: any) => sum + (parseFloat(r.price) || 0), 0);
 
+          const totalTrips = currentWeekRides.length;
+
           const photo = chauffeur?.profilePhoto || user?.profilePhoto || null;
+          const vehicleMake = vehicle?.carMake || (vehicle as any)?.make || chauffeur?.carMake || "";
+          const vehicleModel = vehicle?.vehicleModel || (vehicle as any)?.model || chauffeur?.vehicleModel || "";
+          const vehiclePlate = vehicle?.plateNumber || chauffeur?.plateNumber || "";
+          const vehicleLabel = [vehicleMake, vehicleModel].filter(Boolean).join(" ").trim() || (vehiclePlate ? "Vehicle" : "");
 
           return {
             driverOperatorProfileId: dp.id,
@@ -5527,7 +5535,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             driverName: user?.name || user?.username || "Driver",
             driverPhone: user?.phone || chauffeur?.phone || "",
             profilePhoto: photo,
-            vehicle: vehicle ? `${vehicle.make} ${vehicle.model} (${vehicle.plateNumber})` : null,
+            vehicle: vehiclePlate ? (vehicleLabel ? `${vehicleLabel} (${vehiclePlate})` : vehiclePlate) : (vehicleLabel || null),
             totalTrips,
             allTimeTrips: completedRides.length,
             grossFares: Math.round(grossFares * 100) / 100,
@@ -5554,19 +5562,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         adjustmentsFromPreviousPeriods,
         payout: Math.round(totalPayouts * 100) / 100,
         endBalance,
-        totalNetEarnings: Math.round(totalFleetNetEarnings * 100) / 100,
-        driverCount: driverEarningsList.length,
+        totalFleetNetEarnings: Math.round(totalFleetNetEarnings * 100) / 100,
         drivers: driverEarningsList,
+        totalDrivers: driverEarningsList.length,
+        activeTripsCount: allRides.filter((r: any) =>
+          driverEarningsList.some((d) => d.chauffeurId === r.chauffeurId) &&
+          (r.status === "chauffeur_assigned" || r.status === "chauffeur_arriving" || r.status === "trip_started")
+        ).length,
       });
     } catch (error: any) {
-      return res.status(500).json({ message: error.message });
+      return res.status(500).json({ message: error.message || "Failed to load fleet earnings summary" });
     }
   });
 
   app.get("/api/fleet/live-locations", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
-      const profile = await ensureDriverOperatorForChauffeur(req.auth!.sub);
+      const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
       if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      if (profile.type !== "partner" || profile.status !== "approved") {
+        return res.status(403).json({ message: "Fleet live tracking is reserved for approved fleet partners." });
+      }
 
       const vehicles = await storage.getVehiclesByOwnerOperator(profile.id);
       const vehicleMap = new Map<string, any>(vehicles.map((v) => [v.id, v]));
@@ -5600,6 +5615,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const isOnline = chauffeur?.isOnline === true;
           const status = currentRide ? "in_trip" : isOnline ? "online" : "offline";
 
+          const vehicleMake = vehicle?.carMake || (vehicle as any)?.make || chauffeur?.carMake || "";
+          const vehicleModel = vehicle?.vehicleModel || (vehicle as any)?.model || chauffeur?.vehicleModel || "";
+          const vehiclePlate = vehicle?.plateNumber || chauffeur?.plateNumber || "";
+          const vehicleColor = vehicle?.carColor || (vehicle as any)?.color || chauffeur?.carColor || "";
+          const vehicleCategory = vehicle?.vehicleType || (vehicle as any)?.category || chauffeur?.vehicleType || "Standard";
+          const vehicleYear = vehicle?.vehicleYear || chauffeur?.vehicleYear;
+
           return {
             id: dp.id,
             chauffeurId: chauffeur?.id || null,
@@ -5621,13 +5643,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               dropoffAddress: currentRide.dropoffAddress,
               price: currentRide.price,
             } : null,
-            vehicle: vehicle ? {
-              id: vehicle.id,
-              make: vehicle.make,
-              model: vehicle.model,
-              plateNumber: vehicle.plateNumber,
-              color: vehicle.color,
-              category: vehicle.category,
+            vehicle: (vehicle || vehiclePlate) ? {
+              id: vehicle?.id || chauffeur?.activeVehicleId || "assigned-vehicle",
+              make: vehicleMake || "Vehicle",
+              model: vehicleModel,
+              plateNumber: vehiclePlate,
+              color: vehicleColor,
+              category: vehicleCategory,
+              year: vehicleYear,
             } : null,
           };
         })
@@ -5637,17 +5660,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         vehicles.map(async (v) => {
           const activeAssignment = assignments.find((a) => a.vehicleId === v.id && a.status === "active");
           const assignedDriver = activeAssignment ? liveDrivers.find((d) => d.id === activeAssignment.driverOperatorProfileId) : null;
+          const vehicleMake = v.carMake || (v as any).make || "Vehicle";
+          const vehicleModel = v.vehicleModel || (v as any).model || "";
+          const vehiclePlate = v.plateNumber || "";
+          const vehicleColor = v.carColor || (v as any).color || "";
+          const vehicleCategory = v.vehicleType || (v as any).category || "Standard";
+
           return {
             id: v.id,
-            make: v.make,
-            model: v.model,
-            plateNumber: v.plateNumber,
-            color: v.color,
-            category: v.category,
+            make: vehicleMake,
+            model: vehicleModel,
+            plateNumber: vehiclePlate,
+            color: vehicleColor,
+            category: vehicleCategory,
+            year: v.vehicleYear,
             status: v.status,
+            lat: assignedDriver?.lat || null,
+            lng: assignedDriver?.lng || null,
             assignedDriver: assignedDriver ? {
               id: assignedDriver.id,
               name: assignedDriver.name,
+              phone: assignedDriver.phone,
               status: assignedDriver.status,
               lat: assignedDriver.lat,
               lng: assignedDriver.lng,
@@ -5665,7 +5698,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         totalVehicles: allFleetVehicles.length,
       });
     } catch (error: any) {
-      return res.status(500).json({ message: error.message });
+      return res.status(500).json({ message: error.message || "Failed to load live fleet locations" });
     }
   });
 

@@ -581,7 +581,7 @@ export default function VehiclesScreen() {
                       </Text>
                     </Pressable>
                   )}
-                  {ownsVehicle && (
+                  {operatorProfile?.type === "partner" && operatorProfile?.status === "approved" && ownsVehicle && (
                     <Pressable style={styles.selectBtn} onPress={() => router.push("/chauffeur/fleet" as never)}>
                       <Text style={styles.selectText}>Manage Drivers</Text>
                     </Pressable>

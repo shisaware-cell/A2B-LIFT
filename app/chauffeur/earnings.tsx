@@ -57,9 +57,7 @@ export default function EarningsScreen() {
   const effectiveProfile = profileData?.profile || operatorProfile;
 
   const isPartner =
-    effectiveProfile?.type === "partner" ||
-    effectiveProfile?.type === "fleet" ||
-    (effectiveProfile?.status === "approved" && effectiveProfile?.type !== "driver");
+    effectiveProfile?.type === "partner" && effectiveProfile?.status === "approved";
 
   // Partner fleet earnings query
   const {
@@ -168,7 +166,13 @@ export default function EarningsScreen() {
   return (
     <View style={[styles.mainContainer, !isPartner && { backgroundColor: Colors.primary }]}>
       {/* ─── Header ─── */}
-      <View style={[styles.headerBar, !isPartner && { borderBottomColor: Colors.border }]}>
+      <View
+        style={[
+          styles.headerBar,
+          { paddingTop: Math.max(insets.top, Platform.OS === "android" ? 28 : 16) },
+          !isPartner && { borderBottomColor: Colors.border },
+        ]}
+      >
         <Pressable
           style={styles.headerBtn}
           onPress={() => router.back()}

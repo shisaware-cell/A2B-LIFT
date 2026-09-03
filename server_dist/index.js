@@ -7358,8 +7358,11 @@ If you did not request this, you can ignore this email.`,
   }
   app2.get("/api/fleet/earnings-summary", requireAuth, async (req, res) => {
     try {
-      const profile = await ensureDriverOperatorForChauffeur(req.auth.sub);
+      const profile = await storage.getOperatorProfileByUserId(req.auth.sub);
       if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      if (profile.type !== "partner" || profile.status !== "approved") {
+        return res.status(403).json({ message: "Fleet earnings summary is reserved for approved fleet partners." });
+      }
       const vehicles2 = await storage.getVehiclesByOwnerOperator(profile.id);
       const vehicleIds = new Set(vehicles2.map((v) => v.id));
       const assignments = await storage.getVehicleAssignments({
@@ -7401,28 +7404,30 @@ If you did not request this, you can ignore this email.`,
       const driverEarningsList = await Promise.all(
         Array.from(driverMap.values()).map(async ({ profile: dp, user, chauffeur: chauffeur2, vehicle }) => {
           const chauffeurId = chauffeur2?.id;
-          const chauffeurRides = allRides.filter(
-            (r) => chauffeurId && r.chauffeurId === chauffeurId || r.vehicleId && vehicleIds.has(r.vehicleId)
-          );
-          const completedRides = chauffeurRides.filter((r) => r.status === "trip_completed");
-          const weekCompletedRides = completedRides.filter((r) => {
-            const date = new Date(r.completedAt || r.updatedAt || r.createdAt);
-            return date >= weekStart && date <= weekEnd;
+          const completedRides = allRides.filter((r) => {
+            if (r.chauffeurId !== chauffeurId && r.driverOperatorProfileId !== dp.id) return false;
+            if (r.status !== "trip_completed" && r.status !== "completed") return false;
+            return true;
           });
-          const totalTrips = weekCompletedRides.length;
-          const grossFares = weekCompletedRides.reduce((sum, r) => sum + (parseFloat(r.price) || 0), 0);
-          const netEarnings = weekCompletedRides.reduce((sum, r) => {
+          const currentWeekRides = completedRides.filter((r) => {
+            const completedAt = r.completedAt ? new Date(r.completedAt) : r.createdAt ? new Date(r.createdAt) : null;
+            if (!completedAt) return false;
+            return completedAt >= weekStart && completedAt < weekEnd;
+          });
+          const grossFares = currentWeekRides.reduce((sum, r) => sum + (parseFloat(r.price) || 0), 0);
+          const commissionTotal = currentWeekRides.reduce((sum, r) => {
             const fare = parseFloat(r.price) || 0;
-            const calc = calculateChauffeurEarnings(fare, r.commissionRate);
-            return sum + calc.chauffeurEarnings;
+            const rate = parseFloat(r.commissionRate) || 0.15;
+            return sum + fare * rate;
           }, 0);
-          const commissionTotal = weekCompletedRides.reduce((sum, r) => {
-            const fare = parseFloat(r.price) || 0;
-            const calc = calculateChauffeurEarnings(fare, r.commissionRate);
-            return sum + calc.commission;
-          }, 0);
-          const cashFares = weekCompletedRides.filter((r) => r.paymentMethod === "cash").reduce((sum, r) => sum + (parseFloat(r.price) || 0), 0);
+          const netEarnings = Math.max(0, grossFares - commissionTotal);
+          const cashFares = currentWeekRides.filter((r) => r.paymentMethod === "cash").reduce((sum, r) => sum + (parseFloat(r.price) || 0), 0);
+          const totalTrips = currentWeekRides.length;
           const photo = chauffeur2?.profilePhoto || user?.profilePhoto || null;
+          const vehicleMake = vehicle?.carMake || vehicle?.make || chauffeur2?.carMake || "";
+          const vehicleModel = vehicle?.vehicleModel || vehicle?.model || chauffeur2?.vehicleModel || "";
+          const vehiclePlate = vehicle?.plateNumber || chauffeur2?.plateNumber || "";
+          const vehicleLabel = [vehicleMake, vehicleModel].filter(Boolean).join(" ").trim() || (vehiclePlate ? "Vehicle" : "");
           return {
             driverOperatorProfileId: dp.id,
             chauffeurId: chauffeurId || null,
@@ -7430,7 +7435,7 @@ If you did not request this, you can ignore this email.`,
             driverName: user?.name || user?.username || "Driver",
             driverPhone: user?.phone || chauffeur2?.phone || "",
             profilePhoto: photo,
-            vehicle: vehicle ? `${vehicle.make} ${vehicle.model} (${vehicle.plateNumber})` : null,
+            vehicle: vehiclePlate ? vehicleLabel ? `${vehicleLabel} (${vehiclePlate})` : vehiclePlate : vehicleLabel || null,
             totalTrips,
             allTimeTrips: completedRides.length,
             grossFares: Math.round(grossFares * 100) / 100,
@@ -7452,18 +7457,24 @@ If you did not request this, you can ignore this email.`,
         adjustmentsFromPreviousPeriods,
         payout: Math.round(totalPayouts * 100) / 100,
         endBalance,
-        totalNetEarnings: Math.round(totalFleetNetEarnings * 100) / 100,
-        driverCount: driverEarningsList.length,
-        drivers: driverEarningsList
+        totalFleetNetEarnings: Math.round(totalFleetNetEarnings * 100) / 100,
+        drivers: driverEarningsList,
+        totalDrivers: driverEarningsList.length,
+        activeTripsCount: allRides.filter(
+          (r) => driverEarningsList.some((d) => d.chauffeurId === r.chauffeurId) && (r.status === "chauffeur_assigned" || r.status === "chauffeur_arriving" || r.status === "trip_started")
+        ).length
       });
     } catch (error) {
-      return res.status(500).json({ message: error.message });
+      return res.status(500).json({ message: error.message || "Failed to load fleet earnings summary" });
     }
   });
   app2.get("/api/fleet/live-locations", requireAuth, async (req, res) => {
     try {
-      const profile = await ensureDriverOperatorForChauffeur(req.auth.sub);
+      const profile = await storage.getOperatorProfileByUserId(req.auth.sub);
       if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      if (profile.type !== "partner" || profile.status !== "approved") {
+        return res.status(403).json({ message: "Fleet live tracking is reserved for approved fleet partners." });
+      }
       const vehicles2 = await storage.getVehiclesByOwnerOperator(profile.id);
       const vehicleMap = new Map(vehicles2.map((v) => [v.id, v]));
       const assignments = await storage.getVehicleAssignments({
@@ -7489,6 +7500,12 @@ If you did not request this, you can ignore this email.`,
           const heading = typeof chauffeur2?.heading === "number" ? chauffeur2.heading : void 0;
           const isOnline = chauffeur2?.isOnline === true;
           const status = currentRide ? "in_trip" : isOnline ? "online" : "offline";
+          const vehicleMake = vehicle?.carMake || vehicle?.make || chauffeur2?.carMake || "";
+          const vehicleModel = vehicle?.vehicleModel || vehicle?.model || chauffeur2?.vehicleModel || "";
+          const vehiclePlate = vehicle?.plateNumber || chauffeur2?.plateNumber || "";
+          const vehicleColor = vehicle?.carColor || vehicle?.color || chauffeur2?.carColor || "";
+          const vehicleCategory = vehicle?.vehicleType || vehicle?.category || chauffeur2?.vehicleType || "Standard";
+          const vehicleYear = vehicle?.vehicleYear || chauffeur2?.vehicleYear;
           return {
             id: dp.id,
             chauffeurId: chauffeur2?.id || null,
@@ -7510,13 +7527,14 @@ If you did not request this, you can ignore this email.`,
               dropoffAddress: currentRide.dropoffAddress,
               price: currentRide.price
             } : null,
-            vehicle: vehicle ? {
-              id: vehicle.id,
-              make: vehicle.make,
-              model: vehicle.model,
-              plateNumber: vehicle.plateNumber,
-              color: vehicle.color,
-              category: vehicle.category
+            vehicle: vehicle || vehiclePlate ? {
+              id: vehicle?.id || chauffeur2?.activeVehicleId || "assigned-vehicle",
+              make: vehicleMake || "Vehicle",
+              model: vehicleModel,
+              plateNumber: vehiclePlate,
+              color: vehicleColor,
+              category: vehicleCategory,
+              year: vehicleYear
             } : null
           };
         })
@@ -7525,17 +7543,26 @@ If you did not request this, you can ignore this email.`,
         vehicles2.map(async (v) => {
           const activeAssignment = assignments.find((a) => a.vehicleId === v.id && a.status === "active");
           const assignedDriver = activeAssignment ? liveDrivers.find((d) => d.id === activeAssignment.driverOperatorProfileId) : null;
+          const vehicleMake = v.carMake || v.make || "Vehicle";
+          const vehicleModel = v.vehicleModel || v.model || "";
+          const vehiclePlate = v.plateNumber || "";
+          const vehicleColor = v.carColor || v.color || "";
+          const vehicleCategory = v.vehicleType || v.category || "Standard";
           return {
             id: v.id,
-            make: v.make,
-            model: v.model,
-            plateNumber: v.plateNumber,
-            color: v.color,
-            category: v.category,
+            make: vehicleMake,
+            model: vehicleModel,
+            plateNumber: vehiclePlate,
+            color: vehicleColor,
+            category: vehicleCategory,
+            year: v.vehicleYear,
             status: v.status,
+            lat: assignedDriver?.lat || null,
+            lng: assignedDriver?.lng || null,
             assignedDriver: assignedDriver ? {
               id: assignedDriver.id,
               name: assignedDriver.name,
+              phone: assignedDriver.phone,
               status: assignedDriver.status,
               lat: assignedDriver.lat,
               lng: assignedDriver.lng
@@ -7552,7 +7579,7 @@ If you did not request this, you can ignore this email.`,
         totalVehicles: allFleetVehicles.length
       });
     } catch (error) {
-      return res.status(500).json({ message: error.message });
+      return res.status(500).json({ message: error.message || "Failed to load live fleet locations" });
     }
   });
   app2.post("/api/fleet/assignments", requireAuth, async (req, res) => {

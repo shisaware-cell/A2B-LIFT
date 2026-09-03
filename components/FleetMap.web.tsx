@@ -9,9 +9,12 @@ export interface FleetMapRef {
 }
 
 interface FleetMapProps {
+  mode?: "Driver" | "Vehicle";
   drivers: any[];
+  vehicles?: any[];
   selectedItem: any;
   onSelectDriver: (driver: any) => void;
+  onSelectVehicle?: (vehicle: any) => void;
   initialRegion: {
     latitude: number;
     longitude: number;
@@ -27,7 +30,7 @@ const GOOGLE_MAPS_API_KEY =
   "";
 
 export const FleetMap = forwardRef<FleetMapRef, FleetMapProps>(function FleetMap(
-  { drivers, selectedItem, initialRegion },
+  { mode = "Driver", drivers, vehicles = [], selectedItem, onSelectDriver, onSelectVehicle, initialRegion },
   ref
 ) {
   useImperativeHandle(ref, () => ({

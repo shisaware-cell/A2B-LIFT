@@ -244,6 +244,29 @@ export default function FleetScreen() {
 
   if (loading) return <View style={[styles.container, styles.center]}><ActivityIndicator color={Colors.white} /></View>;
 
+  const isApprovedPartner = profile?.type === "partner" && profile?.status === "approved";
+  if (!isApprovedPartner) {
+    return (
+      <View style={[styles.container, styles.center, { paddingHorizontal: 28, paddingTop: insets.top + 40 }]}>
+        <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+          <Ionicons name="business-outline" size={38} color={Colors.white} />
+        </View>
+        <Text style={{ color: Colors.white, fontSize: 20, fontFamily: "Inter_700Bold", textAlign: "center", marginBottom: 8 }}>
+          Partner Access Required
+        </Text>
+        <Text style={{ color: Colors.textMuted, fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 20, marginBottom: 24 }}>
+          Fleet &amp; Driver management is exclusively available to approved A2B fleet partners.
+        </Text>
+        <Pressable
+          style={{ backgroundColor: Colors.white, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 28, alignItems: "center" }}
+          onPress={() => router.replace("/chauffeur" as never)}
+        >
+          <Text style={{ color: Colors.primary, fontFamily: "Inter_700Bold", fontSize: 14 }}>Back to Dashboard</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + (Platform.OS === "web" ? 67 : 14) }]}>
       <View style={styles.header}>
