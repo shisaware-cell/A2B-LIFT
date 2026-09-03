@@ -13,6 +13,7 @@ import {
   Animated,
   Dimensions,
   ScrollView,
+  RefreshControl,
   TextInput,
   KeyboardAvoidingView,
   AppState,
@@ -219,6 +220,8 @@ export default function ChauffeurDashboard() {
     activeTrips: 0,
     pendingApprovals: 0,
   });
+  const [partnerDashboardMode, setPartnerDashboardMode] = useState<"partner" | "driver">("partner");
+  const [partnerRefreshing, setPartnerRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(false);
   const [incomingRide, setIncomingRide] = useState<any>(null);
@@ -1654,10 +1657,20 @@ export default function ChauffeurDashboard() {
       if (profileData?.profile) {
         setOperatorProfile(profileData.profile);
         if (profileData.profile.type === "partner") {
-          // Partners manage vehicles, they don't drive — land them on the fleet list.
           await loadFleetOverview();
-          router.replace("/chauffeur/fleet" as never);
-          return;
+          const savedMode = await AsyncStorage.getItem("a2b_partner_dashboard_mode");
+          if (savedMode === "driver") {
+            setPartnerDashboardMode("driver");
+          } else {
+            setPartnerDashboardMode("partner");
+          }
+          if (profileData?.chauffeur) {
+            setChauffeur(profileData.chauffeur);
+            setIsOnline(profileData.chauffeur.isOnline || false);
+            if (typeof profileData.chauffeur.todayEarnings === "number") {
+              setTodayEarnings(profileData.chauffeur.todayEarnings);
+            }
+          }
         }
       }
       const stored = await AsyncStorage.getItem("a2b_chauffeur");
@@ -2408,69 +2421,308 @@ export default function ChauffeurDashboard() {
     );
   }
 
-  if (operatorProfile?.type === "partner") {
+  if (operatorProfile?.type === "partner" && partnerDashboardMode === "partner") {
     const isApprovedPartner = operatorProfile.status === "approved";
+
     return (
-      <View style={[styles.pendingContainer, { paddingTop: insets.top + 20 }]}>
-        <View style={styles.pendingInner}>
-          <Ionicons name={isApprovedPartner ? "business-outline" : "hourglass"} size={60} color={isApprovedPartner ? Colors.success : Colors.warning} />
-          <Text style={styles.pendingTitle}>{isApprovedPartner ? "Partner Dashboard" : "Partner Approval Pending"}</Text>
-          <Text style={styles.pendingDesc}>
-            {isApprovedPartner
-              ? "Manage your fleet vehicles, assign approved drivers, and track your A2B LIFT partner account."
-              : "Your partner application is under review. You will be notified once A2B approves your account."}
-          </Text>
-          {isApprovedPartner && (
-            <View style={styles.overviewGrid}>
-              {[
-                ["Vehicles", fleetOverview.vehicles],
-                ["Drivers", fleetOverview.assignedDrivers],
-                ["Active trips", fleetOverview.activeTrips],
-                ["Pending", fleetOverview.pendingApprovals],
-              ].map(([label, value]) => (
-                <View key={label} style={styles.overviewCard}>
-                  <Text style={styles.overviewValue}>{value}</Text>
-                  <Text style={styles.overviewLabel}>{label}</Text>
+      <View style={[styles.partnerMainContainer, { paddingTop: insets.top + (Platform.OS === "web" ? 64 : 12) }]}>
+        <ScrollView
+          style={styles.partnerScroll}
+          contentContainerStyle={[styles.partnerScrollContent, { paddingBottom: insets.bottom + 48 }]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={partnerRefreshing}
+              onRefresh={async () => {
+                setPartnerRefreshing(true);
+                try {
+                  await Promise.all([loadFleetOverview(), loadDriverVehicles()]);
+                } finally {
+                  setPartnerRefreshing(false);
+                }
+              }}
+              tintColor={Colors.white}
+            />
+          }
+        >
+          {/* ─── Top Executive Header ─── */}
+          <View style={styles.partnerHeaderBar}>
+            <View style={styles.partnerBrandCol}>
+              <View style={styles.partnerBadgeRow}>
+                <View style={styles.partnerLogoIcon}>
+                  <Ionicons name="business" size={16} color="#10B981" />
                 </View>
-              ))}
+                <Text style={styles.partnerBrandTag}>A2B LIFT FLEET</Text>
+                <View style={[styles.partnerStatusChip, isApprovedPartner ? styles.statusChipApproved : styles.statusChipPending]}>
+                  <View style={[styles.statusDot, { backgroundColor: isApprovedPartner ? "#10B981" : "#F59E0B" }]} />
+                  <Text style={[styles.statusChipText, { color: isApprovedPartner ? "#10B981" : "#F59E0B" }]}>
+                    {isApprovedPartner ? "Approved Partner" : "Pending Review"}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.partnerWelcomeTitle}>{isApprovedPartner ? "Partner Dashboard" : "Partner Application Pending"}</Text>
+              <Text style={styles.partnerSubtitle}>
+                {isApprovedPartner
+                  ? "Manage vehicles, assign drivers, track live operations and revenue."
+                  : "Your partner fleet application is under review by A2B administrators."}
+              </Text>
             </View>
-          )}
-          <View style={styles.partnerActions}>
-            {isApprovedPartner && (
-              <>
-                <Pressable style={styles.pendingBtn} onPress={() => router.push("/chauffeur/vehicles" as never)}>
-                  <Ionicons name="car-sport-outline" size={16} color={Colors.white} />
-                  <Text style={styles.pendingBtnText}>Vehicles</Text>
-                </Pressable>
-                <Pressable style={styles.pendingBtn} onPress={() => router.push("/chauffeur/fleet" as never)}>
-                  <Ionicons name="people-outline" size={16} color={Colors.white} />
-                  <Text style={styles.pendingBtnText}>Drivers</Text>
-                </Pressable>
-                <Pressable style={styles.pendingBtn} onPress={() => router.push("/chauffeur/rides" as never)}>
-                  <Ionicons name="receipt-outline" size={16} color={Colors.white} />
-                  <Text style={styles.pendingBtnText}>Trips</Text>
-                </Pressable>
-                <Pressable style={styles.pendingBtn} onPress={() => router.push("/chauffeur/settings" as never)}>
-                  <Ionicons name="settings-outline" size={16} color={Colors.white} />
-                  <Text style={styles.pendingBtnText}>Settings</Text>
-                </Pressable>
-              </>
-            )}
-            <Pressable style={styles.pendingBtn} onPress={() => router.push("/chauffeur/notifications")}>
-              <Ionicons name="notifications-outline" size={16} color={Colors.white} />
-              <Text style={styles.pendingBtnText}>Notifications</Text>
+
+            {/* Quick Switch to Driver Dashboard Button */}
+            <Pressable
+              style={({ pressed }) => [styles.headerDriverModeBtn, pressed && { opacity: 0.85 }]}
+              onPress={async () => {
+                setPartnerDashboardMode("driver");
+                await AsyncStorage.setItem("a2b_partner_dashboard_mode", "driver");
+              }}
+              accessibilityLabel="Switch to Driver Dashboard"
+            >
+              <Ionicons name="speedometer" size={16} color="#FFFFFF" />
+              <Text style={styles.headerDriverModeBtnText}>Driver Mode</Text>
             </Pressable>
           </View>
-        </View>
+
+          {/* ─── Hero Driver Quick-Switch Card ─── */}
+          <View style={styles.driverModeHeroCard}>
+            <View style={styles.driverModeHeroLeft}>
+              <View style={styles.driverModeIconCircle}>
+                <Ionicons name="car-sport" size={24} color="#10B981" />
+              </View>
+              <View style={styles.driverModeHeroTexts}>
+                <Text style={styles.driverModeHeroTitle}>Drive & Take Rides</Text>
+                <Text style={styles.driverModeHeroDesc}>
+                  Drive one of your fleet vehicles? Switch to the Driver Dashboard to go online, accept ride requests, and navigate trips.
+                </Text>
+              </View>
+            </View>
+            <Pressable
+              style={({ pressed }) => [styles.driverModeHeroBtn, pressed && { opacity: 0.85 }]}
+              onPress={async () => {
+                setPartnerDashboardMode("driver");
+                await AsyncStorage.setItem("a2b_partner_dashboard_mode", "driver");
+              }}
+            >
+              <Text style={styles.driverModeHeroBtnText}>Go to Driver Dashboard</Text>
+              <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+            </Pressable>
+          </View>
+
+          {/* ─── Fleet Key Metrics Grid (2x2) ─── */}
+          <Text style={styles.partnerSectionHeader}>FLEET OVERVIEW</Text>
+          <View style={styles.partnerMetricsGrid}>
+            <Pressable
+              style={styles.partnerMetricCard}
+              onPress={() => router.push("/chauffeur/vehicles" as never)}
+            >
+              <View style={styles.metricTopRow}>
+                <View style={[styles.metricIconWrap, { backgroundColor: "rgba(16, 185, 129, 0.15)" }]}>
+                  <Ionicons name="car-sport" size={18} color="#10B981" />
+                </View>
+                <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.3)" />
+              </View>
+              <Text style={styles.metricBigNumber}>{fleetOverview.vehicles}</Text>
+              <Text style={styles.metricLabel}>Fleet Vehicles</Text>
+              <Text style={styles.metricSubtext}>Registered & approved</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.partnerMetricCard}
+              onPress={() => router.push("/chauffeur/fleet" as never)}
+            >
+              <View style={styles.metricTopRow}>
+                <View style={[styles.metricIconWrap, { backgroundColor: "rgba(56, 189, 248, 0.15)" }]}>
+                  <Ionicons name="people" size={18} color="#38BDF8" />
+                </View>
+                <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.3)" />
+              </View>
+              <Text style={styles.metricBigNumber}>{fleetOverview.assignedDrivers}</Text>
+              <Text style={styles.metricLabel}>Chauffeur Team</Text>
+              <Text style={styles.metricSubtext}>Assigned drivers</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.partnerMetricCard}
+              onPress={() => router.push("/chauffeur/live-map" as never)}
+            >
+              <View style={styles.metricTopRow}>
+                <View style={[styles.metricIconWrap, { backgroundColor: "rgba(168, 85, 247, 0.15)" }]}>
+                  <Ionicons name="navigate" size={18} color="#A855F7" />
+                </View>
+                <View style={styles.liveIndicatorPulse}>
+                  <View style={styles.livePulseDot} />
+                  <Text style={styles.livePulseText}>LIVE</Text>
+                </View>
+              </View>
+              <Text style={styles.metricBigNumber}>{fleetOverview.activeTrips}</Text>
+              <Text style={styles.metricLabel}>Active Trips</Text>
+              <Text style={styles.metricSubtext}>On the road now</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.partnerMetricCard}
+              onPress={() => router.push(isApprovedPartner ? "/chauffeur/earnings" : "/chauffeur/vehicles" as never)}
+            >
+              <View style={styles.metricTopRow}>
+                <View style={[styles.metricIconWrap, { backgroundColor: "rgba(245, 158, 11, 0.15)" }]}>
+                  <Ionicons name={isApprovedPartner ? "wallet" : "time"} size={18} color="#F59E0B" />
+                </View>
+                <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.3)" />
+              </View>
+              <Text style={styles.metricBigNumber}>{isApprovedPartner ? `R ${todayEarnings}` : fleetOverview.pendingApprovals}</Text>
+              <Text style={styles.metricLabel}>{isApprovedPartner ? "Today's Earnings" : "Pending Items"}</Text>
+              <Text style={styles.metricSubtext}>{isApprovedPartner ? "Net fleet revenue" : "Review queue"}</Text>
+            </Pressable>
+          </View>
+
+          {/* ─── Fleet Operations Action Menu ─── */}
+          <Text style={styles.partnerSectionHeader}>FLEET OPERATIONS & TOOLS</Text>
+          <View style={styles.operationsList}>
+            {/* Live GPS Fleet Map */}
+            <Pressable
+              style={({ pressed }) => [styles.operationItem, pressed && styles.operationItemPressed]}
+              onPress={() => router.push("/chauffeur/live-map" as never)}
+            >
+              <View style={[styles.operationIconCircle, { backgroundColor: "rgba(16, 185, 129, 0.15)" }]}>
+                <Ionicons name="map" size={20} color="#10B981" />
+              </View>
+              <View style={styles.operationContent}>
+                <View style={styles.operationTitleRow}>
+                  <Text style={styles.operationTitle}>Fleet Live Map</Text>
+                  <View style={styles.liveGpsBadge}>
+                    <Text style={styles.liveGpsBadgeText}>GPS TRACKING</Text>
+                  </View>
+                </View>
+                <Text style={styles.operationSubtitle}>View real-time location of all vehicles and drivers</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+            </Pressable>
+
+            {/* Earnings & Payouts */}
+            <Pressable
+              style={({ pressed }) => [styles.operationItem, pressed && styles.operationItemPressed]}
+              onPress={() => router.push("/chauffeur/earnings")}
+            >
+              <View style={[styles.operationIconCircle, { backgroundColor: "rgba(34, 197, 94, 0.15)" }]}>
+                <Ionicons name="cash" size={20} color="#22C55E" />
+              </View>
+              <View style={styles.operationContent}>
+                <Text style={styles.operationTitle}>Earnings & Payouts</Text>
+                <Text style={styles.operationSubtitle}>Weekly cycle balances, statements & bank withdrawals</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+            </Pressable>
+
+            {/* Vehicles */}
+            <Pressable
+              style={({ pressed }) => [styles.operationItem, pressed && styles.operationItemPressed]}
+              onPress={() => router.push("/chauffeur/vehicles" as never)}
+            >
+              <View style={[styles.operationIconCircle, { backgroundColor: "rgba(14, 165, 233, 0.15)" }]}>
+                <Ionicons name="car-sport" size={20} color="#0EA5E9" />
+              </View>
+              <View style={styles.operationContent}>
+                <Text style={styles.operationTitle}>Vehicle Fleet</Text>
+                <Text style={styles.operationSubtitle}>Add vehicles, upload Dekra/photos & assign drivers</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+            </Pressable>
+
+            {/* Drivers */}
+            <Pressable
+              style={({ pressed }) => [styles.operationItem, pressed && styles.operationItemPressed]}
+              onPress={() => router.push("/chauffeur/fleet" as never)}
+            >
+              <View style={[styles.operationIconCircle, { backgroundColor: "rgba(139, 92, 246, 0.15)" }]}>
+                <Ionicons name="people" size={20} color="#8B5CF6" />
+              </View>
+              <View style={styles.operationContent}>
+                <Text style={styles.operationTitle}>Driver Management</Text>
+                <Text style={styles.operationSubtitle}>Invite, review and assign approved chauffeurs</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+            </Pressable>
+
+            {/* Trips */}
+            <Pressable
+              style={({ pressed }) => [styles.operationItem, pressed && styles.operationItemPressed]}
+              onPress={() => router.push("/chauffeur/rides" as never)}
+            >
+              <View style={[styles.operationIconCircle, { backgroundColor: "rgba(217, 119, 6, 0.15)" }]}>
+                <Ionicons name="receipt" size={20} color="#D97706" />
+              </View>
+              <View style={styles.operationContent}>
+                <Text style={styles.operationTitle}>Trip History</Text>
+                <Text style={styles.operationSubtitle}>All completed rides, passenger routes & invoices</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+            </Pressable>
+
+            {/* Settings */}
+            <Pressable
+              style={({ pressed }) => [styles.operationItem, pressed && styles.operationItemPressed]}
+              onPress={() => router.push("/chauffeur/settings" as never)}
+            >
+              <View style={[styles.operationIconCircle, { backgroundColor: "rgba(148, 163, 184, 0.15)" }]}>
+                <Ionicons name="settings" size={20} color="#94A3B8" />
+              </View>
+              <View style={styles.operationContent}>
+                <Text style={styles.operationTitle}>Settings & Profile</Text>
+                <Text style={styles.operationSubtitle}>Company profile, preferences & banking information</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+            </Pressable>
+
+            {/* Notifications */}
+            <Pressable
+              style={({ pressed }) => [styles.operationItem, pressed && styles.operationItemPressed]}
+              onPress={() => router.push("/chauffeur/notifications")}
+            >
+              <View style={[styles.operationIconCircle, { backgroundColor: "rgba(239, 68, 68, 0.15)" }]}>
+                <Ionicons name="notifications" size={20} color="#EF4444" />
+              </View>
+              <View style={styles.operationContent}>
+                <View style={styles.operationTitleRow}>
+                  <Text style={styles.operationTitle}>Notifications</Text>
+                  {unreadCount > 0 && (
+                    <View style={styles.unreadCountBadge}>
+                      <Text style={styles.unreadCountBadgeText}>{unreadCount} new</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.operationSubtitle}>System alerts, document reviews & ride notices</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+            </Pressable>
+          </View>
+        </ScrollView>
       </View>
     );
   }
 
-  if (!chauffeur) return null;
+  if (!chauffeur) {
+    if (operatorProfile?.type === "partner") {
+      return (
+        <View style={[styles.loadingContainer, { paddingHorizontal: 24 }]}>
+          <ActivityIndicator size="large" color={Colors.white} />
+          <Text style={{ color: Colors.white, marginTop: 16, fontSize: 16, fontFamily: "Inter_600SemiBold" }}>
+            Preparing Driver Dashboard...
+          </Text>
+          <Pressable
+            style={[styles.headerDriverModeBtn, { marginTop: 24, backgroundColor: Colors.card }]}
+            onPress={() => setPartnerDashboardMode("partner")}
+          >
+            <Ionicons name="business" size={16} color={Colors.white} />
+            <Text style={styles.headerDriverModeBtnText}>Return to Partner Dashboard</Text>
+          </Pressable>
+        </View>
+      );
+    }
+    return null;
+  }
   const activeVehicle = driverVehicles.find((vehicle) => vehicle.id === chauffeur.activeVehicleId);
 
   // ─── Pending approval ─────────────────────────────────────────────────────
-  if (!chauffeur.isApproved) {
+  if (!chauffeur.isApproved && operatorProfile?.type !== "partner") {
     const isWaitlisted = chauffeur.applicationStatus === "waitlisted";
     return (
       <View style={[styles.pendingContainer, { paddingTop: insets.top + 20 }]}>
@@ -2503,6 +2755,20 @@ export default function ChauffeurDashboard() {
 
   // ─── Menu items ───────────────────────────────────────────────────────────
   const menuItems = [
+    ...(operatorProfile?.type === "partner"
+      ? [
+          {
+            icon: "business-outline",
+            label: "Partner Dashboard",
+            onPress: async () => {
+              setPartnerDashboardMode("partner");
+              await AsyncStorage.setItem("a2b_partner_dashboard_mode", "partner");
+              closeMenu();
+            },
+            color: "#10B981",
+          },
+        ]
+      : []),
     { icon: isOnline ? "stop-circle-outline" : "play-circle-outline", label: isOnline ? "Go Offline" : "Go Online", onPress: toggleOnline, color: isOnline ? "#ff6b6b" : Colors.success },
     { icon: "map-outline", label: "Fleet Live Map", onPress: () => { router.push("/chauffeur/live-map" as never); closeMenu(); }, color: "#10B981" },
     { icon: "car-outline", label: "Vehicles", onPress: () => { router.push("/chauffeur/vehicles" as never); closeMenu(); }, color: Colors.white },
@@ -2704,6 +2970,21 @@ export default function ChauffeurDashboard() {
         <View style={[styles.pillDot, { backgroundColor: isOnline ? Colors.success : "#555" }]} />
         <Text style={styles.pillText}>{isOnline ? "Online" : "Offline"}</Text>
       </Pressable>
+
+      {/* ─── Partner Fleet Dashboard Button (Top-Center for partner users in driver mode) ─── */}
+      {operatorProfile?.type === "partner" && (
+        <Pressable
+          style={[styles.partnerFleetPill, { top: insets.top + 16 }]}
+          onPress={async () => {
+            setPartnerDashboardMode("partner");
+            await AsyncStorage.setItem("a2b_partner_dashboard_mode", "partner");
+          }}
+          accessibilityLabel="Switch to Partner Fleet Dashboard"
+        >
+          <Ionicons name="business" size={14} color="#10B981" />
+          <Text style={styles.partnerFleetPillText}>Fleet Dashboard</Text>
+        </Pressable>
+      )}
 
       {/* ─── Bottom-Left Green Vehicle Button ─── */}
       {!currentRide && (
@@ -3349,6 +3630,344 @@ const GLASS_BORDER = "rgba(255,255,255,0.09)";
 
 const styles = StyleSheet.create({
   loadingContainer: { flex: 1, backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center" },
+
+  // Partner Fleet Dashboard (Executive Theme)
+  partnerMainContainer: {
+    flex: 1,
+    backgroundColor: "#0A0A0A",
+  },
+  partnerScroll: {
+    flex: 1,
+  },
+  partnerScrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  partnerHeaderBar: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255, 255, 255, 0.08)",
+  },
+  partnerBrandCol: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  partnerBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+    flexWrap: "wrap",
+  },
+  partnerLogoIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: "rgba(16, 185, 129, 0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.3)",
+  },
+  partnerBrandTag: {
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+    color: "#10B981",
+    letterSpacing: 1.2,
+  },
+  partnerStatusChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  statusChipApproved: {
+    backgroundColor: "rgba(16, 185, 129, 0.12)",
+    borderColor: "rgba(16, 185, 129, 0.3)",
+  },
+  statusChipPending: {
+    backgroundColor: "rgba(245, 158, 11, 0.12)",
+    borderColor: "rgba(245, 158, 11, 0.3)",
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  statusChipText: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+  },
+  partnerWelcomeTitle: {
+    fontSize: 22,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+    marginTop: 4,
+  },
+  partnerSubtitle: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255, 255, 255, 0.6)",
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  headerDriverModeBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#16A34A",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 24,
+    shadowColor: "#16A34A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.2)",
+  },
+  headerDriverModeBtnText: {
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+    letterSpacing: 0.3,
+  },
+
+  // Driver Mode Hero Switcher Card
+  driverModeHeroCard: {
+    backgroundColor: "rgba(22, 163, 74, 0.08)",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(34, 197, 94, 0.25)",
+    padding: 16,
+    marginBottom: 24,
+    gap: 14,
+  },
+  driverModeHeroLeft: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  driverModeIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(16, 185, 129, 0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.3)",
+  },
+  driverModeHeroTexts: {
+    flex: 1,
+  },
+  driverModeHeroTitle: {
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+    marginBottom: 3,
+  },
+  driverModeHeroDesc: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255, 255, 255, 0.7)",
+    lineHeight: 17,
+  },
+  driverModeHeroBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#16A34A",
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  driverModeHeroBtnText: {
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+  },
+
+  // Section Header
+  partnerSectionHeader: {
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+    color: "rgba(255, 255, 255, 0.4)",
+    letterSpacing: 1.2,
+    marginBottom: 12,
+  },
+
+  // Metrics Grid
+  partnerMetricsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+    marginBottom: 28,
+  },
+  partnerMetricCard: {
+    width: "48%",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    padding: 14,
+  },
+  metricTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  metricIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  liveIndicatorPulse: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(168, 85, 247, 0.2)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  livePulseDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#A855F7",
+  },
+  livePulseText: {
+    fontSize: 9,
+    fontFamily: "Inter_700Bold",
+    color: "#A855F7",
+  },
+  metricBigNumber: {
+    fontSize: 22,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+    marginBottom: 2,
+  },
+  metricLabel: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    color: "rgba(255, 255, 255, 0.9)",
+  },
+  metricSubtext: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255, 255, 255, 0.4)",
+    marginTop: 2,
+  },
+
+  // Operations List
+  operationsList: {
+    gap: 10,
+    marginBottom: 20,
+  },
+  operationItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    padding: 14,
+    gap: 14,
+  },
+  operationItemPressed: {
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+  },
+  operationIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  operationContent: {
+    flex: 1,
+  },
+  operationTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  operationTitle: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: "#FFFFFF",
+    marginBottom: 2,
+  },
+  operationSubtitle: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255, 255, 255, 0.5)",
+    lineHeight: 15,
+  },
+  liveGpsBadge: {
+    backgroundColor: "rgba(16, 185, 129, 0.15)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.3)",
+  },
+  liveGpsBadgeText: {
+    fontSize: 9,
+    fontFamily: "Inter_700Bold",
+    color: "#10B981",
+    letterSpacing: 0.5,
+  },
+  unreadCountBadge: {
+    backgroundColor: "#EF4444",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  unreadCountBadgeText: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+  },
+
+  // Partner Fleet Pill on Driver Dashboard Map
+  partnerFleetPill: {
+    position: "absolute",
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(10, 10, 10, 0.9)",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.4)",
+    zIndex: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    elevation: 6,
+  },
+  partnerFleetPillText: {
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+    color: "#10B981",
+    letterSpacing: 0.3,
+  },
 
   // Pending
   pendingContainer: { flex: 1, backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },

@@ -4673,8 +4673,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   async function ensureDriverOperatorForChauffeur(userId: string) {
     let profile = await storage.getOperatorProfileByUserId(userId);
-    const chauffeur = await storage.getChauffeurByUserId(userId).catch(() => undefined);
-    if (!chauffeur) return profile || null;
+    let chauffeur = await storage.getChauffeurByUserId(userId).catch(() => undefined);
+    if (!chauffeur) {
+      if (profile?.type === "partner" && profile.status === "approved") {
+        const user = await storage.getUser(userId);
+        chauffeur = await storage.createChauffeur({
+          userId,
+          phone: user?.phone || null,
+          profilePhoto: user?.profilePhoto || null,
+          isApproved: true,
+        });
+        return profile;
+      }
+      return profile || null;
+    }
 
     if (!profile) {
       profile = await storage.createOperatorProfile({
@@ -4932,9 +4944,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           vehicle,
           documents: await storage.getDocumentsByVehicle(vehicle.id).catch(() => []),
         }))),
-        profile.type === "driver"
-          ? storage.getChauffeurByUserId(req.auth!.sub).catch(() => undefined)
-          : Promise.resolve(undefined),
+        storage.getChauffeurByUserId(req.auth!.sub).catch(() => undefined),
       ]);
       return res.json({
         vehicles: vehiclesWithDocuments,
@@ -5169,8 +5179,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const row = selection.rows[0];
       if (!row) return res.status(404).json({ message: "Vehicle or operator profile not found" });
-      if (row.operator_type !== "driver" || (!row.chauffeur_approved && row.operator_status !== "approved")) {
-        return res.status(403).json({ message: "Only approved drivers can select a driving vehicle." });
+      const isAuthorizedOperator = row.operator_type === "driver" || row.operator_type === "partner";
+      if (!isAuthorizedOperator || (!row.chauffeur_approved && row.operator_status !== "approved")) {
+        return res.status(403).json({ message: "Only approved drivers or fleet partners can select a driving vehicle." });
       }
       if (row.vehicle_status !== "approved") {
         return res.status(400).json({ message: "Select an approved vehicle before going online." });
@@ -6401,9 +6412,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(403).json({ message: application.notes || "Your driver profile is waitlisted. Please contact support before going online." });
         }
         const profile = await ensureDriverOperatorForChauffeur(chauffeur.userId);
-        if (profile?.type === "partner") {
-          return res.status(403).json({ message: "Partners cannot go online as drivers." });
-        }
         if (!profile || profile.status !== "approved" || !chauffeur.isApproved) {
           return res.status(403).json({ message: "Account not yet approved" });
         }
@@ -6412,7 +6420,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         const vehicle = await storage.getVehicle(chauffeur.activeVehicleId);
         const assignment = await storage.getActiveVehicleAssignment(chauffeur.activeVehicleId, profile.id);
-        if (!vehicle || vehicle.status !== "approved" || !assignment) {
+        const ownsVehicle = vehicle && vehicle.ownerOperatorProfileId === profile.id;
+        if (!vehicle || vehicle.status !== "approved" || (!assignment && !ownsVehicle)) {
           await storage.updateChauffeur(req.params.id, { activeVehicleId: null, isOnline: false });
           return res.status(400).json({ message: "This vehicle is no longer approved or assigned to you." });
         }

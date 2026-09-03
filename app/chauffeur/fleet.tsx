@@ -17,6 +17,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { apiRequest } from "@/lib/query-client";
 import Colors from "@/constants/colors";
 
@@ -248,14 +249,27 @@ export default function FleetScreen() {
       <View style={styles.header}>
         <Pressable style={styles.backBtn} onPress={() => router.back()}><Ionicons name="arrow-back" size={22} color={Colors.white} /></Pressable>
         <Text style={styles.title}>Fleet</Text>
-        <Pressable
-          style={styles.liveMapHeaderBtn}
-          onPress={() => router.push("/chauffeur/live-map" as never)}
-          accessibilityLabel="Open Live Map"
-        >
-          <Ionicons name="map-outline" size={18} color={Colors.white} />
-          <Text style={styles.liveMapHeaderBtnText}>Live Map</Text>
-        </Pressable>
+        <View style={styles.headerRightActions}>
+          <Pressable
+            style={styles.driverModeHeaderBtn}
+            onPress={async () => {
+              await AsyncStorage.setItem("a2b_partner_dashboard_mode", "driver");
+              router.push("/chauffeur" as never);
+            }}
+            accessibilityLabel="Open Driver Dashboard"
+          >
+            <Ionicons name="speedometer" size={14} color="#FFFFFF" />
+            <Text style={styles.driverModeHeaderBtnText}>Driver Mode</Text>
+          </Pressable>
+          <Pressable
+            style={styles.liveMapHeaderBtn}
+            onPress={() => router.push("/chauffeur/live-map" as never)}
+            accessibilityLabel="Open Live Map"
+          >
+            <Ionicons name="map-outline" size={16} color={Colors.white} />
+            <Text style={styles.liveMapHeaderBtnText}>Live Map</Text>
+          </Pressable>
+        </View>
       </View>
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
@@ -537,7 +551,25 @@ const styles = StyleSheet.create({
   center: { alignItems: "center", justifyContent: "center" },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 12 },
   backBtn: { width: 38, height: 38, alignItems: "center", justifyContent: "center" },
-  title: { fontSize: 18, fontFamily: "Inter_700Bold", color: Colors.white },
+  headerRightActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  driverModeHeaderBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#16A34A",
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 16,
+  },
+  driverModeHeaderBtnText: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    color: "#FFFFFF",
+  },
   liveMapHeaderBtn: {
     flexDirection: "row",
     alignItems: "center",

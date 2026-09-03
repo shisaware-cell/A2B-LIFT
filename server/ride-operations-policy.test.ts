@@ -359,3 +359,23 @@ test("partner earnings and fleet live map screens are properly integrated in rou
   assert.match(liveMapSource, /Drivers \(/);
 });
 
+test("partner drivers can switch between partner fleet dashboard and driver dashboard seamlessly", () => {
+  const chauffeurSource = readFileSync(resolve(process.cwd(), "app/chauffeur/index.tsx"), "utf-8");
+  // Ensure forced lock into fleet list was removed
+  assert.doesNotMatch(chauffeurSource, /router\.replace\("\/chauffeur\/fleet" as never\);/);
+  // Ensure dual mode state and UI toggles are integrated
+  assert.match(chauffeurSource, /partnerDashboardMode/);
+  assert.match(chauffeurSource, /headerDriverModeBtn/);
+  assert.match(chauffeurSource, /partnerFleetPill/);
+  assert.match(chauffeurSource, /driverModeHeroCard/);
+  assert.match(chauffeurSource, /FLEET OPERATIONS & TOOLS/);
+
+  const fleetSource = readFileSync(resolve(process.cwd(), "app/chauffeur/fleet.tsx"), "utf-8");
+  assert.match(fleetSource, /driverModeHeaderBtn/);
+
+  const routesSource = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
+  // Ensure approved partners are authorized to select a vehicle and go online
+  assert.match(routesSource, /row\.operator_type === "driver" \|\| row\.operator_type === "partner"/);
+  assert.doesNotMatch(routesSource, /Partners cannot go online as drivers/);
+});
+
