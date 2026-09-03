@@ -2,7 +2,15 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack, router, usePathname, useRootNavigationState } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useState } from "react";
-import { Platform } from "react-native";
+import { Platform, Alert } from "react-native";
+
+// Guarantee Alert exists on global scope in all runtimes (Hermes, JSC, etc.)
+if (typeof globalThis !== "undefined") {
+  (globalThis as any).Alert = (globalThis as any).Alert || Alert;
+}
+if (typeof global !== "undefined") {
+  (global as any).Alert = (global as any).Alert || Alert;
+}
 import * as Linking from "expo-linking";
 import Constants from "expo-constants";
 import { GestureHandlerRootView } from "react-native-gesture-handler";

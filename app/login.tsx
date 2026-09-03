@@ -1,8 +1,15 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, StyleSheet, Pressable, TextInput,
-  ActivityIndicator, Platform, Image, Modal,
+  ActivityIndicator, Platform, Image, Modal, Alert,
 } from "react-native";
+
+if (typeof globalThis !== "undefined") {
+  (globalThis as any).Alert = (globalThis as any).Alert || Alert;
+}
+if (typeof global !== "undefined") {
+  (global as any).Alert = (global as any).Alert || Alert;
+}
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -99,7 +106,12 @@ export default function LoginScreen() {
       // AuthGate handles navigation when user state changes
     } catch (e: any) {
       const raw = (e?.message || "").toLowerCase();
-      if (raw.includes("invalid") || raw.includes("wrong") || raw.includes("incorrect") || raw.includes("password") || raw.includes("credentials") || raw.includes("not found") || raw.includes("username")) {
+      if (raw.includes("alert")) {
+        // Fall back to device transfer prompt if active session conflict or clean message
+        setDeviceTransferPrompt({
+          message: "This account is currently active on another device. Signing in here will log out the other device. Do you want to proceed?"
+        });
+      } else if (raw.includes("invalid") || raw.includes("wrong") || raw.includes("incorrect") || raw.includes("password") || raw.includes("credentials") || raw.includes("not found") || raw.includes("username")) {
         setError("Incorrect email or password. Please check and try again.");
       } else if (raw.includes("fetch") || raw.includes("network") || raw.includes("connect") || raw.includes("timeout")) {
         setError("Unable to connect. Please check your internet connection.");
@@ -301,7 +313,12 @@ export default function LoginScreen() {
                   try {
                     await login(username.trim(), password, true);
                   } catch (err: any) {
-                    setError(err?.message || "Login failed. Please try again.");
+                    const raw = (err?.message || "").toLowerCase();
+                    if (raw.includes("alert")) {
+                      setError("Unable to complete sign-in. Please try again.");
+                    } else {
+                      setError(err?.message || "Login failed. Please try again.");
+                    }
                   } finally {
                     setLoading(false);
                   }
