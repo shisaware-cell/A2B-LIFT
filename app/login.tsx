@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, StyleSheet, Pressable, TextInput,
-  ActivityIndicator, Platform, Image,
+  ActivityIndicator, Platform, Image, Modal, Alert,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -36,6 +36,7 @@ export default function LoginScreen() {
   const [error, setError] = useState("");
   const [resetMessage, setResetMessage] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [deviceTransferPrompt, setDeviceTransferPrompt] = useState<{ message: string } | null>(null);
   const [clientLoginMode, setClientLoginMode] = useState<ClientLoginMode>("client");
   const showClientModeChoice = APP_VARIANT === "client";
 
@@ -89,28 +90,35 @@ export default function LoginScreen() {
       const result = await login(username.trim(), password);
       if (result?.requiresDeviceTransferConfirmation) {
         setLoading(false);
-        Alert.alert(
-          "Active Session Detected",
-          result.message || "This account is currently active on another device. Signing in here will log out the other device. Do you want to proceed?",
-          [
-            { text: "Cancel", style: "cancel" },
-            {
-              text: "Sign In & Switch Device",
-              style: "destructive",
-              onPress: async () => {
-                setLoading(true);
-                setError("");
-                try {
-                  await login(username.trim(), password, true);
-                } catch (err: any) {
-                  setError(err?.message || "Login failed. Please try again.");
-                } finally {
-                  setLoading(false);
-                }
+        const confirmMsg =
+          result.message ||
+          "This account is currently active on another device. Signing in here will log out the other device. Do you want to proceed?";
+        setDeviceTransferPrompt({ message: confirmMsg });
+        if (Platform.OS !== "web") {
+          Alert.alert(
+            "Active Session Detected",
+            confirmMsg,
+            [
+              { text: "Cancel", style: "cancel", onPress: () => setDeviceTransferPrompt(null) },
+              {
+                text: "Sign In & Switch Device",
+                style: "destructive",
+                onPress: async () => {
+                  setDeviceTransferPrompt(null);
+                  setLoading(true);
+                  setError("");
+                  try {
+                    await login(username.trim(), password, true);
+                  } catch (err: any) {
+                    setError(err?.message || "Login failed. Please try again.");
+                  } finally {
+                    setLoading(false);
+                  }
+                },
               },
-            },
-          ]
-        );
+            ]
+          );
+        }
         return;
       }
       // AuthGate handles navigation when user state changes
@@ -285,6 +293,51 @@ export default function LoginScreen() {
           </Pressable>
         </View>
       </KeyboardAwareScrollViewCompat>
+
+      <Modal
+        visible={Boolean(deviceTransferPrompt)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeviceTransferPrompt(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.deviceConflictCard}>
+            <View style={styles.deviceConflictIconWrap}>
+              <Ionicons name="phone-portrait-outline" size={28} color="#FFFFFF" />
+            </View>
+            <Text style={styles.deviceConflictTitle}>Active Session Detected</Text>
+            <Text style={styles.deviceConflictMessage}>
+              {deviceTransferPrompt?.message ||
+                "This account is currently active on another device. Signing in here will log out the other device. Do you want to proceed?"}
+            </Text>
+            <View style={styles.deviceConflictActions}>
+              <Pressable
+                style={styles.deviceConflictCancelBtn}
+                onPress={() => setDeviceTransferPrompt(null)}
+              >
+                <Text style={styles.deviceConflictCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={styles.deviceConflictConfirmBtn}
+                onPress={async () => {
+                  setDeviceTransferPrompt(null);
+                  setLoading(true);
+                  setError("");
+                  try {
+                    await login(username.trim(), password, true);
+                  } catch (err: any) {
+                    setError(err?.message || "Login failed. Please try again.");
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+              >
+                <Text style={styles.deviceConflictConfirmText}>Sign In & Switch</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -358,4 +411,14 @@ const styles = StyleSheet.create({
   footer: { flexDirection: "row", alignItems: "flex-end", gap: 4, paddingTop: 24 },
   footerText: { fontSize: 14, fontFamily: "Inter_400Regular", color: Colors.textMuted },
   footerLink: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.white },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.7)", alignItems: "center", justifyContent: "center", padding: 24 },
+  deviceConflictCard: { width: "100%", maxWidth: 420, backgroundColor: "#1C1C1E", borderRadius: 20, padding: 24, borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.12)", alignItems: "center" },
+  deviceConflictIconWrap: { width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(255, 255, 255, 0.1)", alignItems: "center", justifyContent: "center", marginBottom: 16 },
+  deviceConflictTitle: { fontSize: 18, fontFamily: "Inter_700Bold", color: "#FFFFFF", marginBottom: 10, textAlign: "center" },
+  deviceConflictMessage: { fontSize: 14, fontFamily: "Inter_400Regular", color: "rgba(255, 255, 255, 0.7)", textAlign: "center", lineHeight: 20, marginBottom: 24 },
+  deviceConflictActions: { flexDirection: "row", gap: 12, width: "100%" },
+  deviceConflictCancelBtn: { flex: 1, minHeight: 48, borderRadius: 12, backgroundColor: "rgba(255, 255, 255, 0.08)", alignItems: "center", justifyContent: "center" },
+  deviceConflictCancelText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: "#FFFFFF" },
+  deviceConflictConfirmBtn: { flex: 1.3, minHeight: 48, borderRadius: 12, backgroundColor: "#E53935", alignItems: "center", justifyContent: "center" },
+  deviceConflictConfirmText: { fontSize: 14, fontFamily: "Inter_700Bold", color: "#FFFFFF" },
 });

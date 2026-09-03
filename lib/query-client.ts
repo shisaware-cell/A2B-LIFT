@@ -56,6 +56,9 @@ async function throwIfResNotOk(res: Response) {
     let text = "";
     if (contentType.includes("application/json")) {
       const body = await clonedRes.json().catch(() => null);
+      if (res.status === 401 && body?.code === "DEVICE_TRANSFERRED") {
+        AsyncStorage.multiRemove(["a2b_token", "a2b_user"]).catch(() => {});
+      }
       text = body?.message || body?.error || "";
     } else {
       text = (await clonedRes.text()) || res.statusText;
@@ -118,8 +121,14 @@ export async function apiRequest(
   const url = new URL(route, baseUrl);
 
   const authHeader = await getAuthHeader();
+  let deviceId: string | null = null;
+  try {
+    deviceId = await AsyncStorage.getItem("a2b_device_id");
+  } catch {}
+
   const headers: Record<string, string> = {
     ...(data ? { "Content-Type": "application/json" } : {}),
+    ...(deviceId ? { "x-device-id": deviceId } : {}),
     ...authHeader,
   };
 

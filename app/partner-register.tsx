@@ -8,6 +8,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/query-client";
 import { uploadDocument } from "@/lib/supabase-storage";
+import { pickImageOrDocument, PickedMedia } from "@/lib/image-picker-helper";
+import DocumentUploadModal from "@/components/DocumentUploadModal";
 import Colors from "@/constants/colors";
 
 const PARTNER_DOCS = [
@@ -18,7 +20,7 @@ const PARTNER_DOCS = [
   { id: "partner:bank_account_details", label: "Bank Account Details" },
 ];
 
-type DraftFile = { uri: string; name: string; uploadedUrl?: string };
+type DraftFile = { uri: string; name: string; uploadedUrl?: string; base64?: string };
 type DraftDocuments = Record<string, DraftFile | null>;
 
 function emptyDocs(): DraftDocuments {
@@ -102,52 +104,65 @@ export default function PartnerRegisterScreen() {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
+  const [activeUploadModal, setActiveUploadModal] = useState<{
+    type: string;
+    label: string;
+  } | null>(null);
+
+  async function applyPickedMedia(type: string, media: PickedMedia) {
+    const file: DraftFile = {
+      uri: media.uri,
+      name: media.name || `${type.replace("partner:", "")}.jpg`,
+      base64: media.base64,
+    };
+    setDocuments((prev) => ({ ...prev, [type]: file }));
+    void autosaveDocumentUpload(type, file);
+  }
+
   async function pickDocument(type: string, camera = false) {
     try {
-      if (Platform.OS !== "web") {
-        const { status } = camera
-          ? await ImagePicker.requestCameraPermissionsAsync()
-          : await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== "granted") {
-          Alert.alert("Permission needed", `Please allow ${camera ? "camera" : "photo"} access.`);
-          return;
-        }
-      }
-      const result = camera && Platform.OS !== "web"
-        ? await ImagePicker.launchCameraAsync({ quality: 0.75, allowsEditing: false })
-        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.75 });
-      if (!result.canceled && result.assets?.[0]) {
-        const asset = result.assets[0];
-        const file = { uri: asset.uri, name: asset.fileName || `${type}.jpg` };
-        setDocuments((prev) => ({ ...prev, [type]: file }));
-        void autosaveDocumentUpload(type, file);
+      const media = await pickImageOrDocument({
+        camera,
+        acceptPdf: true,
+        fallbackName: `${type.replace("partner:", "")}.jpg`,
+      });
+      if (media) {
+        await applyPickedMedia(type, media);
+        return;
       }
     } catch {
+      try {
+        if (camera && Platform.OS !== "web") {
+          const result = await ImagePicker.launchCameraAsync({ quality: 0.75, allowsEditing: false });
+          if (!result.canceled && result.assets?.[0]) {
+            const asset = result.assets[0];
+            await applyPickedMedia(type, {
+              uri: asset.uri,
+              name: asset.fileName || `${type}.jpg`,
+              base64: asset.base64 || undefined,
+            });
+            return;
+          }
+        }
+      } catch {}
       Alert.alert("Error", "Could not open camera or image picker.");
     }
   }
 
   function promptDocumentChoice(type: string, label: string) {
-    if (Platform.OS === "web") {
-      void pickDocument(type, false);
-      return;
-    }
-    Alert.alert(
-      label,
-      "Choose how you want to upload this document:",
-      [
-        { text: "Take Photo (Camera)", onPress: () => void pickDocument(type, true) },
-        { text: "Photo Library (Gallery)", onPress: () => void pickDocument(type, false) },
-        { text: "Cancel", style: "cancel" },
-      ]
-    );
+    setActiveUploadModal({ type, label });
   }
 
   async function autosaveDocumentUpload(type: string, file: DraftFile) {
     if (!user) return;
     setUploadingDocs((prev) => ({ ...prev, [type]: true }));
     try {
-      const url = file.uploadedUrl || await uploadDocument(file.uri, user.id, type.replace("partner:", "partner_"));
+      const url =
+        file.uploadedUrl ||
+        (await uploadDocument(file.uri, user.id, type.replace("partner:", "partner_"), {
+          base64: file.base64,
+          fileName: file.name,
+        }));
       await apiRequest("POST", "/api/operator-profile/documents", { type, url });
       setDocuments((prev) => ({ ...prev, [type]: { ...file, uri: url, uploadedUrl: url } }));
     } catch {
@@ -184,7 +199,10 @@ export default function PartnerRegisterScreen() {
         const file = documents[doc.id];
         if (!file) continue;
         if (!file.uploadedUrl) {
-          const url = await uploadDocument(file.uri, user.id, doc.id.replace("partner:", "partner_"));
+          const url = await uploadDocument(file.uri, user.id, doc.id.replace("partner:", "partner_"), {
+            base64: file.base64,
+            fileName: file.name,
+          });
           await apiRequest("POST", "/api/operator-profile/documents", { type: doc.id, url });
         }
       }
@@ -271,16 +289,24 @@ export default function PartnerRegisterScreen() {
                   <Text style={styles.docTitle}>{doc.label}{doc.optional ? " (optional)" : ""}</Text>
                   <Text style={styles.docMeta}>{uploadingDocs[doc.id] ? "Saving upload..." : file ? file.name : "Tap to take photo or choose file"}</Text>
                 </View>
-                {Platform.OS !== "web" && (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    <Pressable style={styles.docMiniBtn} onPress={() => void pickDocument(doc.id, true)} hitSlop={6}>
-                      <Ionicons name="camera-outline" size={17} color={Colors.white} />
-                    </Pressable>
-                    <Pressable style={styles.docMiniBtn} onPress={() => void pickDocument(doc.id, false)} hitSlop={6}>
-                      <Ionicons name="images-outline" size={17} color={Colors.white} />
-                    </Pressable>
-                  </View>
-                )}
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Pressable
+                    style={styles.docMiniBtn}
+                    onPress={() => void pickDocument(doc.id, true)}
+                    hitSlop={6}
+                    accessibilityLabel={`Take photo for ${doc.label}`}
+                  >
+                    <Ionicons name="camera-outline" size={17} color={Colors.white} />
+                  </Pressable>
+                  <Pressable
+                    style={styles.docMiniBtn}
+                    onPress={() => void pickDocument(doc.id, false)}
+                    hitSlop={6}
+                    accessibilityLabel={`Choose file for ${doc.label}`}
+                  >
+                    <Ionicons name="images-outline" size={17} color={Colors.white} />
+                  </Pressable>
+                </View>
               </Pressable>
             );
           })}
@@ -290,6 +316,18 @@ export default function PartnerRegisterScreen() {
           {loading ? <ActivityIndicator color={Colors.primary} /> : <Text style={styles.submitText}>Submit Partner Application</Text>}
         </Pressable>
       </ScrollView>
+
+      <DocumentUploadModal
+        visible={Boolean(activeUploadModal)}
+        title={activeUploadModal?.label || "Upload Document"}
+        currentFile={activeUploadModal?.type ? documents[activeUploadModal.type] : null}
+        onSelect={(media) => {
+          if (activeUploadModal?.type) {
+            void applyPickedMedia(activeUploadModal.type, media);
+          }
+        }}
+        onClose={() => setActiveUploadModal(null)}
+      />
     </View>
   );
 }

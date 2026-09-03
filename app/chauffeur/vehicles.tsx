@@ -7,6 +7,7 @@ import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { apiRequest } from "@/lib/query-client";
 import { uploadDocument } from "@/lib/supabase-storage";
+import { pickImageOrDocument } from "@/lib/image-picker-helper";
 import Colors from "@/constants/colors";
 
 const emptyForm = { carMake: "", vehicleModel: "", vehicleYear: "", plateNumber: "", vehicleType: "budget", carColor: "", passengerCapacity: "4", luggageCapacity: "2" };
@@ -18,10 +19,10 @@ const VEHICLE_DOCS = [
 ];
 
 const VEHICLE_PHOTO_ANGLES = [
-  { id: "front", label: "Front View", desc: "Headlights, front bumper & license plate", docType: "vehicle:photo_front", icon: "car-outline" },
-  { id: "back", label: "Back / Rear View", desc: "Tail lights, rear bumper & boot", docType: "vehicle:photo_back", icon: "car-outline" },
-  { id: "left", label: "Left Side View", desc: "Left side doors, windows & wheels", docType: "vehicle:photo_left", icon: "arrow-back-outline" },
-  { id: "right", label: "Right Side View", desc: "Right side doors, windows & wheels", docType: "vehicle:photo_right", icon: "arrow-forward-outline" },
+  { id: "front", label: "Front Exterior", desc: "Front bumper, grille, license plate & lights", docType: "vehicle:photo_front", icon: "car-outline" },
+  { id: "back", label: "Rear Exterior", desc: "Rear bumper, boot, rear license plate & taillights", docType: "vehicle:photo_back", icon: "car-outline" },
+  { id: "left", label: "Driver Side (Left)", desc: "Full side profile, doors, mirrors & wheels", docType: "vehicle:photo_left", icon: "swap-horizontal-outline" },
+  { id: "right", label: "Passenger Side (Right)", desc: "Full side profile, doors, mirrors & wheels", docType: "vehicle:photo_right", icon: "swap-horizontal-outline" },
   { id: "inside", label: "Inside / Interior", desc: "Dashboard, front & rear seats, upholstery", docType: "vehicle:photo_inside", icon: "browsers-outline" },
 ] as const;
 
@@ -34,7 +35,7 @@ const VEHICLE_CATEGORIES = [
   { id: "van", label: "Van", desc: "Hyundai H1, Mercedes Vito, Staria" },
 ];
 
-type PhotoDraft = { uri: string; name?: string; uploadedUrl?: string };
+type PhotoDraft = { uri: string; name?: string; uploadedUrl?: string; base64?: string };
 
 export default function VehiclesScreen() {
   const insets = useSafeAreaInsets();
@@ -135,60 +136,20 @@ export default function VehiclesScreen() {
   ) {
     const uploadKey = `${vehicleId}:${type}`;
     try {
-      let fileUri: string | null = null;
-      let fileName: string | undefined;
-      let mimeType: string | undefined;
+      const isCamera = source === "camera";
+      const isFile = source === "file";
+      const media = await pickImageOrDocument({
+        camera: isCamera,
+        acceptPdf: isFile,
+        fallbackName: `${type.replace("vehicle:", "")}.jpg`,
+      });
+      if (!media) return;
 
-      if (source === "camera") {
-        if (Platform.OS !== "web") {
-          const perm = await ImagePicker.requestCameraPermissionsAsync();
-          if (perm.status !== "granted") {
-            Alert.alert("Permission needed", "Please allow camera access to take document photos.");
-            return;
-          }
-        }
-        const result = await ImagePicker.launchCameraAsync({
-          quality: 0.75,
-          allowsEditing: false,
-        });
-        if (result.canceled || !result.assets?.[0]) return;
-        fileUri = result.assets[0].uri;
-        fileName = result.assets[0].fileName || `${type.replace("vehicle:", "")}.jpg`;
-        mimeType = result.assets[0].mimeType || "image/jpeg";
-      } else if (source === "gallery") {
-        if (Platform.OS !== "web") {
-          const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-          if (perm.status !== "granted") {
-            Alert.alert("Permission needed", "Please allow photo access.");
-            return;
-          }
-        }
-        const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          quality: 0.75,
-          allowsEditing: false,
-        });
-        if (result.canceled || !result.assets?.[0]) return;
-        fileUri = result.assets[0].uri;
-        fileName = result.assets[0].fileName || `${type.replace("vehicle:", "")}.jpg`;
-        mimeType = result.assets[0].mimeType || "image/jpeg";
-      } else {
-        const result = await DocumentPicker.getDocumentAsync({
-          type: "*/*",
-          copyToCacheDirectory: true,
-          multiple: false,
-        });
-        if (result.canceled || !result.assets?.[0]) return;
-        fileUri = result.assets[0].uri;
-        fileName = result.assets[0].name;
-        mimeType = result.assets[0].mimeType;
-      }
-
-      if (!fileUri) return;
       setUploadingDocs((prev) => ({ ...prev, [uploadKey]: true }));
-      const url = await uploadDocument(fileUri, vehicleId, type.replace("vehicle:", "vehicle_"), {
-        fileName,
-        mimeType,
+      const url = await uploadDocument(media.uri, vehicleId, type.replace("vehicle:", "vehicle_"), {
+        fileName: media.name,
+        mimeType: media.mimeType,
+        base64: media.base64,
       });
       if (!url || url.startsWith("file:") || url.startsWith("content:")) {
         throw new Error("Could not process document upload.");
@@ -258,31 +219,40 @@ export default function VehiclesScreen() {
 
   async function capturePhotoAngle(angleId: string, camera: boolean = true) {
     try {
-      if (Platform.OS !== "web") {
-        const perm = camera
-          ? await ImagePicker.requestCameraPermissionsAsync()
-          : await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (perm.status !== "granted") {
-          Alert.alert("Permission needed", `Please allow ${camera ? "camera" : "photo library"} access to take vehicle photos.`);
-          return;
-        }
-      }
-      const result = camera && Platform.OS !== "web"
-        ? await ImagePicker.launchCameraAsync({ quality: 0.75, allowsEditing: false })
-        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.75, allowsEditing: false });
-
-      if (!result.canceled && result.assets?.[0]) {
-        const asset = result.assets[0];
+      const media = await pickImageOrDocument({
+        camera,
+        fallbackName: `${photoModalVehicle?.id || "vehicle"}_${angleId}.jpg`,
+      });
+      if (media) {
         setPhotosDraft((prev) => ({
           ...prev,
           [angleId]: {
-            uri: asset.uri,
-            name: asset.fileName || `${photoModalVehicle?.id || "vehicle"}_${angleId}.jpg`,
+            uri: media.uri,
+            name: media.name,
+            base64: media.base64,
           },
         }));
+        return;
       }
-    } catch (err: any) {
-      Alert.alert("Error", err?.message || "Could not capture photo.");
+    } catch {
+      try {
+        if (camera && Platform.OS !== "web") {
+          const result = await ImagePicker.launchCameraAsync({ quality: 0.75, allowsEditing: false });
+          if (!result.canceled && result.assets?.[0]) {
+            const asset = result.assets[0];
+            setPhotosDraft((prev) => ({
+              ...prev,
+              [angleId]: {
+                uri: asset.uri,
+                name: asset.fileName || `${photoModalVehicle?.id || "vehicle"}_${angleId}.jpg`,
+                base64: asset.base64 || undefined,
+              },
+            }));
+            return;
+          }
+        }
+      } catch {}
+      Alert.alert("Error", "Could not capture photo.");
     }
   }
 
@@ -320,6 +290,7 @@ export default function VehiclesScreen() {
           url = await uploadDocument(draft.uri, vehicleId, `vehicle_${angle.id}`, {
             fileName: draft.name || `${angle.id}.jpg`,
             mimeType: "image/jpeg",
+            base64: draft.base64,
           });
         }
         if (!url || url.startsWith("file:") || url.startsWith("content:")) {

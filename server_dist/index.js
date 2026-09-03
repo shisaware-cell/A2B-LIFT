@@ -4284,9 +4284,24 @@ async function registerRoutes(app2) {
       try {
         const incomingDeviceId = String(req.body.deviceId || req.headers["x-device-id"] || "").trim();
         const forceSwitchDevice = req.body.forceSwitchDevice === true || req.headers["x-force-switch-device"] === "true";
-        const isDriverLogin = req.body.appVariant === "driver" || req.headers["x-app-variant"] === "driver" || user.role === "chauffeur";
-        if (isDriverLogin) {
-          const chauffeur2 = await storage.getChauffeurByUserId(user.id);
+        let chauffeur2 = await storage.getChauffeurByUserId(user.id);
+        const operatorProfile = await storage.getOperatorProfileByUserId(user.id);
+        const isDriverAccount = Boolean(chauffeur2) || Boolean(operatorProfile && (operatorProfile.type === "driver" || operatorProfile.type === "partner")) || user.role === "chauffeur" || req.body.appVariant === "driver" || req.headers["x-app-variant"] === "driver";
+        if (isDriverAccount) {
+          if (!chauffeur2 && (user.role === "chauffeur" || operatorProfile?.type === "driver" || operatorProfile?.type === "partner")) {
+            try {
+              chauffeur2 = await storage.createChauffeur({
+                userId: user.id,
+                status: "active",
+                approved: true,
+                rating: "5.0",
+                totalRides: 0,
+                activeDeviceId: incomingDeviceId || void 0,
+                lastDriverLoginAt: /* @__PURE__ */ new Date()
+              });
+            } catch {
+            }
+          }
           if (chauffeur2) {
             const previousDevice = chauffeur2.activeDeviceId;
             if (previousDevice && incomingDeviceId && previousDevice !== incomingDeviceId && !forceSwitchDevice) {
@@ -8201,6 +8216,13 @@ If you did not request this, you can ignore this email.`,
     try {
       const chauffeur2 = await storage.getChauffeur(req.params.id);
       if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
+      const reqDeviceId = String(req.headers["x-device-id"] || req.body?.deviceId || "").trim();
+      if (chauffeur2.activeDeviceId && reqDeviceId && chauffeur2.activeDeviceId !== reqDeviceId) {
+        return res.status(401).json({
+          code: "DEVICE_TRANSFERRED",
+          message: "You have been logged out because your account was signed in on another device."
+        });
+      }
       const nextOnline = !chauffeur2.isOnline;
       if (nextOnline) {
         const application = await storage.getDriverApplicationByUserId(chauffeur2.userId).catch(() => void 0);
@@ -9737,6 +9759,13 @@ If you did not request this, you can ignore this email.`,
     try {
       const chauffeur2 = await storage.getChauffeur(req.params.id);
       if (!chauffeur2 || chauffeur2.userId !== req.auth.sub) return res.status(403).json({ message: "Forbidden" });
+      const reqDeviceId = String(req.headers["x-device-id"] || req.body?.deviceId || "").trim();
+      if (chauffeur2.activeDeviceId && reqDeviceId && chauffeur2.activeDeviceId !== reqDeviceId) {
+        return res.status(401).json({
+          code: "DEVICE_TRANSFERRED",
+          message: "You have been logged out because your account was signed in on another device."
+        });
+      }
       const lat = Number(req.body?.lat);
       const lng = Number(req.body?.lng);
       if (!isValidLocationSample(lat, lng)) return res.status(400).json({ message: "A valid latitude and longitude are required" });

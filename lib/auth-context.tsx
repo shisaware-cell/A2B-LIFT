@@ -221,6 +221,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           try {
             deviceId = (Application as any).getAndroidId();
           } catch {}
+        } else if (Platform.OS === "ios" && typeof (Application as any).getIosIdForVendorAsync === "function") {
+          try {
+            deviceId = await (Application as any).getIosIdForVendorAsync();
+          } catch {}
         }
         if (!deviceId) {
           deviceId = "dev_" + Math.random().toString(36).substring(2, 15) + "_" + Date.now();

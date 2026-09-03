@@ -1,4 +1,5 @@
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { apiRequest, getApiUrl } from "./query-client";
 
 const SUPABASE_URL =
@@ -13,6 +14,7 @@ const DEFAULT_DOCUMENT_MIME = "application/octet-stream";
 type UploadDocumentOptions = {
   fileName?: string | null;
   mimeType?: string | null;
+  base64?: string | null;
 };
 
 /**
@@ -37,11 +39,11 @@ export async function uploadDocument(
     return uploadProfileSelfie(localUri, userId);
   }
 
-  // ── 1. Optimize image if applicable & extract base64 directly ─────────
+  // ── 1. Use pre-computed base64 or optimize image if applicable ───────────
   let uploadUri = localUri;
-  let base64Data = "";
+  let base64Data = options.base64 ? options.base64.replace(/^data:[^;]+;base64,/, "") : "";
   const isProbableImage = !options.mimeType || options.mimeType.startsWith("image/");
-  if (isProbableImage && !localUri.endsWith(".pdf")) {
+  if (!base64Data && isProbableImage && !localUri.endsWith(".pdf")) {
     try {
       const optimized = await manipulateAsync(
         localUri,
@@ -71,9 +73,18 @@ export async function uploadDocument(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
   try {
+    let authHeader: Record<string, string> = {};
+    try {
+      const token = await AsyncStorage.getItem("a2b_token");
+      if (token) authHeader = { Authorization: `Bearer ${token}` };
+    } catch {}
+
     const res = await fetch(`${apiUrl}/api/upload-document`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeader,
+      },
       body: JSON.stringify({ base64Data, userId, docType, mimeType, fileExtension: extension }),
       signal: controller.signal,
     });

@@ -379,3 +379,22 @@ test("partner drivers can switch between partner fleet dashboard and driver dash
   assert.doesNotMatch(routesSource, /Partners cannot go online as drivers/);
 });
 
+test("driver single-device session conflict alert and website photo upload are enabled", () => {
+  const loginSource = readFileSync(resolve(process.cwd(), "app/login.tsx"), "utf-8");
+  assert.match(loginSource, /deviceTransferPrompt/);
+  assert.match(loginSource, /Active Session Detected/);
+  assert.match(loginSource, /deviceConflictCard/);
+
+  const queryClientSource = readFileSync(resolve(process.cwd(), "lib/query-client.ts"), "utf-8");
+  assert.match(queryClientSource, /"x-device-id": deviceId/);
+  assert.match(queryClientSource, /DEVICE_TRANSFERRED/);
+
+  const routesSource = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
+  assert.match(routesSource, /isDriverAccount/);
+  assert.match(routesSource, /DEVICE_TRANSFERRED/);
+
+  const websiteDriverRegister = readFileSync(resolve(process.cwd(), "website/driver-register.html"), "utf-8");
+  assert.match(websiteDriverRegister, /doc-photo/);
+  assert.match(websiteDriverRegister, /\/api\/upload-document/);
+});
+

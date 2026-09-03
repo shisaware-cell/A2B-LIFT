@@ -1772,9 +1772,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const incomingDeviceId = String(req.body.deviceId || req.headers["x-device-id"] || "").trim();
         const forceSwitchDevice = req.body.forceSwitchDevice === true || req.headers["x-force-switch-device"] === "true";
-        const isDriverLogin = req.body.appVariant === "driver" || req.headers["x-app-variant"] === "driver" || user.role === "chauffeur";
-        if (isDriverLogin) {
-          const chauffeur = await storage.getChauffeurByUserId(user.id);
+        let chauffeur = await storage.getChauffeurByUserId(user.id);
+        const operatorProfile = await storage.getOperatorProfileByUserId(user.id);
+        const isDriverAccount =
+          Boolean(chauffeur) ||
+          Boolean(operatorProfile && (operatorProfile.type === "driver" || operatorProfile.type === "partner")) ||
+          user.role === "chauffeur" ||
+          req.body.appVariant === "driver" ||
+          req.headers["x-app-variant"] === "driver";
+
+        if (isDriverAccount) {
+          if (!chauffeur && (user.role === "chauffeur" || operatorProfile?.type === "driver" || operatorProfile?.type === "partner")) {
+            try {
+              chauffeur = await storage.createChauffeur({
+                userId: user.id,
+                status: "active",
+                approved: true,
+                rating: "5.0",
+                totalRides: 0,
+                activeDeviceId: incomingDeviceId || undefined,
+                lastDriverLoginAt: new Date(),
+              });
+            } catch {}
+          }
+
           if (chauffeur) {
             const previousDevice = chauffeur.activeDeviceId;
             if (previousDevice && incomingDeviceId && previousDevice !== incomingDeviceId && !forceSwitchDevice) {
@@ -6404,6 +6425,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const chauffeur = await storage.getChauffeur(req.params.id);
       if (!chauffeur) return res.status(404).json({ message: "Chauffeur not found" });
+      const reqDeviceId = String(req.headers["x-device-id"] || req.body?.deviceId || "").trim();
+      if (chauffeur.activeDeviceId && reqDeviceId && chauffeur.activeDeviceId !== reqDeviceId) {
+        return res.status(401).json({
+          code: "DEVICE_TRANSFERRED",
+          message: "You have been logged out because your account was signed in on another device.",
+        });
+      }
       const nextOnline = !chauffeur.isOnline;
       if (nextOnline) {
         const application = await storage.getDriverApplicationByUserId(chauffeur.userId).catch(() => undefined);
@@ -8165,6 +8193,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const chauffeur = await storage.getChauffeur(req.params.id);
       if (!chauffeur || chauffeur.userId !== req.auth!.sub) return res.status(403).json({ message: "Forbidden" });
+      const reqDeviceId = String(req.headers["x-device-id"] || req.body?.deviceId || "").trim();
+      if (chauffeur.activeDeviceId && reqDeviceId && chauffeur.activeDeviceId !== reqDeviceId) {
+        return res.status(401).json({
+          code: "DEVICE_TRANSFERRED",
+          message: "You have been logged out because your account was signed in on another device.",
+        });
+      }
       const lat = Number(req.body?.lat);
       const lng = Number(req.body?.lng);
       if (!isValidLocationSample(lat, lng)) return res.status(400).json({ message: "A valid latitude and longitude are required" });

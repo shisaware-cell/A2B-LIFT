@@ -183,22 +183,49 @@
       const password = document.getElementById('loginPassword').value;
       btn.textContent = 'Logging in…';
       btn.disabled = true;
-      try {
-        const res = await fetch(`${API}/api/auth/login`, {
+      let deviceId = localStorage.getItem('a2b_device_id');
+      if (!deviceId) {
+        deviceId = 'web_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
+        localStorage.setItem('a2b_device_id', deviceId);
+      }
+
+      async function doLogin(forceSwitch = false) {
+        return fetch(`${API}/api/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: email.trim().toLowerCase(), password })
+          body: JSON.stringify({
+            username: email.trim().toLowerCase(),
+            password,
+            deviceId,
+            appVariant: 'web',
+            forceSwitchDevice: forceSwitch
+          })
         });
-        const data = await res.json();
-        if (res.ok && data.accessToken) {
-          localStorage.setItem('a2b_token', data.accessToken);
-          if (data.user) localStorage.setItem('a2b_user', JSON.stringify(data.user));
-          const next = new URLSearchParams(window.location.search).get('next') || 'dashboard.html';
-          window.location.href = next;
+      }
+
+      let res = await doLogin(false);
+      let data = await res.json();
+
+      if (data?.requiresDeviceTransferConfirmation) {
+        const proceed = confirm(data.message || 'This account is currently active on another device. Signing in here will log out the other device. Do you want to proceed?');
+        if (proceed) {
+          res = await doLogin(true);
+          data = await res.json();
         } else {
-          alert(data.message || 'Login failed. Please check your credentials.');
           btn.textContent = 'Log in'; btn.disabled = false;
+          return;
         }
+      }
+
+      if (res.ok && data.accessToken) {
+        localStorage.setItem('a2b_token', data.accessToken);
+        if (data.user) localStorage.setItem('a2b_user', JSON.stringify(data.user));
+        const next = new URLSearchParams(window.location.search).get('next') || 'dashboard.html';
+        window.location.href = next;
+      } else {
+        alert(data.message || 'Login failed. Please check your credentials.');
+        btn.textContent = 'Log in'; btn.disabled = false;
+      }
       } catch {
         alert('Unable to reach the server. Please try again.');
         btn.textContent = 'Log in'; btn.disabled = false;

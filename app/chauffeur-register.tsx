@@ -8,6 +8,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/query-client";
 import { uploadDocument } from "@/lib/supabase-storage";
+import { pickImageOrDocument, PickedMedia } from "@/lib/image-picker-helper";
+import DocumentUploadModal from "@/components/DocumentUploadModal";
 import Colors from "@/constants/colors";
 
 const DRIVER_DOCS = [
@@ -30,7 +32,7 @@ function normalizeSouthAfricanPhone(raw: string): string {
   return local ? `+27${local}` : "";
 }
 
-type DraftFile = { uri: string; name: string; uploadedUrl?: string };
+type DraftFile = { uri: string; name: string; uploadedUrl?: string; base64?: string };
 type DraftDocuments = Record<string, DraftFile | null>;
 
 function emptyDocs(): DraftDocuments {
@@ -108,46 +110,61 @@ export default function ChauffeurRegisterScreen() {
     AsyncStorage.setItem(draftKey, JSON.stringify({ phone, documents, driverPhoto })).catch(() => {});
   }, [documents, draftKey, draftLoaded, driverPhoto, phoneLocal]);
 
+  const [activeUploadModal, setActiveUploadModal] = useState<{
+    docId: string;
+    label: string;
+    isSelfie?: boolean;
+  } | null>(null);
+
+  async function applyPickedMedia(docId: string, media: PickedMedia) {
+    const file: DraftFile = {
+      uri: media.uri,
+      name: media.name || `${docId.replace("driver:", "")}.jpg`,
+      base64: media.base64,
+    };
+    if (docId === "driver_photo") setDriverPhoto(file);
+    else setDocuments((prev) => ({ ...prev, [docId]: file }));
+    void autosaveDocumentUpload(docId, file);
+  }
+
   async function pickImage(docId: string, camera = false) {
     try {
-      if (Platform.OS !== "web") {
-        const permission = camera
-          ? await ImagePicker.requestCameraPermissionsAsync()
-          : await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (permission.status !== "granted") {
-          Alert.alert("Permission needed", `Please allow ${camera ? "camera" : "photo"} access.`);
-          return;
-        }
-      }
-      const result = camera && Platform.OS !== "web"
-        ? await ImagePicker.launchCameraAsync({ quality: 0.75, allowsEditing: docId === "driver_photo", aspect: docId === "driver_photo" ? [1, 1] : undefined })
-        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.75, allowsEditing: docId === "driver_photo", aspect: docId === "driver_photo" ? [1, 1] : undefined });
-      if (!result.canceled && result.assets?.[0]) {
-        const asset = result.assets[0];
-        const file = { uri: asset.uri, name: asset.fileName || `${docId}.jpg` };
-        if (docId === "driver_photo") setDriverPhoto(file);
-        else setDocuments((prev) => ({ ...prev, [docId]: file }));
-        void autosaveDocumentUpload(docId, file);
+      const isSelfie = docId === "driver_photo";
+      const media = await pickImageOrDocument({
+        camera,
+        isSelfie,
+        fallbackName: isSelfie ? "driver_photo.jpg" : `${docId.replace("driver:", "")}.jpg`,
+      });
+      if (media) {
+        await applyPickedMedia(docId, media);
+        return;
       }
     } catch {
+      // Fallback for native camera if needed
+      try {
+        if (camera && Platform.OS !== "web") {
+          const res = await ImagePicker.launchCameraAsync({ quality: 0.75 });
+          if (!res.canceled && res.assets?.[0]) {
+            const asset = res.assets[0];
+            await applyPickedMedia(docId, {
+              uri: asset.uri,
+              name: asset.fileName || `${docId}.jpg`,
+              base64: asset.base64 || undefined,
+            });
+            return;
+          }
+        }
+      } catch {}
       Alert.alert("Error", "Could not open camera or image picker.");
     }
   }
 
   function promptDocumentChoice(docId: string, label: string) {
-    if (Platform.OS === "web") {
-      void pickImage(docId, false);
-      return;
-    }
-    Alert.alert(
+    setActiveUploadModal({
+      docId,
       label,
-      "Choose how you want to upload this document:",
-      [
-        { text: "Take Photo (Camera)", onPress: () => void pickImage(docId, true) },
-        { text: "Photo Library (Gallery)", onPress: () => void pickImage(docId, false) },
-        { text: "Cancel", style: "cancel" },
-      ]
-    );
+      isSelfie: docId === "driver_photo",
+    });
   }
 
   async function autosaveDocumentUpload(docId: string, file: DraftFile) {
@@ -156,7 +173,12 @@ export default function ChauffeurRegisterScreen() {
     try {
       const type = docId === "driver_photo" ? "driver:driver_photo" : docId;
       const storageType = type.replace("driver:", "driver_");
-      const url = file.uploadedUrl || await uploadDocument(file.uri, user.id, storageType);
+      const url =
+        file.uploadedUrl ||
+        (await uploadDocument(file.uri, user.id, storageType, {
+          base64: file.base64,
+          fileName: file.name,
+        }));
       await apiRequest("POST", "/api/operator-profile/documents", { type, url });
       const savedFile = { ...file, uri: url, uploadedUrl: url };
       if (docId === "driver_photo") setDriverPhoto(savedFile);
@@ -197,7 +219,10 @@ export default function ChauffeurRegisterScreen() {
         if (!file) continue;
         let url = file.uploadedUrl;
         if (!url && file.uri) {
-          url = await uploadDocument(file.uri, user.id, doc.id.replace("driver:", "driver_"));
+          url = await uploadDocument(file.uri, user.id, doc.id.replace("driver:", "driver_"), {
+            base64: file.base64,
+            fileName: file.name,
+          });
         }
         if (!url || url.startsWith("file:") || url.startsWith("content:")) {
           throw new Error(`Failed to upload ${doc.label}. Please try uploading again.`);
@@ -206,7 +231,10 @@ export default function ChauffeurRegisterScreen() {
       }
       let finalPhotoUrl = driverPhoto?.uploadedUrl || null;
       if (driverPhoto && !finalPhotoUrl && driverPhoto.uri) {
-        finalPhotoUrl = await uploadDocument(driverPhoto.uri, user.id, "driver_photo");
+        finalPhotoUrl = await uploadDocument(driverPhoto.uri, user.id, "driver_photo", {
+          base64: driverPhoto.base64,
+          fileName: driverPhoto.name,
+        });
       }
       if (finalPhotoUrl && (finalPhotoUrl.startsWith("file:") || finalPhotoUrl.startsWith("content:"))) {
         throw new Error("Failed to upload profile photo. Please try again.");
@@ -265,13 +293,19 @@ export default function ChauffeurRegisterScreen() {
             {driverPhoto ? <Image source={{ uri: driverPhoto.uri }} style={styles.photoImage} /> : <Ionicons name="person" size={42} color={Colors.textMuted} />}
           </View>
           <View style={styles.photoActions}>
-            {Platform.OS !== "web" && (
-              <Pressable style={styles.secondaryBtn} onPress={() => pickImage("driver_photo", true)}>
-                <Ionicons name="camera-outline" size={18} color={Colors.white} />
-                <Text style={styles.secondaryBtnText}>Camera</Text>
-              </Pressable>
-            )}
-            <Pressable style={styles.secondaryBtn} onPress={() => pickImage("driver_photo", false)}>
+            <Pressable
+              style={styles.secondaryBtn}
+              onPress={() => pickImage("driver_photo", true)}
+              accessibilityLabel="Take Profile Photo with Camera"
+            >
+              <Ionicons name="camera-outline" size={18} color={Colors.white} />
+              <Text style={styles.secondaryBtnText}>Camera</Text>
+            </Pressable>
+            <Pressable
+              style={styles.secondaryBtn}
+              onPress={() => pickImage("driver_photo", false)}
+              accessibilityLabel="Upload Profile Photo from Gallery"
+            >
               <Ionicons name="images-outline" size={18} color={Colors.white} />
               <Text style={styles.secondaryBtnText}>Gallery</Text>
             </Pressable>
@@ -282,23 +316,50 @@ export default function ChauffeurRegisterScreen() {
         <View style={styles.docs}>
           {DRIVER_DOCS.map((doc) => {
             const file = documents[doc.id];
+            const hasPreview = Boolean(file?.uri) && !file?.name?.toLowerCase().endsWith(".pdf");
             return (
-              <Pressable key={doc.id} style={[styles.docRow, file && styles.docUploaded]} onPress={() => promptDocumentChoice(doc.id, doc.label)}>
-                <Ionicons name={file ? "checkmark-circle" : "document-text-outline"} size={22} color={file ? Colors.success : Colors.textMuted} />
+              <Pressable
+                key={doc.id}
+                style={[styles.docRow, file && styles.docUploaded]}
+                onPress={() => promptDocumentChoice(doc.id, doc.label)}
+              >
+                {hasPreview ? (
+                  <Image source={{ uri: file!.uri }} style={styles.docThumbnail} />
+                ) : (
+                  <Ionicons
+                    name={file ? "checkmark-circle" : "document-text-outline"}
+                    size={22}
+                    color={file ? Colors.success : Colors.textMuted}
+                  />
+                )}
                 <View style={{ flex: 1 }}>
                   <Text style={styles.docTitle}>{doc.label}</Text>
-                  <Text style={styles.docMeta}>{uploadingDocs[doc.id] ? "Saving upload..." : file ? file.name : "Tap to take photo or choose from gallery"}</Text>
+                  <Text style={[styles.docMeta, file && styles.docMetaUploaded]} numberOfLines={1}>
+                    {uploadingDocs[doc.id]
+                      ? "Saving upload..."
+                      : file
+                      ? `${file.name} (Attached)`
+                      : "Tap to take photo or choose file"}
+                  </Text>
                 </View>
-                {Platform.OS !== "web" && (
-                  <View style={styles.docActionIcons}>
-                    <Pressable style={styles.docMiniBtn} onPress={() => void pickImage(doc.id, true)} hitSlop={6}>
-                      <Ionicons name="camera-outline" size={17} color={Colors.white} />
-                    </Pressable>
-                    <Pressable style={styles.docMiniBtn} onPress={() => void pickImage(doc.id, false)} hitSlop={6}>
-                      <Ionicons name="images-outline" size={17} color={Colors.white} />
-                    </Pressable>
-                  </View>
-                )}
+                <View style={styles.docActionIcons}>
+                  <Pressable
+                    style={styles.docMiniBtn}
+                    onPress={() => void pickImage(doc.id, true)}
+                    hitSlop={6}
+                    accessibilityLabel={`Take photo for ${doc.label}`}
+                  >
+                    <Ionicons name="camera-outline" size={17} color={Colors.white} />
+                  </Pressable>
+                  <Pressable
+                    style={styles.docMiniBtn}
+                    onPress={() => void pickImage(doc.id, false)}
+                    hitSlop={6}
+                    accessibilityLabel={`Choose file for ${doc.label}`}
+                  >
+                    <Ionicons name="images-outline" size={17} color={Colors.white} />
+                  </Pressable>
+                </View>
               </Pressable>
             );
           })}
@@ -308,6 +369,25 @@ export default function ChauffeurRegisterScreen() {
           {loading ? <ActivityIndicator color={Colors.primary} /> : <Text style={styles.submitText}>Submit Driver Application</Text>}
         </Pressable>
       </ScrollView>
+
+      <DocumentUploadModal
+        visible={Boolean(activeUploadModal)}
+        title={activeUploadModal?.label || "Upload Document"}
+        isSelfie={activeUploadModal?.isSelfie}
+        currentFile={
+          activeUploadModal?.docId === "driver_photo"
+            ? driverPhoto
+            : activeUploadModal?.docId
+            ? documents[activeUploadModal.docId]
+            : null
+        }
+        onSelect={(media) => {
+          if (activeUploadModal?.docId) {
+            void applyPickedMedia(activeUploadModal.docId, media);
+          }
+        }}
+        onClose={() => setActiveUploadModal(null)}
+      />
     </View>
   );
 }
@@ -360,6 +440,8 @@ const styles = StyleSheet.create({
   docMiniBtn: { width: 34, height: 34, borderRadius: 8, backgroundColor: Colors.surface, alignItems: "center", justifyContent: "center" },
   docTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.white },
   docMeta: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textMuted, marginTop: 2 },
+  docMetaUploaded: { color: "#10B981" },
+  docThumbnail: { width: 34, height: 34, borderRadius: 6, backgroundColor: "#222" },
   errorBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(255,77,77,0.1)", padding: 12, borderRadius: 10, marginBottom: 12 },
   errorText: { flex: 1, fontSize: 13, color: Colors.error, fontFamily: "Inter_400Regular" },
   submitBtn: { minHeight: 52, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white, marginTop: 20 },

@@ -381,8 +381,18 @@
         <!-- ── STEP 3 ── -->
         <div class="form-section" id="form-step-3">
           <div class="form-header">
-            <h2>Upload documents</h2>
+            <h2>Upload documents &amp; photos</h2>
             <p>We verify all documents before approving your account. Files must be clear and legible (JPG, PNG, or PDF — max 5 MB each).</p>
+          </div>
+
+          <div class="form-group">
+            <label>Driver Profile Photo (Headshot) *</label>
+            <div class="file-upload" id="fu-photo">
+              <input type="file" accept="image/*" capture="user" id="doc-photo" name="doc_photo" />
+              <div class="file-upload-icon">📸</div>
+              <strong>Tap to take photo or upload</strong>
+              <p>JPG or PNG · Clear face view</p>
+            </div>
           </div>
 
           <div class="form-group">
@@ -591,7 +601,7 @@
           throw new Error(err.message || 'Registration failed');
         }
 
-        const { token } = await regRes.json();
+        const { token, user } = await regRes.json();
 
         // Step 2: create chauffeur profile
         await fetch(`${API}/api/chauffeurs`, {
@@ -607,6 +617,92 @@
             city: payload.city,
           })
         });
+
+        // Step 3: upload driver documents & photos
+        const docConfigs = [
+          { inputId: 'doc-photo', type: 'driver:driver_photo', docType: 'driver_photo' },
+          { inputId: 'doc-id', type: 'driver:drivers_license', docType: 'driver_drivers_license' },
+          { inputId: 'doc-prdp', type: 'driver:pdrp_certificate', docType: 'driver_pdrp_certificate' },
+          { inputId: 'doc-reg', type: 'vehicle:registration', docType: 'vehicle_registration' },
+          { inputId: 'doc-roadworthy', type: 'vehicle:roadworthy', docType: 'vehicle_roadworthy' },
+        ];
+
+        for (const cfg of docConfigs) {
+          const input = document.getElementById(cfg.inputId);
+          const file = input?.files?.[0];
+          if (!file) continue;
+          try {
+            btn.textContent = `Uploading ${file.name}…`;
+            let base64Data = '';
+            if (file.type && file.type.startsWith('image/')) {
+              base64Data = await new Promise((resolve) => {
+                const img = new Image();
+                const url = URL.createObjectURL(file);
+                img.onload = () => {
+                  URL.revokeObjectURL(url);
+                  const canvas = document.createElement('canvas');
+                  const maxDim = 1400;
+                  let w = img.width;
+                  let h = img.height;
+                  if (w > maxDim || h > maxDim) {
+                    if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+                    else { w = Math.round((w * maxDim) / h); h = maxDim; }
+                  }
+                  canvas.width = w;
+                  canvas.height = h;
+                  const ctx = canvas.getContext('2d');
+                  ctx.drawImage(img, 0, 0, w, h);
+                  const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+                  resolve(dataUrl.replace(/^data:[^;]+;base64,/, ''));
+                };
+                img.onerror = () => {
+                  URL.revokeObjectURL(url);
+                  const reader = new FileReader();
+                  reader.onload = () => resolve((reader.result || '').replace(/^data:[^;]+;base64,/, ''));
+                  reader.readAsDataURL(file);
+                };
+                img.src = url;
+              });
+            } else {
+              base64Data = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve((reader.result || '').replace(/^data:[^;]+;base64,/, ''));
+                reader.readAsDataURL(file);
+              });
+            }
+
+            const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+            const upRes = await fetch(`${API}/api/upload-document`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                base64Data,
+                userId: user?.id || 'pending',
+                docType: cfg.docType,
+                mimeType: file.type || 'image/jpeg',
+                fileExtension: ext
+              })
+            });
+            if (upRes.ok) {
+              const upData = await upRes.json();
+              if (upData?.url) {
+                await fetch(`${API}/api/operator-profile/documents`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                  },
+                  body: JSON.stringify({ type: cfg.type, url: upData.url })
+                }).catch(() => {});
+              }
+            }
+          } catch (uploadErr) {
+            console.warn('Document upload warning:', uploadErr);
+          }
+        }
 
         // Show success
         document.getElementById('formWrap').style.display = 'none';
