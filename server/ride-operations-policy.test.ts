@@ -478,3 +478,35 @@ test("partner dashboard cleanup, dark theme map and earnings, and device push no
   assert.match(serverRoutes, /new Set\(\[user\?\.pushToken,\s*chauffeur\?\.pushToken\]/);
 });
 
+test("fleet invitations UX in driver app, notifications routing, styled website inputs, and partner role consistency", () => {
+  const vehiclesSource = readFileSync(resolve(process.cwd(), "app/chauffeur/vehicles.tsx"), "utf-8");
+  const notificationsSource = readFileSync(resolve(process.cwd(), "app/chauffeur/notifications.tsx"), "utf-8");
+  const serverRoutes = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
+  const dashboardHtml = readFileSync(resolve(process.cwd(), "website/dashboard.html"), "utf-8");
+
+  // 1. Driver app vehicles screen has Fleet Invitations section and response handling
+  assert.match(vehiclesSource, /receivedInvites/);
+  assert.match(vehiclesSource, /\/api\/fleet\/invites/);
+  assert.match(vehiclesSource, /respondToInvite/);
+  assert.match(vehiclesSource, /Fleet Invitations for You/);
+  assert.match(vehiclesSource, /Accept Invitation/i);
+  assert.match(vehiclesSource, /Decline/i);
+
+  // 2. Chauffeur notifications handle fleet_invite and navigate to /chauffeur/vehicles
+  assert.match(notificationsSource, /n\.type === ["']fleet_invite["']/);
+  assert.match(notificationsSource, /router\.push\(["']\/chauffeur\/vehicles["']\)/);
+  assert.match(notificationsSource, /return\s+["']business["']/);
+
+  // 3. Server notifications and emails direct drivers to Vehicles -> Fleet Invitations
+  assert.match(serverRoutes, /Vehicles → Fleet Invitations/);
+
+  // 4. Partner profile sets and preserves role as 'partner'
+  assert.match(serverRoutes, /role: "partner"/);
+
+  // 5. Website dashboard has styled inputs for fleet search and displays Partner role properly
+  assert.match(dashboardHtml, /\.driver-apply-card input/);
+  assert.match(dashboardHtml, /fleetDriverSearch/);
+  assert.match(dashboardHtml, /currentUser = \{ \.\.\.currentUser, role: 'partner'/);
+  assert.match(dashboardHtml, /user\.role === 'partner' \|\| user\.operatorProfile\?\.type === 'partner'/);
+});
+

@@ -4000,9 +4000,17 @@ async function registerRoutes(app2) {
     const rewardsBalance = Number(
       safeUser?.rewardsBalance ?? safeUser?.rewards_balance ?? await getUserRewardsBalance(user.id)
     );
-    const liftClubMembership = await storage.getLiftClubMembershipByUser(user.id).catch(() => void 0);
+    const [liftClubMembership, operatorProfile] = await Promise.all([
+      storage.getLiftClubMembershipByUser(user.id).catch(() => void 0),
+      storage.getOperatorProfileByUserId(user.id).catch(() => void 0)
+    ]);
+    const partnerProfile = operatorProfile?.type === "partner" ? await storage.getPartnerProfileByOperatorId(operatorProfile.id).catch(() => void 0) : null;
+    const role = operatorProfile?.type === "partner" || safeUser.role === "partner" ? "partner" : safeUser.role;
     return {
       ...safeUser,
+      role,
+      operatorProfile: operatorProfile || null,
+      partnerProfile: partnerProfile || null,
       referralCode,
       rewardsBalance,
       liftClubMembership: liftClubMembership ? {
@@ -6932,7 +6940,7 @@ If you did not request this, you can ignore this email.`,
         [normalizePhoneIdentity(partnerData.contactPhone)],
         async () => {
           await assertUserIdentityAvailable({ phone: partnerData.contactPhone, excludeUserId: req.auth.sub });
-          await storage.updateUser(req.auth.sub, { role: "chauffeur", phone: partnerData.contactPhone });
+          await storage.updateUser(req.auth.sub, { role: "partner", phone: partnerData.contactPhone });
         }
       );
       return res.status(201).json({ profile, partnerProfile });
@@ -7759,9 +7767,9 @@ If you did not request this, you can ignore this email.`,
       const emailBody = `<p>Hi ${driverName},</p>
         <p><strong>${inviterName}</strong> wants you to become one of their drivers on A2B LIFT and drive one of their vehicles.</p>
         ${message ? `<p style="padding:12px 14px;background:#f4f4f6;border-radius:10px;">"${message}"</p>` : ""}
-        <p>Open the A2B LIFT driver app and go to <strong>Fleet \u2192 Invitations</strong> to accept or decline.</p>
+        <p>Open the A2B LIFT driver app and go to <strong>Vehicles \u2192 Fleet Invitations</strong> to accept or decline.</p>
         <p>Don't have the app yet? Get it here: <a href="${driverAppUrl}">${driverAppUrl}</a></p>`;
-      const smsText = `A2B LIFT: ${smsInviter} invited you to drive for their fleet. Accept in the A2B driver app > Fleet: ${driverAppUrl}`;
+      const smsText = `A2B LIFT: ${smsInviter} invited you to drive for their fleet. Accept in the A2B driver app > Vehicles: ${driverAppUrl}`;
       const [emailResult, smsResult] = await Promise.all([
         sendEmail({
           to: driverEmail,
@@ -7783,7 +7791,7 @@ If you did not request this, you can ignore this email.`,
         userId: driverProfile.userId,
         type: "fleet_invite",
         title: "Fleet invitation",
-        body: `${inviterName} wants you to become one of their drivers. Open Fleet \u2192 Invitations to respond.`,
+        body: `${inviterName} wants you to become one of their drivers. Open Vehicles in your menu to accept or decline.`,
         data: { inviteId: invite.id, invitedByOperatorProfileId: profile.id }
       });
       return res.status(201).json({ invite: await serializeFleetInvite(invite) });
@@ -7828,9 +7836,9 @@ If you did not request this, you can ignore this email.`,
       const emailBody = `<p>Hi ${driverName},</p>
         <p><strong>${inviterName}</strong> wants you to become one of their drivers on A2B LIFT and drive one of their vehicles.</p>
         ${invite.message ? `<p style="padding:12px 14px;background:#f4f4f6;border-radius:10px;">"${invite.message}"</p>` : ""}
-        <p>Open the A2B LIFT driver app and go to <strong>Fleet \u2192 Invitations</strong> to accept or decline.</p>
+        <p>Open the A2B LIFT driver app and go to <strong>Vehicles \u2192 Fleet Invitations</strong> to accept or decline.</p>
         <p>Don't have the app yet? Get it here: <a href="${driverAppUrl}">${driverAppUrl}</a></p>`;
-      const smsText = `A2B LIFT: ${smsInviter} invited you to drive for their fleet. Accept in the A2B driver app > Fleet: ${driverAppUrl}`;
+      const smsText = `A2B LIFT: ${smsInviter} invited you to drive for their fleet. Accept in the A2B driver app > Vehicles: ${driverAppUrl}`;
       const [emailResult, smsResult] = await Promise.all([
         sendEmail({
           to: driverEmail,

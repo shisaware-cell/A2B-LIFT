@@ -97,7 +97,9 @@ export default function ChauffeurNotificationsScreen() {
         return "remove-circle-outline";
       case "partner_approval":
       case "partner_rejection":
-        return "business-outline";
+      case "fleet_invite":
+      case "fleet_invite_response":
+        return "business";
       case "earning": return "cash";
       case "withdrawal": return "arrow-down-circle";
       default: return "notifications";
@@ -114,6 +116,8 @@ export default function ChauffeurNotificationsScreen() {
       case "vehicle_approved":
       case "vehicle_assignment":
       case "partner_approval":
+      case "fleet_invite":
+      case "fleet_invite_response":
         return Colors.success;
       case "rejection": return Colors.error;
       case "operator_rejected":
@@ -184,7 +188,12 @@ export default function ChauffeurNotificationsScreen() {
             <Pressable
               key={n.id}
               style={[styles.notifCard, !n.isRead && styles.notifUnread]}
-              onPress={() => !n.isRead && markAsRead(n.id)}
+              onPress={() => {
+                if (!n.isRead) markAsRead(n.id);
+                if (n.type === "fleet_invite" || n.type === "vehicle_assignment") {
+                  router.push("/chauffeur/vehicles");
+                }
+              }}
             >
               <View style={[styles.notifIcon, { backgroundColor: `${getIconColor(n.type)}20` }]}>
                 <Ionicons name={getIcon(n.type) as any} size={20} color={getIconColor(n.type)} />
@@ -195,6 +204,19 @@ export default function ChauffeurNotificationsScreen() {
                   {!n.isRead && <View style={styles.unreadDot} />}
                 </View>
                 <Text style={styles.notifBody}>{n.body}</Text>
+                {n.type === "fleet_invite" && (
+                  <Pressable
+                    style={styles.notifActionBtn}
+                    onPress={() => {
+                      if (!n.isRead) markAsRead(n.id);
+                      router.push("/chauffeur/vehicles");
+                    }}
+                  >
+                    <Ionicons name="car-sport" size={14} color="#10B981" />
+                    <Text style={styles.notifActionText}>View & Respond in Vehicles</Text>
+                    <Ionicons name="chevron-forward" size={14} color="#10B981" />
+                  </Pressable>
+                )}
                 <Text style={styles.notifTime}>{timeAgo(n.createdAt)}</Text>
               </View>
             </Pressable>
@@ -232,5 +254,24 @@ const styles = StyleSheet.create({
   notifTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.white, flex: 1 },
   unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#3B82F6" },
   notifBody: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textSecondary, lineHeight: 18 },
+  notifActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(16, 185, 129, 0.12)",
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    marginTop: 4,
+    marginBottom: 4,
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.25)",
+  },
+  notifActionText: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    color: "#10B981",
+  },
   notifTime: { fontSize: 11, fontFamily: "Inter_400Regular", color: Colors.textMuted },
 });

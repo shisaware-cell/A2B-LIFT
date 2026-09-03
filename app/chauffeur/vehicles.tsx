@@ -43,6 +43,8 @@ export default function VehiclesScreen() {
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
   const [operatorProfile, setOperatorProfile] = useState<any>(null);
+  const [receivedInvites, setReceivedInvites] = useState<any[]>([]);
+  const [respondingInviteId, setRespondingInviteId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -67,12 +69,21 @@ export default function VehiclesScreen() {
 
   const load = useCallback(async () => {
     try {
-      const vehicleRes = await apiRequest("GET", "/api/vehicles");
-      const data = await vehicleRes.json();
-      setOperatorProfile(data.operatorProfile || null);
-      setActiveVehicleId(data.activeVehicleId || null);
-      setVehicles(Array.isArray(data.vehicles) ? data.vehicles : []);
-      setAssignments(Array.isArray(data.assignments) ? data.assignments : []);
+      const [vehicleRes, inviteRes] = await Promise.all([
+        apiRequest("GET", "/api/vehicles").catch(() => null),
+        apiRequest("GET", "/api/fleet/invites").catch(() => null),
+      ]);
+      if (vehicleRes && vehicleRes.ok) {
+        const data = await vehicleRes.json();
+        setOperatorProfile(data.operatorProfile || null);
+        setActiveVehicleId(data.activeVehicleId || null);
+        setVehicles(Array.isArray(data.vehicles) ? data.vehicles : []);
+        setAssignments(Array.isArray(data.assignments) ? data.assignments : []);
+      }
+      if (inviteRes && inviteRes.ok) {
+        const inviteData = await inviteRes.json();
+        setReceivedInvites(Array.isArray(inviteData.receivedInvites) ? inviteData.receivedInvites : []);
+      }
     } catch {
       Alert.alert("Error", "Could not load vehicles.");
     } finally {
@@ -80,6 +91,24 @@ export default function VehiclesScreen() {
       setRefreshing(false);
     }
   }, []);
+
+  async function respondToInvite(inviteId: string, status: "accepted" | "declined") {
+    setRespondingInviteId(inviteId);
+    try {
+      await apiRequest("PUT", `/api/fleet/invites/${inviteId}/respond`, { status });
+      await load();
+      Alert.alert(
+        status === "accepted" ? "Invite Accepted" : "Invite Declined",
+        status === "accepted"
+          ? "You have joined the fleet! Any assigned vehicles from this fleet partner will now appear in your vehicle list."
+          : "You declined the fleet invitation."
+      );
+    } catch (e: any) {
+      Alert.alert("Could not update invite", e.message || "Please try again.");
+    } finally {
+      setRespondingInviteId(null);
+    }
+  }
 
   useEffect(() => { load(); }, [load]);
 
@@ -372,6 +401,81 @@ export default function VehiclesScreen() {
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.white} />}
       >
+        {receivedInvites.length > 0 && (
+          <View style={styles.inviteSection}>
+            <View style={styles.inviteSectionHeader}>
+              <View style={styles.inviteSectionIcon}>
+                <Ionicons name="business" size={18} color="#10B981" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.inviteSectionTitle}>Fleet Invitations for You</Text>
+                <Text style={styles.inviteSectionSubtitle}>
+                  A fleet partner wants you to join their fleet and drive one of their vehicles.
+                </Text>
+              </View>
+            </View>
+
+            {receivedInvites.map((invite) => {
+              const partnerName =
+                invite.manager?.partnerProfile?.companyName ||
+                invite.manager?.user?.name ||
+                "Fleet Partner";
+              const isPending = invite.status === "pending";
+
+              return (
+                <View key={invite.id} style={styles.inviteCard}>
+                  <View style={styles.inviteTopRow}>
+                    <Text style={styles.invitePartnerName}>{partnerName}</Text>
+                    <View style={[styles.inviteStatusBadge, isPending ? styles.invitePendingBadge : styles.inviteDoneBadge]}>
+                      <Text style={[styles.inviteStatusText, { color: isPending ? "#F59E0B" : (invite.status === "accepted" ? "#10B981" : "#EF4444") }]}>
+                        {invite.status.toUpperCase()}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {!!invite.message && (
+                    <View style={styles.inviteMessageBubble}>
+                      <Text style={styles.inviteMessageText}>"{invite.message}"</Text>
+                    </View>
+                  )}
+
+                  <Text style={styles.inviteMetaText}>
+                    Received {invite.createdAt ? new Date(invite.createdAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" }) : "Recently"}
+                  </Text>
+
+                  {isPending && (
+                    <View style={styles.inviteActionRow}>
+                      <Pressable
+                        style={[styles.acceptInviteBtn, respondingInviteId === invite.id && { opacity: 0.6 }]}
+                        onPress={() => respondToInvite(invite.id, "accepted")}
+                        disabled={respondingInviteId === invite.id}
+                      >
+                        {respondingInviteId === invite.id ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <>
+                            <Ionicons name="checkmark-circle" size={16} color="#FFFFFF" />
+                            <Text style={styles.acceptInviteText}>Accept Invitation</Text>
+                          </>
+                        )}
+                      </Pressable>
+
+                      <Pressable
+                        style={[styles.declineInviteBtn, respondingInviteId === invite.id && { opacity: 0.6 }]}
+                        onPress={() => respondToInvite(invite.id, "declined")}
+                        disabled={respondingInviteId === invite.id}
+                      >
+                        <Ionicons name="close-circle-outline" size={16} color="#9CA3AF" />
+                        <Text style={styles.declineInviteText}>Decline</Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        )}
+
         <Pressable style={styles.addVehicleBtn} onPress={() => setShowForm((prev) => !prev)}>
           <Ionicons name={showForm ? "close-circle-outline" : "add-circle-outline"} size={20} color={Colors.primary} />
           <Text style={styles.submitText}>{showForm ? "Cancel" : "Add New Vehicle"}</Text>
@@ -804,4 +908,131 @@ const styles = StyleSheet.create({
   savePhotosBtnActive: { backgroundColor: Colors.white, borderColor: Colors.white },
   savePhotosText: { color: Colors.textMuted, fontSize: 14, fontFamily: "Inter_700Bold" },
   savePhotosTextActive: { color: Colors.primary },
+
+  // Fleet Invitations Styles
+  inviteSection: {
+    backgroundColor: Colors.card,
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.35)",
+    gap: 14,
+  },
+  inviteSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  inviteSectionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(16, 185, 129, 0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  inviteSectionTitle: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+    color: Colors.white,
+  },
+  inviteSectionSubtitle: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  inviteCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: 10,
+  },
+  inviteTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  invitePartnerName: {
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
+    color: Colors.white,
+  },
+  inviteStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  invitePendingBadge: {
+    backgroundColor: "rgba(245, 158, 11, 0.12)",
+    borderColor: "rgba(245, 158, 11, 0.3)",
+  },
+  inviteDoneBadge: {
+    backgroundColor: "rgba(16, 185, 129, 0.12)",
+    borderColor: "rgba(16, 185, 129, 0.3)",
+  },
+  inviteStatusText: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.5,
+  },
+  inviteMessageBubble: {
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    padding: 10,
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: "#10B981",
+  },
+  inviteMessageText: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    color: Colors.white,
+    fontStyle: "italic",
+  },
+  inviteMetaText: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textMuted,
+  },
+  inviteActionRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 4,
+  },
+  acceptInviteBtn: {
+    flex: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#10B981",
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  acceptInviteText: {
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+  },
+  declineInviteBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+  },
+  declineInviteText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: "#9CA3AF",
+  },
 });

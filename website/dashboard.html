@@ -90,6 +90,45 @@
     .driver-apply-card { background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius); padding: 24px; margin-bottom: 24px; }
     .driver-apply-card h3 { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 8px; }
     .driver-apply-card p { color: var(--grey-500); font-size: 14px; line-height: 1.7; margin-bottom: 18px; }
+    .driver-apply-card input[type="text"],
+    .driver-apply-card input[type="number"],
+    .driver-apply-card input[type="tel"],
+    .driver-apply-card input[type="email"],
+    .driver-apply-card input[type="password"],
+    .driver-apply-card select,
+    .driver-apply-card textarea {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1.5px solid var(--grey-200);
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-family: var(--font);
+      outline: none;
+      background: var(--white);
+      color: var(--grey-900);
+      box-sizing: border-box;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .driver-apply-card input:focus,
+    .driver-apply-card select:focus,
+    .driver-apply-card textarea:focus {
+      border-color: var(--black);
+      box-shadow: 0 0 0 3px rgba(0,0,0,0.06);
+    }
+    .driver-apply-card textarea {
+      resize: vertical;
+      min-height: 76px;
+      line-height: 1.5;
+    }
+    .driver-apply-card select {
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      padding-right: 38px;
+      cursor: pointer;
+    }
     .lift-member-card { background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius); padding: 24px; margin-bottom: 24px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 20px; align-items: start; }
     .lift-member-card h3 { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 8px; }
     .lift-member-card p { color: var(--grey-500); font-size: 14px; line-height: 1.7; margin-bottom: 10px; }
@@ -452,8 +491,16 @@
         <div class="driver-apply-card" style="margin-bottom:18px;">
           <h3>Find an approved driver</h3>
           <p>Search by name, phone or email. Only A2B-approved drivers appear here.</p>
-          <input type="text" id="fleetDriverSearch" placeholder="Search drivers…" oninput="fleetSearchDebounced()" style="margin-bottom:8px;" />
-          <textarea id="fleetInviteMessage" placeholder="Optional message to include with the invite" rows="2" style="margin-bottom:12px;"></textarea>
+          <div style="display:flex;flex-direction:column;gap:14px;margin-bottom:16px;">
+            <div>
+              <label style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--grey-400);display:block;margin-bottom:6px;">Search Driver</label>
+              <input type="text" id="fleetDriverSearch" placeholder="Search by name, phone, or email…" oninput="fleetSearchDebounced()" />
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--grey-400);display:block;margin-bottom:6px;">Invite Message (Optional)</label>
+              <textarea id="fleetInviteMessage" placeholder="Write an optional note to include with your invite (e.g. which vehicle they will be driving)…" rows="2"></textarea>
+            </div>
+          </div>
           <div id="fleetSearchResults"><div class="empty-state"><p>Start typing to find drivers.</p></div></div>
         </div>
 
@@ -977,13 +1024,15 @@
     }
 
     function updateDriverApplicationVisibility(user) {
-      const isDriver = user?.role === 'chauffeur';
+      const isPartner = user?.role === 'partner' || user?.operatorProfile?.type === 'partner';
+      const isDriver = user?.role === 'chauffeur' || user?.operatorProfile?.type === 'driver';
+      const isOperator = isPartner || isDriver;
       const navItem = document.getElementById('nav-driverapply');
       const partnerNavItem = document.getElementById('nav-partnerapply');
       const overviewCard = document.getElementById('overviewDriverApplyCard');
-      if (navItem) navItem.style.display = isDriver ? 'none' : 'flex';
-      if (partnerNavItem) partnerNavItem.style.display = isDriver ? 'none' : 'flex';
-      if (overviewCard) overviewCard.style.display = isDriver ? 'none' : 'block';
+      if (navItem) navItem.style.display = isOperator ? 'none' : 'flex';
+      if (partnerNavItem) partnerNavItem.style.display = isOperator ? 'none' : 'flex';
+      if (overviewCard) overviewCard.style.display = isOperator ? 'none' : 'block';
       const phoneInput = document.getElementById('driverApplyPhone');
       if (phoneInput && !phoneInput.value) phoneInput.value = user?.phone || '';
       const paPhone = document.getElementById('paContactPhone');
@@ -992,7 +1041,7 @@
       if (paName && !paName.value) paName.value = user?.name || '';
       const paEmail = document.getElementById('paContactEmail');
       if (paEmail && !paEmail.value && String(user?.username || '').includes('@')) paEmail.value = user.username;
-      if (!isDriver) loadDriverApplicationStatus();
+      if (!isDriver && !isPartner) loadDriverApplicationStatus();
     }
 
     async function submitPartnerApplication() {
@@ -1037,9 +1086,9 @@
         });
         const payload = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(payload.message || 'Partner application failed.');
-        currentUser = { ...currentUser, role: 'chauffeur', phone: form.contactPhone };
+        currentUser = { ...currentUser, role: 'partner', phone: form.contactPhone };
         localStorage.setItem('a2b_user', JSON.stringify(currentUser));
-        document.getElementById('dashRole').textContent = 'partner';
+        document.getElementById('dashRole').textContent = 'Partner';
         updateDriverApplicationVisibility(currentUser);
         if (statusEl) { statusEl.textContent = 'Partner application submitted. Your company is pending admin approval.'; statusEl.style.color = '#15803d'; }
         showNotification('Partner application submitted.', 'success');
@@ -1260,7 +1309,7 @@
         if (!res.ok) throw new Error(payload.message || 'Driver application failed.');
         currentUser = { ...currentUser, role: 'chauffeur', phone };
         localStorage.setItem('a2b_user', JSON.stringify(currentUser));
-        document.getElementById('dashRole').textContent = 'chauffeur';
+        document.getElementById('dashRole').textContent = 'Chauffeur';
         updateDriverApplicationVisibility(currentUser);
         document.getElementById('driverSep').style.display = 'block';
         document.getElementById('nav-availability').style.display = 'flex';
@@ -1309,7 +1358,12 @@
       const name = user.name || user.username || 'User';
       const initials = name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
       document.getElementById('dashName').textContent = name;
-      document.getElementById('dashRole').textContent = user.role || 'Rider';
+      const roleLabel = (user.role === 'partner' || user.operatorProfile?.type === 'partner')
+        ? 'Partner'
+        : (user.role === 'chauffeur' || user.role === 'driver' || user.operatorProfile?.type === 'driver')
+        ? 'Chauffeur'
+        : (user.role === 'admin' ? 'Admin' : 'Rider');
+      document.getElementById('dashRole').textContent = roleLabel;
       document.getElementById('overviewName').textContent = name.split(' ')[0];
       document.getElementById('navUser').textContent = name.split(' ')[0];
       const avatarEl = document.getElementById('dashAvatar');
