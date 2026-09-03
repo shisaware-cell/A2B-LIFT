@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, StyleSheet, Pressable, TextInput,
-  ActivityIndicator, Platform, Image, Modal, Alert,
+  ActivityIndicator, Platform, Image, Modal,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -94,31 +94,6 @@ export default function LoginScreen() {
           result.message ||
           "This account is currently active on another device. Signing in here will log out the other device. Do you want to proceed?";
         setDeviceTransferPrompt({ message: confirmMsg });
-        if (Platform.OS !== "web") {
-          Alert.alert(
-            "Active Session Detected",
-            confirmMsg,
-            [
-              { text: "Cancel", style: "cancel", onPress: () => setDeviceTransferPrompt(null) },
-              {
-                text: "Sign In & Switch Device",
-                style: "destructive",
-                onPress: async () => {
-                  setDeviceTransferPrompt(null);
-                  setLoading(true);
-                  setError("");
-                  try {
-                    await login(username.trim(), password, true);
-                  } catch (err: any) {
-                    setError(err?.message || "Login failed. Please try again.");
-                  } finally {
-                    setLoading(false);
-                  }
-                },
-              },
-            ]
-          );
-        }
         return;
       }
       // AuthGate handles navigation when user state changes

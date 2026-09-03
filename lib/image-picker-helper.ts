@@ -1,6 +1,16 @@
 import { Platform, Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 
+function safeAlert(title: string, message: string) {
+  try {
+    if (typeof Alert !== "undefined" && Alert && typeof Alert.alert === "function") {
+      Alert.alert(title, message);
+    } else {
+      console.warn(`[ImagePicker] ${title}: ${message}`);
+    }
+  } catch {}
+}
+
 export type PickedMedia = {
   uri: string;
   name: string;
@@ -182,7 +192,7 @@ export async function pickImageOrDocument(options: PickOptions = {}): Promise<Pi
     if (camera) {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (permission.status !== "granted") {
-        Alert.alert("Permission Needed", "Please allow camera access to take photos.");
+        safeAlert("Permission Needed", "Please allow camera access to take photos.");
         return null;
       }
 
@@ -206,7 +216,7 @@ export async function pickImageOrDocument(options: PickOptions = {}): Promise<Pi
     } else {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (permission.status !== "granted") {
-        Alert.alert("Permission Needed", "Please allow photo library access.");
+        safeAlert("Permission Needed", "Please allow photo library access.");
         return null;
       }
 
@@ -229,7 +239,7 @@ export async function pickImageOrDocument(options: PickOptions = {}): Promise<Pi
       };
     }
   } catch (err: any) {
-    Alert.alert("Upload Error", err?.message || "Could not open camera or image picker.");
+    safeAlert("Upload Error", err?.message || "Could not open camera or image picker.");
     return null;
   }
 }
