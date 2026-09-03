@@ -295,17 +295,6 @@ export default function FleetScreen() {
         <Text style={styles.title}>Fleet</Text>
         <View style={styles.headerRightActions}>
           <Pressable
-            style={styles.driverModeHeaderBtn}
-            onPress={async () => {
-              await AsyncStorage.setItem("a2b_partner_dashboard_mode", "driver");
-              router.push("/chauffeur" as never);
-            }}
-            accessibilityLabel="Open Driver Dashboard"
-          >
-            <Ionicons name="speedometer" size={14} color="#FFFFFF" />
-            <Text style={styles.driverModeHeaderBtnText}>Driver Mode</Text>
-          </Pressable>
-          <Pressable
             style={styles.liveMapHeaderBtn}
             onPress={() => router.push("/chauffeur/live-map" as never)}
             accessibilityLabel="Open Live Map"
@@ -642,20 +631,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-  },
-  driverModeHeaderBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#16A34A",
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 16,
-  },
-  driverModeHeaderBtnText: {
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
-    color: "#FFFFFF",
   },
   liveMapHeaderBtn: {
     flexDirection: "row",

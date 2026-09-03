@@ -1216,7 +1216,7 @@ export default function ChauffeurDashboard() {
 
   // ─── Push notifications ───────────────────────────────────────────────────
   useEffect(() => {
-    if (!chauffeur?.id || Platform.OS === "web" || isExpoGoAndroid) return;
+    if ((!chauffeur?.id && !user?.id) || Platform.OS === "web" || isExpoGoAndroid) return;
     (async () => {
       try {
         const Notifications = notificationsRef.current;
@@ -1230,23 +1230,33 @@ export default function ChauffeurDashboard() {
             bypassDnd: true,
             lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
           });
+          await Notifications.setNotificationChannelAsync("default", {
+            name: "General Alerts",
+            importance: Notifications.AndroidImportance.HIGH,
+            vibrationPattern: [0, 250, 250, 250],
+            lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+          });
         }
         const { status } = await Notifications.requestPermissionsAsync();
         if (status !== "granted") return;
         const projectId =
           Constants.easConfig?.projectId ||
-          Constants.expoConfig?.extra?.eas?.projectId;
+          Constants.expoConfig?.extra?.eas?.projectId ||
+          process.env.EXPO_PUBLIC_EAS_PROJECT_ID ||
+          "eb3b8747-40b2-4aad-b118-e64339bfeea0";
         const tokenData = await Notifications.getExpoPushTokenAsync(
           projectId ? { projectId } : undefined,
         );
         if (tokenData?.data) {
-          await apiRequest("PUT", `/api/chauffeurs/${chauffeur.id}/push-token`, { pushToken: tokenData.data });
+          if (chauffeur?.id) {
+            await apiRequest("PUT", `/api/chauffeurs/${chauffeur.id}/push-token`, { pushToken: tokenData.data }).catch(() => {});
+          }
           if (user?.id) {
-            await apiRequest("PUT", `/api/users/${user.id}/push-token`, { pushToken: tokenData.data });
+            await apiRequest("PUT", `/api/users/${user.id}/push-token`, { pushToken: tokenData.data }).catch(() => {});
           }
         }
       } catch (e: any) {
-        console.log("[push] Chauffeur registration:", e?.message || e);
+        console.log("[push] Chauffeur/Partner registration:", e?.message || e);
       }
     })();
   }, [chauffeur?.id, isExpoGoAndroid, user?.id]);
@@ -2453,33 +2463,16 @@ export default function ChauffeurDashboard() {
                   <Ionicons name="business" size={16} color="#10B981" />
                 </View>
                 <Text style={styles.partnerBrandTag}>A2B LIFT FLEET</Text>
-                <View style={[styles.partnerStatusChip, isApprovedPartner ? styles.statusChipApproved : styles.statusChipPending]}>
-                  <View style={[styles.statusDot, { backgroundColor: isApprovedPartner ? "#10B981" : "#F59E0B" }]} />
-                  <Text style={[styles.statusChipText, { color: isApprovedPartner ? "#10B981" : "#F59E0B" }]}>
-                    {isApprovedPartner ? "Approved Partner" : "Pending Review"}
-                  </Text>
-                </View>
               </View>
-              <Text style={styles.partnerWelcomeTitle}>{isApprovedPartner ? "Partner Dashboard" : "Partner Application Pending"}</Text>
+              <Text style={styles.partnerWelcomeTitle} numberOfLines={1} adjustsFontSizeToFit>
+                {isApprovedPartner ? "Partner Dashboard" : "Partner Application Pending"}
+              </Text>
               <Text style={styles.partnerSubtitle}>
                 {isApprovedPartner
                   ? "Manage vehicles, assign drivers, track live operations and revenue."
                   : "Your partner fleet application is under review by A2B administrators."}
               </Text>
             </View>
-
-            {/* Quick Switch to Driver Dashboard Button */}
-            <Pressable
-              style={({ pressed }) => [styles.headerDriverModeBtn, pressed && { opacity: 0.85 }]}
-              onPress={async () => {
-                setPartnerDashboardMode("driver");
-                await AsyncStorage.setItem("a2b_partner_dashboard_mode", "driver");
-              }}
-              accessibilityLabel="Switch to Driver Dashboard"
-            >
-              <Ionicons name="speedometer" size={16} color="#FFFFFF" />
-              <Text style={styles.headerDriverModeBtnText}>Driver Mode</Text>
-            </Pressable>
           </View>
 
           {/* ─── Hero Driver Quick-Switch Card ─── */}
@@ -3672,7 +3665,6 @@ const styles = StyleSheet.create({
   },
   partnerBrandCol: {
     flex: 1,
-    paddingRight: 12,
   },
   partnerBadgeRow: {
     flexDirection: "row",
@@ -3696,32 +3688,6 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     color: "#10B981",
     letterSpacing: 1.2,
-  },
-  partnerStatusChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-  statusChipApproved: {
-    backgroundColor: "rgba(16, 185, 129, 0.12)",
-    borderColor: "rgba(16, 185, 129, 0.3)",
-  },
-  statusChipPending: {
-    backgroundColor: "rgba(245, 158, 11, 0.12)",
-    borderColor: "rgba(245, 158, 11, 0.3)",
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  statusChipText: {
-    fontSize: 11,
-    fontFamily: "Inter_600SemiBold",
   },
   partnerWelcomeTitle: {
     fontSize: 22,

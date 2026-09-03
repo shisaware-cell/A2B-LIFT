@@ -164,43 +164,37 @@ export default function EarningsScreen() {
   };
 
   return (
-    <View style={[styles.mainContainer, !isPartner && { backgroundColor: Colors.primary }]}>
+    <View style={styles.mainContainer}>
       {/* ─── Header ─── */}
-      <View
-        style={[
-          styles.headerBar,
-          { paddingTop: Math.max(insets.top, Platform.OS === "android" ? 28 : 16) },
-          !isPartner && { borderBottomColor: Colors.border },
-        ]}
-      >
+      <View style={[styles.headerBar, { paddingTop: Math.max(insets.top, Platform.OS === "android" ? 28 : 16) }]}>
         <Pressable
           style={styles.headerBtn}
           onPress={() => router.back()}
-          accessibilityLabel="Back"
+          accessibilityLabel="Go back"
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Ionicons name="arrow-back" size={24} color={isPartner ? "#000000" : Colors.white} />
+          <Ionicons name="arrow-back" size={24} color={Colors.white} />
         </Pressable>
-        <Text style={[styles.headerTitle, !isPartner && { color: Colors.white }]}>Earnings</Text>
+        <Text style={styles.headerTitle}>Earnings</Text>
         <Pressable
-          style={[styles.payoutActionBtn, !isPartner && { backgroundColor: "rgba(255,255,255,0.12)" }]}
+          style={styles.payoutActionBtn}
           onPress={() => setShowWithdraw(true)}
           accessibilityLabel="Request Payout"
         >
-          <Ionicons name="cash-outline" size={18} color={isPartner ? "#000000" : Colors.white} />
-          <Text style={[styles.payoutActionText, !isPartner && { color: Colors.white }]}>Payout</Text>
+          <Ionicons name="cash-outline" size={18} color={Colors.white} />
+          <Text style={styles.payoutActionText}>Payout</Text>
         </Pressable>
       </View>
 
       <ScrollView
-        style={[styles.container, !isPartner && { backgroundColor: Colors.primary }]}
+        style={styles.container}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 40 }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={isPartner ? fleetLoading : driverLoading}
             onRefresh={handleRefresh}
-            tintColor={isPartner ? "#000000" : Colors.white}
+            tintColor={Colors.white}
           />
         }
       >
@@ -566,8 +560,8 @@ export default function EarningsScreen() {
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: "#FFFFFF" },
-  container: { flex: 1, backgroundColor: "#FFFFFF" },
+  mainContainer: { flex: 1, backgroundColor: Colors.primary },
+  container: { flex: 1, backgroundColor: Colors.primary },
   scrollContent: { paddingHorizontal: 20, paddingTop: 8 },
 
   // Header Bar
@@ -578,7 +572,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
+    borderBottomColor: "rgba(255, 255, 255, 0.08)",
   },
   headerBtn: {
     width: 40,
@@ -589,29 +583,35 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 22,
     fontFamily: "Inter_700Bold",
-    color: "#000000",
+    color: Colors.white,
     letterSpacing: -0.3,
   },
   payoutActionBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
   },
   payoutActionText: {
     fontSize: 13,
     fontFamily: "Inter_600SemiBold",
-    color: "#000000",
+    color: Colors.white,
   },
 
   // Partner Summary Table (Image 1 reference)
   partnerSummaryCard: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Colors.card,
+    borderRadius: 16,
+    padding: 18,
     marginTop: 8,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
   },
   summaryRow: {
     flexDirection: "row",
@@ -620,60 +620,66 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   summaryLabel: {
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: "Inter_400Regular",
-    color: "#111827",
+    color: "rgba(255, 255, 255, 0.7)",
     flex: 1,
     paddingRight: 12,
   },
   summaryValue: {
     fontSize: 16,
-    fontFamily: "Inter_500Medium",
-    color: "#111827",
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.white,
   },
   summaryDivider: {
     height: 1,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
   },
   summaryDividerBold: {
     height: 1.5,
-    backgroundColor: "#111827",
+    backgroundColor: "rgba(255, 255, 255, 0.18)",
     marginVertical: 4,
   },
   endBalanceLabel: {
     fontFamily: "Inter_700Bold",
     fontSize: 17,
+    color: Colors.white,
   },
   endBalanceValue: {
     fontFamily: "Inter_700Bold",
-    fontSize: 17,
+    fontSize: 18,
+    color: "#10B981",
   },
 
   // Information Notice Card (Image 1 reference)
   infoNoticeCard: {
     flexDirection: "row",
-    backgroundColor: "#F0F4FA",
+    backgroundColor: Colors.card,
     borderRadius: 16,
-    padding: 18,
+    padding: 16,
     alignItems: "flex-start",
     gap: 14,
     marginBottom: 26,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
   },
   infoNoticeIconWrap: {
     width: 30,
     height: 30,
     borderRadius: 8,
-    backgroundColor: "#000000",
+    backgroundColor: "rgba(16, 185, 129, 0.15)",
     alignItems: "center",
     justifyContent: "center",
     marginTop: 2,
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.3)",
   },
   infoNoticeText: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 13,
     fontFamily: "Inter_400Regular",
-    color: "#374151",
-    lineHeight: 20,
+    color: "rgba(255, 255, 255, 0.7)",
+    lineHeight: 19,
   },
 
   // Driver Net Earnings Section Header
@@ -681,9 +687,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   driverSectionTitle: {
-    fontSize: 24,
+    fontSize: 22,
     fontFamily: "Inter_700Bold",
-    color: "#000000",
+    color: Colors.white,
     letterSpacing: -0.4,
   },
 
@@ -691,20 +697,22 @@ const styles = StyleSheet.create({
   searchBarContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F3F4F6",
+    backgroundColor: Colors.surface,
     borderRadius: 24,
     paddingHorizontal: 16,
-    height: 50,
-    marginBottom: 40,
+    height: 48,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
   },
   searchIcon: {
     marginRight: 10,
   },
   searchInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: "Inter_400Regular",
-    color: "#000000",
+    color: Colors.white,
   },
 
   // Empty State (Image 1 reference)
@@ -714,15 +722,15 @@ const styles = StyleSheet.create({
     paddingVertical: 50,
   },
   emptyStateTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontFamily: "Inter_700Bold",
-    color: "#000000",
+    color: Colors.white,
     marginBottom: 8,
   },
   emptyStateSubtitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontFamily: "Inter_400Regular",
-    color: "#6B7280",
+    color: Colors.textMuted,
     textAlign: "center",
   },
 
@@ -731,11 +739,11 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   driverEarningsCard: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Colors.card,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderColor: "rgba(255, 255, 255, 0.08)",
     gap: 12,
   },
   driverCardHeader: {
@@ -752,37 +760,39 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: Colors.surface,
     alignItems: "center",
     justifyContent: "center",
   },
   driverCardName: {
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
-    color: "#111827",
+    color: Colors.white,
   },
   driverCardSub: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: "#6B7280",
+    color: Colors.textMuted,
     marginTop: 2,
   },
   driverTripBadge: {
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
   },
   driverTripBadgeText: {
     fontSize: 12,
     fontFamily: "Inter_600SemiBold",
-    color: "#374151",
+    color: Colors.white,
   },
   driverMetricsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     borderTopWidth: 1,
-    borderTopColor: "#F3F4F6",
+    borderTopColor: "rgba(255, 255, 255, 0.08)",
     paddingTop: 10,
   },
   driverMetricItem: {
@@ -791,13 +801,13 @@ const styles = StyleSheet.create({
   metricLabel: {
     fontSize: 11,
     fontFamily: "Inter_500Medium",
-    color: "#9CA3AF",
+    color: Colors.textMuted,
     textTransform: "uppercase",
   },
   metricValue: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
-    color: "#111827",
+    color: Colors.white,
   },
 
   // ─── Solo Driver Styles ───

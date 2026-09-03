@@ -160,6 +160,9 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
         "android.permission.INTERNET",
         "android.permission.VIBRATE",
         "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.WAKE_LOCK",
       ],
       config: {
         googleMaps: {

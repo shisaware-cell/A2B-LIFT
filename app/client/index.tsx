@@ -1091,12 +1091,20 @@ export default function ClientHomeScreen() {
             sound: "default",
             lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
           });
+          await Notifications.setNotificationChannelAsync("default", {
+            name: "General Alerts",
+            importance: Notifications.AndroidImportance.HIGH,
+            vibrationPattern: [0, 200, 200, 200],
+            lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+          });
         }
         const { status } = await Notifications.requestPermissionsAsync();
         if (status !== "granted") return;
         const projectId =
           Constants.easConfig?.projectId ||
-          Constants.expoConfig?.extra?.eas?.projectId;
+          Constants.expoConfig?.extra?.eas?.projectId ||
+          process.env.EXPO_PUBLIC_EAS_PROJECT_ID_CLIENT ||
+          "9932543b-f023-4dec-8213-5d0fe99ad749";
         const tokenData = await Notifications.getExpoPushTokenAsync(
           projectId ? { projectId } : undefined,
         );

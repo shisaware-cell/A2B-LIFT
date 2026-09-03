@@ -3071,12 +3071,16 @@ async function sendExpoPushNotification(tokens, title, body, data, options) {
   }));
   if (messages2.length === 0) return;
   try {
+    const headers = {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "Accept-Encoding": "gzip, deflate"
+    };
+    if (process.env.EXPO_ACCESS_TOKEN) {
+      headers["Authorization"] = `Bearer ${process.env.EXPO_ACCESS_TOKEN}`;
+    }
     const res = await import_axios2.default.post("https://exp.host/--/api/v2/push/send", messages2, {
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "Accept-Encoding": "gzip, deflate"
-      },
+      headers,
       timeout: 8e3
     });
     const results = Array.isArray(res.data?.data) ? res.data.data : [];
@@ -3101,9 +3105,13 @@ async function notifyUserEvent(options) {
     storage.getUser(options.userId).catch(() => void 0),
     storage.getChauffeurByUserId(options.userId).catch(() => void 0)
   ]);
-  const pushToken = user?.pushToken || chauffeur2?.pushToken;
-  if (pushToken) {
-    await sendExpoPushNotification([pushToken], options.title, options.body, options.data);
+  const tokens = Array.from(new Set([user?.pushToken, chauffeur2?.pushToken].filter(Boolean)));
+  if (tokens.length > 0) {
+    const isRide = options.type?.startsWith("ride");
+    await sendExpoPushNotification(tokens, options.title, options.body, options.data, {
+      urgent: isRide,
+      channelId: isRide ? "ride-alerts-v3" : "default"
+    });
   }
 }
 function generateAIResponse(type, description) {

@@ -191,7 +191,7 @@ export default function FleetLiveMapScreen() {
             accessibilityLabel="Back"
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons name="arrow-back" size={24} color="#000000" />
+            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
           </Pressable>
           <Text style={styles.headerTitle}>Live Map</Text>
           
@@ -213,21 +213,21 @@ export default function FleetLiveMapScreen() {
             accessibilityLabel="Select Filter"
           >
             <Text style={styles.filterDropdownText}>{filterType}</Text>
-            <Ionicons name="chevron-down" size={16} color="#000000" />
+            <Ionicons name="chevron-down" size={16} color="#FFFFFF" />
           </Pressable>
 
           {/* Search Input */}
           <View style={styles.searchBar}>
-            <Ionicons name="search" size={18} color="#6B7280" style={{ marginRight: 8 }} />
+            <Ionicons name="search" size={18} color="#9CA3AF" style={{ marginRight: 8 }} />
             <TextInput
               style={styles.searchInput}
               placeholder={filterType === "Driver" ? "Search driver name or phone..." : "Search plate, make, model..."}
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor="#6B7280"
               value={searchQuery}
               onChangeText={setSearchQuery}
               autoCorrect={false}
             />
-            <Ionicons name="options-outline" size={18} color="#000000" />
+            <Ionicons name="options-outline" size={18} color="#9CA3AF" />
           </View>
         </View>
 
@@ -267,11 +267,11 @@ export default function FleetLiveMapScreen() {
       {/* ─── Zoom Controls (Bottom Right) ─── */}
       <View style={[styles.zoomControlsContainer, { bottom: insets.bottom + 90 }]}>
         <Pressable style={styles.zoomBtn} onPress={zoomIn} accessibilityLabel="Zoom In">
-          <Ionicons name="add" size={24} color="#000000" />
+          <Ionicons name="add" size={24} color="#FFFFFF" />
         </Pressable>
         <View style={styles.zoomDivider} />
         <Pressable style={styles.zoomBtn} onPress={zoomOut} accessibilityLabel="Zoom Out">
-          <Ionicons name="remove" size={24} color="#000000" />
+          <Ionicons name="remove" size={24} color="#FFFFFF" />
         </Pressable>
       </View>
 
@@ -443,7 +443,7 @@ export default function FleetLiveMapScreen() {
                   style={styles.actionLocateBtn}
                   onPress={() => focusOnLocation(selectedItem.lat, selectedItem.lng)}
                 >
-                  <Ionicons name="locate" size={16} color="#000000" />
+                  <Ionicons name="locate" size={16} color="#FFFFFF" />
                   <Text style={styles.actionLocateText}>Center Map</Text>
                 </Pressable>
               ) : null}
@@ -459,7 +459,7 @@ export default function FleetLiveMapScreen() {
             <View style={styles.drawerHeader}>
               <Text style={styles.drawerTitle}>{filterType === "Driver" ? "Fleet Drivers" : "Fleet Vehicles"}</Text>
               <Pressable onPress={() => setShowListDrawer(false)}>
-                <Ionicons name="close" size={24} color="#000000" />
+                <Ionicons name="close" size={24} color="#FFFFFF" />
               </Pressable>
             </View>
 
@@ -543,7 +543,7 @@ export default function FleetLiveMapScreen() {
                         }}
                       >
                         <View style={styles.vehicleIconWrap}>
-                          <Ionicons name="car" size={20} color="#111827" />
+                          <Ionicons name="car" size={20} color="#FFFFFF" />
                         </View>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.drawerItemName}>{vehicleLabel}</Text>
@@ -566,7 +566,7 @@ export default function FleetLiveMapScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#E5E7EB" },
+  container: { flex: 1, backgroundColor: "#0B0C10" },
 
   // Marker
   markerContainer: {
@@ -620,19 +620,21 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "rgba(20, 22, 29, 0.9)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.25,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 4,
   },
   headerTitle: {
     fontSize: 22,
     fontFamily: "Inter_700Bold",
-    color: "#000000",
+    color: "#FFFFFF",
     letterSpacing: -0.3,
   },
 
@@ -646,7 +648,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "#E5E7EB",
+    backgroundColor: "#14161D",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
     borderRadius: 22,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -654,19 +658,21 @@ const styles = StyleSheet.create({
   filterDropdownText: {
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
-    color: "#000000",
+    color: "#FFFFFF",
   },
   searchBar: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "#14161D",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
     borderRadius: 24,
     paddingHorizontal: 16,
     height: 48,
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
   },
@@ -674,7 +680,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     fontFamily: "Inter_400Regular",
-    color: "#000000",
+    color: "#FFFFFF",
   },
 
   // Dropdown Menu
@@ -682,15 +688,17 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 120,
     left: 16,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#14161D",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
     borderRadius: 16,
     paddingVertical: 8,
     width: 140,
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.35,
     shadowRadius: 8,
-    elevation: 6,
+    elevation: 8,
     zIndex: 30,
   },
   dropdownMenuItem: {
@@ -698,16 +706,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   dropdownMenuItemActive: {
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "#1B1E28",
   },
   dropdownItemText: {
     fontSize: 16,
     fontFamily: "Inter_500Medium",
-    color: "#111827",
+    color: "#9CA3AF",
   },
   dropdownItemTextActive: {
     fontFamily: "Inter_700Bold",
-    color: "#000000",
+    color: "#FFFFFF",
   },
 
   // Live Demand Header Badge
@@ -715,17 +723,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "rgba(20, 22, 29, 0.9)",
     borderRadius: 20,
     paddingVertical: 5,
     paddingHorizontal: 10,
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 3,
     borderWidth: 1,
-    borderColor: "#FEE2E2",
+    borderColor: "rgba(239, 68, 68, 0.35)",
   },
   headerDemandIconWrap: {
     width: 22,
@@ -738,7 +746,7 @@ const styles = StyleSheet.create({
   headerDemandText: {
     fontSize: 12,
     fontFamily: "Inter_700Bold",
-    color: "#111827",
+    color: "#FFFFFF",
   },
 
   // Access Restricted View
@@ -746,26 +754,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 28,
-    backgroundColor: "#F9FAFB",
+    backgroundColor: "#0B0C10",
   },
   restrictedIconWrap: {
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: "#E5E7EB",
+    backgroundColor: "#14161D",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 16,
   },
   restrictedTitle: {
-    color: "#111827",
+    color: "#FFFFFF",
     fontSize: 20,
     fontFamily: "Inter_700Bold",
     textAlign: "center",
     marginBottom: 8,
   },
   restrictedDesc: {
-    color: "#6B7280",
+    color: "#9CA3AF",
     fontSize: 14,
     fontFamily: "Inter_400Regular",
     textAlign: "center",
@@ -773,14 +783,14 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   restrictedBackBtn: {
-    backgroundColor: "#111827",
+    backgroundColor: "#FFFFFF",
     borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: 28,
     alignItems: "center",
   },
   restrictedBackBtnText: {
-    color: "#FFFFFF",
+    color: "#0B0C10",
     fontFamily: "Inter_700Bold",
     fontSize: 14,
   },
@@ -789,11 +799,13 @@ const styles = StyleSheet.create({
   zoomControlsContainer: {
     position: "absolute",
     right: 16,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 8,
+    backgroundColor: "#14161D",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    borderRadius: 10,
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 4,
     overflow: "hidden",
@@ -806,7 +818,7 @@ const styles = StyleSheet.create({
   },
   zoomDivider: {
     height: 1,
-    backgroundColor: "#E5E7EB",
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
   },
 
   // Bottom Floating Pill (Image 2 reference)
@@ -821,13 +833,15 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    backgroundColor: "#000000",
+    backgroundColor: "#14161D",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
     borderRadius: 28,
     paddingVertical: 14,
     paddingHorizontal: 24,
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.4,
     shadowRadius: 8,
     elevation: 6,
   },
@@ -842,12 +856,14 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 16,
     right: 16,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#14161D",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
     borderRadius: 18,
     padding: 16,
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.35,
     shadowRadius: 8,
     elevation: 6,
     gap: 12,
@@ -866,19 +882,19 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "#1B1E28",
     alignItems: "center",
     justifyContent: "center",
   },
   selectedName: {
     fontSize: 16,
     fontFamily: "Inter_700Bold",
-    color: "#111827",
+    color: "#FFFFFF",
   },
   selectedSub: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: "#6B7280",
+    color: "#9CA3AF",
     marginTop: 2,
   },
   statusBadge: {
@@ -894,7 +910,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "#EFF6FF",
+    backgroundColor: "rgba(30, 58, 138, 0.3)",
+    borderWidth: 1,
+    borderColor: "rgba(59, 130, 246, 0.35)",
     borderRadius: 10,
     padding: 10,
   },
@@ -902,7 +920,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     fontFamily: "Inter_500Medium",
-    color: "#1D4ED8",
+    color: "#60A5FA",
   },
   selectedActionsRow: {
     flexDirection: "row",
@@ -929,26 +947,30 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "#1B1E28",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
     borderRadius: 12,
     paddingVertical: 12,
   },
   actionLocateText: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
-    color: "#000000",
+    color: "#FFFFFF",
   },
 
   // Drawer
   drawerOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: "rgba(0,0,0,0.6)",
     justifyContent: "flex-end",
   },
   drawerSheet: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#14161D",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
+    borderTopWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
     maxHeight: "75%",
     paddingTop: 20,
     paddingHorizontal: 20,
@@ -962,7 +984,7 @@ const styles = StyleSheet.create({
   drawerTitle: {
     fontSize: 20,
     fontFamily: "Inter_700Bold",
-    color: "#000000",
+    color: "#FFFFFF",
   },
   drawerList: {
     marginBottom: 10,
@@ -973,7 +995,7 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
+    borderBottomColor: "rgba(255, 255, 255, 0.08)",
   },
   drawerAvatar: {
     width: 40,
@@ -984,26 +1006,26 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "#1B1E28",
     alignItems: "center",
     justifyContent: "center",
   },
   drawerItemName: {
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
-    color: "#111827",
+    color: "#FFFFFF",
   },
   drawerItemSub: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: "#6B7280",
+    color: "#9CA3AF",
     marginTop: 2,
   },
   vehicleIconWrap: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "#1B1E28",
     alignItems: "center",
     justifyContent: "center",
   },

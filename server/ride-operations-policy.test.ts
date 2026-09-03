@@ -365,13 +365,12 @@ test("partner drivers can switch between partner fleet dashboard and driver dash
   assert.doesNotMatch(chauffeurSource, /router\.replace\("\/chauffeur\/fleet" as never\);/);
   // Ensure dual mode state and UI toggles are integrated
   assert.match(chauffeurSource, /partnerDashboardMode/);
-  assert.match(chauffeurSource, /headerDriverModeBtn/);
   assert.match(chauffeurSource, /partnerFleetPill/);
   assert.match(chauffeurSource, /driverModeHeroCard/);
   assert.match(chauffeurSource, /FLEET OPERATIONS & TOOLS/);
 
   const fleetSource = readFileSync(resolve(process.cwd(), "app/chauffeur/fleet.tsx"), "utf-8");
-  assert.match(fleetSource, /driverModeHeaderBtn/);
+  assert.match(fleetSource, /liveMapHeaderBtn/);
 
   const routesSource = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
   // Ensure approved partners are authorized to select a vehicle and go online
@@ -436,5 +435,46 @@ test("website login and account registration scripts are syntactically valid and
   // 5. backend register route handles both username and email, and returns accessToken and token
   assert.match(routesSource, /const\s*\{\s*username,\s*email:\s*bodyEmail/);
   assert.match(routesSource, /accessToken:\s*token,\s*token/);
+});
+
+test("partner dashboard cleanup, dark theme map and earnings, and device push notifications are configured", () => {
+  const chauffeurIndex = readFileSync(resolve(process.cwd(), "app/chauffeur/index.tsx"), "utf-8");
+  const fleetSource = readFileSync(resolve(process.cwd(), "app/chauffeur/fleet.tsx"), "utf-8");
+  const fleetMapSource = readFileSync(resolve(process.cwd(), "components/FleetMap.native.tsx"), "utf-8");
+  const liveMapSource = readFileSync(resolve(process.cwd(), "app/chauffeur/live-map.tsx"), "utf-8");
+  const earningsSource = readFileSync(resolve(process.cwd(), "app/chauffeur/earnings.tsx"), "utf-8");
+  const appSharedConfig = readFileSync(resolve(process.cwd(), "app.config.shared.js"), "utf-8");
+  const clientIndex = readFileSync(resolve(process.cwd(), "app/client/index.tsx"), "utf-8");
+  const serverRoutes = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
+
+  // 1. Partner Dashboard header: no Driver Mode button, no Approved driver badge, title single line
+  const partnerHeaderBarMatch = chauffeurIndex.match(/<View style=\{styles\.partnerHeaderBar\}>[\s\S]*?<\/View>\s*<\/View>/);
+  assert.ok(partnerHeaderBarMatch, "partnerHeaderBar must exist in chauffeur index");
+  assert.doesNotMatch(partnerHeaderBarMatch[0], /Driver Mode/i);
+  assert.doesNotMatch(partnerHeaderBarMatch[0], /Approved driver/i);
+  assert.doesNotMatch(chauffeurIndex, /partnerStatusChip/);
+  assert.match(chauffeurIndex, /numberOfLines=\{1\}/);
+  assert.match(chauffeurIndex, /adjustsFontSizeToFit/);
+  assert.doesNotMatch(fleetSource, /driverModeHeaderBtn/);
+
+  // 2. Fleet live map: dark theme map style and dark UI controls
+  assert.match(fleetMapSource, /DARK_MAP_STYLE/);
+  assert.match(fleetMapSource, /customMapStyle=\{DARK_MAP_STYLE\}/);
+  assert.match(fleetMapSource, /userInterfaceStyle="dark"/);
+  assert.match(liveMapSource, /#0B0C10/);
+  assert.match(liveMapSource, /#14161D/);
+
+  // 3. Earnings & Payouts screen: dark theme
+  assert.match(earningsSource, /Colors\.primary/);
+  assert.match(earningsSource, /Colors\.card/);
+  assert.match(earningsSource, /Colors\.surface/);
+
+  // 4. Device push notifications: POST_NOTIFICATIONS permission, projectId fallbacks, and multi-token dispatch
+  assert.match(appSharedConfig, /android\.permission\.POST_NOTIFICATIONS/);
+  assert.match(chauffeurIndex, /\(!chauffeur\?\.id\s*&&\s*!user\?\.id\)/);
+  assert.match(chauffeurIndex, /eb3b8747-40b2-4aad-b118-e64339bfeea0/);
+  assert.match(clientIndex, /9932543b-f023-4dec-8213-5d0fe99ad749/);
+  assert.match(serverRoutes, /process\.env\.EXPO_ACCESS_TOKEN/);
+  assert.match(serverRoutes, /new Set\(\[user\?\.pushToken,\s*chauffeur\?\.pushToken\]/);
 });
 

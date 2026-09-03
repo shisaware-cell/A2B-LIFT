@@ -316,12 +316,16 @@ async function sendExpoPushNotification(
     }));
   if (messages.length === 0) return;
   try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "Accept-Encoding": "gzip, deflate",
+    };
+    if (process.env.EXPO_ACCESS_TOKEN) {
+      headers["Authorization"] = `Bearer ${process.env.EXPO_ACCESS_TOKEN}`;
+    }
     const res = await axios.post("https://exp.host/--/api/v2/push/send", messages, {
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "Accept-Encoding": "gzip, deflate",
-      },
+      headers,
       timeout: 8000,
     });
     // Log any per-message errors from Expo
@@ -355,9 +359,13 @@ async function notifyUserEvent(options: {
     storage.getUser(options.userId).catch(() => undefined),
     storage.getChauffeurByUserId(options.userId).catch(() => undefined),
   ]);
-  const pushToken = user?.pushToken || chauffeur?.pushToken;
-  if (pushToken) {
-    await sendExpoPushNotification([pushToken], options.title, options.body, options.data);
+  const tokens = Array.from(new Set([user?.pushToken, chauffeur?.pushToken].filter(Boolean) as string[]));
+  if (tokens.length > 0) {
+    const isRide = options.type?.startsWith("ride");
+    await sendExpoPushNotification(tokens, options.title, options.body, options.data, {
+      urgent: isRide,
+      channelId: isRide ? "ride-alerts-v3" : "default",
+    });
   }
 }
 
