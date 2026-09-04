@@ -351,8 +351,8 @@ test("partner earnings and fleet live map screens are properly integrated in rou
 
   const earningsBreakdownSource = readFileSync(resolve(process.cwd(), "app/chauffeur/earnings-breakdown.tsx"), "utf-8");
   assert.match(earningsBreakdownSource, /Adjustments from previous periods/);
-  assert.match(earningsBreakdownSource, /Driver Net earnings/);
-  assert.match(earningsBreakdownSource, /An earnings week goes from Monday at 4:00 AM/);
+  assert.match(earningsBreakdownSource, /Weekly earnings cycles run from Monday/);
+  assert.doesNotMatch(earningsBreakdownSource, /Uber Supplier Portal/);
 
   const liveMapSource = readFileSync(resolve(process.cwd(), "app/chauffeur/live-map.tsx"), "utf-8");
   assert.match(liveMapSource, /Live Demand/);

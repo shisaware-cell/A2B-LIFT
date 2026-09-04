@@ -5507,7 +5507,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/fleet/earnings-summary", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
-      const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
+      let profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
+      if (!profile) {
+        const chauffeur = await storage.getChauffeurByUserId(req.auth!.sub);
+        if (chauffeur) {
+          profile = await ensureOperatorProfileForUser(req.auth!.sub, "driver");
+        }
+      }
       if (!profile) return res.status(404).json({ message: "Operator profile not found" });
       if ((profile.type !== "partner" && profile.type !== "driver") || profile.status !== "approved") {
         return res.status(403).json({ message: "Fleet earnings summary is reserved for approved fleet partners and driver partners." });
@@ -5617,17 +5623,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .filter((w: any) => w.status === "completed" || w.status === "approved" || w.status === "paid")
         .reduce((sum: number, w: any) => sum + (parseFloat(w.amount) || 0), 0);
 
+      const startBalance = 0.00;
+      const totalEarnings = Math.round(totalFleetNetEarnings * 100) / 100;
+      const refundsAndExpenses = 0.00;
       const adjustmentsFromPreviousPeriods = 0.00;
-      const endBalance = Math.max(0, Math.round((totalFleetNetEarnings - totalPayouts + adjustmentsFromPreviousPeriods) * 100) / 100);
+      const endBalance = Math.max(0, Math.round((startBalance + totalEarnings - refundsAndExpenses - totalPayouts + adjustmentsFromPreviousPeriods) * 100) / 100);
 
       return res.json({
         period: periodLabel,
         weekStart: weekStart.toISOString(),
         weekEnd: weekEnd.toISOString(),
+        startBalance,
+        totalEarnings,
+        refundsAndExpenses,
         adjustmentsFromPreviousPeriods,
         payout: Math.round(totalPayouts * 100) / 100,
         endBalance,
-        totalFleetNetEarnings: Math.round(totalFleetNetEarnings * 100) / 100,
+        totalFleetNetEarnings,
         drivers: driverEarningsList,
         totalDrivers: driverEarningsList.length,
         activeTripsCount: allRides.filter((r: any) =>
