@@ -105,7 +105,7 @@ export const FleetMap = forwardRef<FleetMapRef, FleetMapProps>(function FleetMap
                 flat={true}
                 onPress={() => (onSelectVehicle ? onSelectVehicle(v) : onSelectDriver(v))}
               >
-                <View style={styles.markerContainer}>
+                <View style={styles.vehicleMarkerContainer}>
                   {v.plateNumber ? (
                     <View style={[styles.plateTag, isSelected && styles.plateTagSelected]}>
                       <Text style={styles.plateTagText}>{v.plateNumber}</Text>
@@ -119,6 +119,7 @@ export const FleetMap = forwardRef<FleetMapRef, FleetMapProps>(function FleetMap
                       isSelected && styles.selectedMarkerGlow,
                     ]}
                     resizeMode="contain"
+                    fadeDuration={0}
                   />
                 </View>
               </Marker>
@@ -136,7 +137,7 @@ export const FleetMap = forwardRef<FleetMapRef, FleetMapProps>(function FleetMap
                 rotation={driver.heading || 0}
                 onPress={() => onSelectDriver(driver)}
               >
-                <View style={styles.markerContainer}>
+                <View style={styles.driverMarkerContainer}>
                   {driver.status === "in_trip" ? (
                     <View style={styles.inTripBadge}>
                       <Ionicons name="navigate" size={10} color="#FFFFFF" />
@@ -152,6 +153,7 @@ export const FleetMap = forwardRef<FleetMapRef, FleetMapProps>(function FleetMap
                       isSelected && styles.selectedMarkerGlow,
                     ]}
                     resizeMode="contain"
+                    fadeDuration={0}
                   />
                 </View>
               </Marker>
@@ -162,15 +164,23 @@ export const FleetMap = forwardRef<FleetMapRef, FleetMapProps>(function FleetMap
 });
 
 const styles = StyleSheet.create({
-  markerContainer: {
+  driverMarkerContainer: {
     alignItems: "center",
     justifyContent: "center",
-    width: 40,
-    height: 60,
+    width: 76,
+    height: 76,
+    overflow: "visible",
+  },
+  vehicleMarkerContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 90,
+    height: 90,
+    overflow: "visible",
   },
   carMarkerImage: {
-    width: 26,
-    height: 52,
+    width: 28,
+    height: 56,
   },
   selectedMarkerGlow: {
     shadowColor: "#10B981",
@@ -180,18 +190,26 @@ const styles = StyleSheet.create({
   },
   onlinePulseDot: {
     position: "absolute",
-    top: 0,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    top: 6,
+    right: 18,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     backgroundColor: "#10B981",
+    borderWidth: 1.5,
+    borderColor: "#FFFFFF",
+    zIndex: 10,
   },
   inTripBadge: {
     position: "absolute",
-    top: -2,
+    top: 4,
+    right: 16,
     backgroundColor: "#2563EB",
     borderRadius: 8,
     padding: 3,
+    borderWidth: 1,
+    borderColor: "#FFFFFF",
+    zIndex: 10,
   },
   plateTag: {
     backgroundColor: "#111827",
@@ -200,7 +218,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     borderWidth: 1,
     borderColor: "#374151",
-    marginBottom: 2,
+    marginBottom: 4,
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.25,

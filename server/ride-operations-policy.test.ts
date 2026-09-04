@@ -510,3 +510,26 @@ test("fleet invitations UX in driver app, notifications routing, styled website 
   assert.match(dashboardHtml, /user\.role === 'partner' \|\| user\.operatorProfile\?\.type === 'partner'/);
 });
 
+test("fleet map marker sizing prevents clipping on rotation and live-locations detects online drivers accurately", () => {
+  const fleetMapNative = readFileSync(resolve(process.cwd(), "components/FleetMap.native.tsx"), "utf-8");
+  const serverRoutes = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
+  const storageSource = readFileSync(resolve(process.cwd(), "server/storage.ts"), "utf-8");
+
+  // 1. FleetMap driver and vehicle containers are large enough to fit rotated cars and plates
+  assert.match(fleetMapNative, /driverMarkerContainer:\s*\{[^}]*width:\s*(?:7[2-9]|[89]\d)/);
+  assert.match(fleetMapNative, /vehicleMarkerContainer:\s*\{[^}]*width:\s*(?:8[5-9]|9\d)/);
+  assert.match(fleetMapNative, /fadeDuration=\{0\}/);
+
+  // 2. Storage supports vehicleIds array query for assignments
+  assert.match(storageSource, /vehicleIds\?: string\[\];/);
+  assert.match(storageSource, /inArray\(vehicleAssignments\.vehicleId,\s*filters\.vehicleIds\)/);
+
+  // 3. Server live-locations queries assignments for partner vehicles and accepted invites
+  assert.match(serverRoutes, /storage\.getVehicleAssignments\(\{\s*vehicleIds\s*\}\)/);
+  assert.match(serverRoutes, /storage\.getFleetDriverInvites\(\{\s*invitedByOperatorProfileId:\s*profile\.id,\s*status:\s*["']accepted["']/);
+
+  // 4. Online detection considers heartbeat and active trips in addition to isOnline
+  assert.match(serverRoutes, /hasFreshPing/);
+  assert.match(serverRoutes, /isOnline\s*=\s*Boolean\(chauffeur\?\.isOnline\)\s*\|\|\s*hasFreshPing\s*\|\|\s*Boolean\(currentRide\)/);
+});
+

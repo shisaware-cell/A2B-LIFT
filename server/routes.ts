@@ -5384,11 +5384,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!profile) return res.status(404).json({ message: "Operator profile not found" });
       const vehicles = await storage.getVehiclesByOwnerOperator(profile.id);
       const vehicleIds = new Set(vehicles.map((vehicle) => vehicle.id));
-      const assignments = await storage.getVehicleAssignments(
-        profile.type === "driver"
-          ? { driverOperatorProfileId: profile.id, status: "active" }
-          : { assignedByOperatorProfileId: profile.id, status: "active" },
-      );
+      const assignments = profile.type === "driver"
+        ? await storage.getVehicleAssignments({ driverOperatorProfileId: profile.id, status: "active" })
+        : await (async () => {
+            const partnerVids = Array.from(vehicleIds);
+            const [byPartner, byVehicles] = await Promise.all([
+              storage.getVehicleAssignments({ assignedByOperatorProfileId: profile.id, status: "active" }),
+              partnerVids.length > 0 ? storage.getVehicleAssignments({ vehicleIds: partnerVids, status: "active" }) : Promise.resolve([]),
+            ]);
+            const map = new Map<string, any>();
+            for (const a of [...byPartner, ...byVehicles]) map.set(a.id, a);
+            return Array.from(map.values());
+          })();
       assignments.forEach((assignment) => vehicleIds.add(assignment.vehicleId));
       const activeStatuses = new Set(["chauffeur_assigned", "chauffeur_arriving", "trip_started"]);
       const activeTrips = (await storage.getAllRides())
@@ -5411,11 +5418,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const profile = await storage.getOperatorProfileByUserId(req.auth!.sub);
       if (!profile) return res.status(404).json({ message: "Operator profile not found" });
-      const assignments = await storage.getVehicleAssignments(
-        profile.type === "driver"
-          ? { driverOperatorProfileId: profile.id }
-          : { assignedByOperatorProfileId: profile.id },
-      );
+      const partnerVehicles = profile.type === "partner" ? await storage.getVehiclesByOwnerOperator(profile.id) : [];
+      const partnerVehicleIds = partnerVehicles.map((v) => v.id);
+      const assignments = profile.type === "driver"
+        ? await storage.getVehicleAssignments({ driverOperatorProfileId: profile.id })
+        : await (async () => {
+            const [byPartner, byVehicles] = await Promise.all([
+              storage.getVehicleAssignments({ assignedByOperatorProfileId: profile.id }),
+              partnerVehicleIds.length > 0 ? storage.getVehicleAssignments({ vehicleIds: partnerVehicleIds }) : Promise.resolve([]),
+            ]);
+            const map = new Map<string, any>();
+            for (const a of [...byPartner, ...byVehicles]) map.set(a.id, a);
+            return Array.from(map.values());
+          })();
       const enriched = await Promise.all(assignments.map(async (assignment) => {
         const [vehicle, driverProfile] = await Promise.all([
           storage.getVehicle(assignment.vehicleId),
@@ -5608,16 +5623,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const vehicles = await storage.getVehiclesByOwnerOperator(profile.id);
       const vehicleMap = new Map<string, any>(vehicles.map((v) => [v.id, v]));
+      const vehicleIds = vehicles.map((v) => v.id);
 
-      const assignments = await storage.getVehicleAssignments({
-        assignedByOperatorProfileId: profile.id,
-      });
+      // Fetch all assignments (by partner OR by any partner vehicle) and accepted fleet invites
+      const [assignmentsByPartner, assignmentsByVehicles, fleetInvites] = await Promise.all([
+        storage.getVehicleAssignments({ assignedByOperatorProfileId: profile.id }),
+        vehicleIds.length > 0
+          ? storage.getVehicleAssignments({ vehicleIds })
+          : Promise.resolve([]),
+        storage.getFleetDriverInvites({
+          invitedByOperatorProfileId: profile.id,
+          status: "accepted",
+        }),
+      ]);
+
+      const assignmentMap = new Map<string, any>();
+      for (const a of [...assignmentsByPartner, ...assignmentsByVehicles]) {
+        if (!assignmentMap.has(a.id) || a.status === "active") {
+          assignmentMap.set(a.id, a);
+        }
+      }
+      const assignments = Array.from(assignmentMap.values());
 
       const allRides = await storage.getAllRides();
-      const activeStatuses = new Set(["chauffeur_assigned", "chauffeur_arriving", "trip_started"]);
+      const activeStatuses = new Set(["chauffeur_assigned", "chauffeur_arriving", "chauffeur_arrived", "trip_started"]);
+
+      // Collect all relevant driver profile IDs
+      const driverProfileIdSet = new Set<string>();
+      for (const a of assignments) {
+        if (a.driverOperatorProfileId) driverProfileIdSet.add(a.driverOperatorProfileId);
+      }
+      for (const inv of fleetInvites) {
+        if (inv.driverOperatorProfileId) driverProfileIdSet.add(inv.driverOperatorProfileId);
+      }
+
+      // If partner themselves is an active chauffeur
+      const partnerChauffeur = await storage.getChauffeurByUserId(profile.userId);
+      if (partnerChauffeur) {
+        driverProfileIdSet.add(profile.id);
+      }
 
       const driverProfiles = await Promise.all(
-        assignments.map((a) => storage.getOperatorProfile(a.driverOperatorProfileId))
+        Array.from(driverProfileIdSet).map(async (dpId) => {
+          const p = await storage.getOperatorProfile(dpId);
+          if (p) return p;
+          if (dpId === profile.id) return profile;
+          return null;
+        })
       );
       const validDriverProfiles = driverProfiles.filter(Boolean) as any[];
 
@@ -5627,15 +5679,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
             storage.getUser(dp.userId),
             storage.getChauffeurByUserId(dp.userId),
           ]);
-          const assignment = assignments.find((a) => a.driverOperatorProfileId === dp.id && a.status === "active");
-          const vehicle = assignment ? vehicleMap.get(assignment.vehicleId) || await storage.getVehicle(assignment.vehicleId) : null;
+          const activeAssignment = assignments.find(
+            (a) => a.driverOperatorProfileId === dp.id && a.status === "active"
+          );
+          const anyAssignment = assignments.find(
+            (a) => a.driverOperatorProfileId === dp.id
+          );
+          const assignment = activeAssignment || anyAssignment;
+
+          let vehicle = assignment ? (vehicleMap.get(assignment.vehicleId) || await storage.getVehicle(assignment.vehicleId)) : null;
+          if (!vehicle && chauffeur?.activeVehicleId) {
+            vehicle = vehicleMap.get(chauffeur.activeVehicleId) || await storage.getVehicle(chauffeur.activeVehicleId);
+          }
 
           const currentRide = chauffeur ? allRides.find((r: any) => r.chauffeurId === chauffeur.id && activeStatuses.has(r.status)) : null;
 
-          const lat = chauffeur?.lat ? parseFloat(chauffeur.lat) : null;
-          const lng = chauffeur?.lng ? parseFloat(chauffeur.lng) : null;
+          const lat = chauffeur?.lat != null ? parseFloat(String(chauffeur.lat)) : null;
+          const lng = chauffeur?.lng != null ? parseFloat(String(chauffeur.lng)) : null;
           const heading = typeof chauffeur?.heading === "number" ? chauffeur.heading : undefined;
-          const isOnline = chauffeur?.isOnline === true;
+
+          // Online detection:
+          // 1. Explicit chauffeur.isOnline truthy
+          // 2. Fresh GPS ping within 5 minutes (locationUpdatedAt)
+          // 3. Driver is actively on a trip
+          const hasFreshPing = Boolean(
+            chauffeur?.locationUpdatedAt &&
+            !isNaN(new Date(chauffeur.locationUpdatedAt).getTime()) &&
+            Date.now() - new Date(chauffeur.locationUpdatedAt).getTime() <= 5 * 60 * 1000
+          );
+          const isOnline = Boolean(chauffeur?.isOnline) || hasFreshPing || Boolean(currentRide);
           const status = currentRide ? "in_trip" : isOnline ? "online" : "offline";
 
           const vehicleMake = vehicle?.carMake || (vehicle as any)?.make || chauffeur?.carMake || "";
@@ -5658,6 +5730,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             speed: chauffeur?.speed,
             isOnline,
             status,
+            activeVehicleId: vehicle?.id || chauffeur?.activeVehicleId || null,
             todayEarnings: chauffeur?.todayEarnings || 0,
             activeRide: currentRide ? {
               id: currentRide.id,
@@ -5682,7 +5755,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allFleetVehicles = await Promise.all(
         vehicles.map(async (v) => {
           const activeAssignment = assignments.find((a) => a.vehicleId === v.id && a.status === "active");
-          const assignedDriver = activeAssignment ? liveDrivers.find((d) => d.id === activeAssignment.driverOperatorProfileId) : null;
+          let assignedDriver = activeAssignment
+            ? liveDrivers.find((d) => d.id === activeAssignment.driverOperatorProfileId)
+            : null;
+
+          if (!assignedDriver) {
+            assignedDriver = liveDrivers.find(
+              (d) => d.activeVehicleId === v.id || d.vehicle?.id === v.id
+            ) || null;
+          }
+
           const vehicleMake = v.carMake || (v as any).make || "Vehicle";
           const vehicleModel = v.vehicleModel || (v as any).model || "";
           const vehiclePlate = v.plateNumber || "";
@@ -5698,8 +5780,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             category: vehicleCategory,
             year: v.vehicleYear,
             status: v.status,
-            lat: assignedDriver?.lat || null,
-            lng: assignedDriver?.lng || null,
+            lat: assignedDriver?.lat || (v.lat ? parseFloat(String(v.lat)) : null),
+            lng: assignedDriver?.lng || (v.lng ? parseFloat(String(v.lng)) : null),
             assignedDriver: assignedDriver ? {
               id: assignedDriver.id,
               name: assignedDriver.name,

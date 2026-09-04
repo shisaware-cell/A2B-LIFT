@@ -871,6 +871,7 @@ var DatabaseStorage = class {
   async getVehicleAssignments(filters = {}) {
     const conditions = [
       filters.vehicleId ? (0, import_drizzle_orm2.eq)(vehicleAssignments.vehicleId, filters.vehicleId) : void 0,
+      filters.vehicleIds && filters.vehicleIds.length > 0 ? (0, import_drizzle_orm2.inArray)(vehicleAssignments.vehicleId, filters.vehicleIds) : void 0,
       filters.driverOperatorProfileId ? (0, import_drizzle_orm2.eq)(vehicleAssignments.driverOperatorProfileId, filters.driverOperatorProfileId) : void 0,
       filters.assignedByOperatorProfileId ? (0, import_drizzle_orm2.eq)(vehicleAssignments.assignedByOperatorProfileId, filters.assignedByOperatorProfileId) : void 0,
       filters.status ? (0, import_drizzle_orm2.eq)(vehicleAssignments.status, filters.status) : void 0
@@ -7309,9 +7310,16 @@ If you did not request this, you can ignore this email.`,
       if (!profile) return res.status(404).json({ message: "Operator profile not found" });
       const vehicles2 = await storage.getVehiclesByOwnerOperator(profile.id);
       const vehicleIds = new Set(vehicles2.map((vehicle) => vehicle.id));
-      const assignments = await storage.getVehicleAssignments(
-        profile.type === "driver" ? { driverOperatorProfileId: profile.id, status: "active" } : { assignedByOperatorProfileId: profile.id, status: "active" }
-      );
+      const assignments = profile.type === "driver" ? await storage.getVehicleAssignments({ driverOperatorProfileId: profile.id, status: "active" }) : await (async () => {
+        const partnerVids = Array.from(vehicleIds);
+        const [byPartner, byVehicles] = await Promise.all([
+          storage.getVehicleAssignments({ assignedByOperatorProfileId: profile.id, status: "active" }),
+          partnerVids.length > 0 ? storage.getVehicleAssignments({ vehicleIds: partnerVids, status: "active" }) : Promise.resolve([])
+        ]);
+        const map = /* @__PURE__ */ new Map();
+        for (const a of [...byPartner, ...byVehicles]) map.set(a.id, a);
+        return Array.from(map.values());
+      })();
       assignments.forEach((assignment) => vehicleIds.add(assignment.vehicleId));
       const activeStatuses = /* @__PURE__ */ new Set(["chauffeur_assigned", "chauffeur_arriving", "trip_started"]);
       const activeTrips = (await storage.getAllRides()).filter((ride) => ride.vehicleId && vehicleIds.has(ride.vehicleId) && activeStatuses.has(ride.status));
@@ -7332,9 +7340,17 @@ If you did not request this, you can ignore this email.`,
     try {
       const profile = await storage.getOperatorProfileByUserId(req.auth.sub);
       if (!profile) return res.status(404).json({ message: "Operator profile not found" });
-      const assignments = await storage.getVehicleAssignments(
-        profile.type === "driver" ? { driverOperatorProfileId: profile.id } : { assignedByOperatorProfileId: profile.id }
-      );
+      const partnerVehicles = profile.type === "partner" ? await storage.getVehiclesByOwnerOperator(profile.id) : [];
+      const partnerVehicleIds = partnerVehicles.map((v) => v.id);
+      const assignments = profile.type === "driver" ? await storage.getVehicleAssignments({ driverOperatorProfileId: profile.id }) : await (async () => {
+        const [byPartner, byVehicles] = await Promise.all([
+          storage.getVehicleAssignments({ assignedByOperatorProfileId: profile.id }),
+          partnerVehicleIds.length > 0 ? storage.getVehicleAssignments({ vehicleIds: partnerVehicleIds }) : Promise.resolve([])
+        ]);
+        const map = /* @__PURE__ */ new Map();
+        for (const a of [...byPartner, ...byVehicles]) map.set(a.id, a);
+        return Array.from(map.values());
+      })();
       const enriched = await Promise.all(assignments.map(async (assignment) => {
         const [vehicle, driverProfile] = await Promise.all([
           storage.getVehicle(assignment.vehicleId),
@@ -7494,13 +7510,42 @@ If you did not request this, you can ignore this email.`,
       }
       const vehicles2 = await storage.getVehiclesByOwnerOperator(profile.id);
       const vehicleMap = new Map(vehicles2.map((v) => [v.id, v]));
-      const assignments = await storage.getVehicleAssignments({
-        assignedByOperatorProfileId: profile.id
-      });
+      const vehicleIds = vehicles2.map((v) => v.id);
+      const [assignmentsByPartner, assignmentsByVehicles, fleetInvites] = await Promise.all([
+        storage.getVehicleAssignments({ assignedByOperatorProfileId: profile.id }),
+        vehicleIds.length > 0 ? storage.getVehicleAssignments({ vehicleIds }) : Promise.resolve([]),
+        storage.getFleetDriverInvites({
+          invitedByOperatorProfileId: profile.id,
+          status: "accepted"
+        })
+      ]);
+      const assignmentMap = /* @__PURE__ */ new Map();
+      for (const a of [...assignmentsByPartner, ...assignmentsByVehicles]) {
+        if (!assignmentMap.has(a.id) || a.status === "active") {
+          assignmentMap.set(a.id, a);
+        }
+      }
+      const assignments = Array.from(assignmentMap.values());
       const allRides = await storage.getAllRides();
-      const activeStatuses = /* @__PURE__ */ new Set(["chauffeur_assigned", "chauffeur_arriving", "trip_started"]);
+      const activeStatuses = /* @__PURE__ */ new Set(["chauffeur_assigned", "chauffeur_arriving", "chauffeur_arrived", "trip_started"]);
+      const driverProfileIdSet = /* @__PURE__ */ new Set();
+      for (const a of assignments) {
+        if (a.driverOperatorProfileId) driverProfileIdSet.add(a.driverOperatorProfileId);
+      }
+      for (const inv of fleetInvites) {
+        if (inv.driverOperatorProfileId) driverProfileIdSet.add(inv.driverOperatorProfileId);
+      }
+      const partnerChauffeur = await storage.getChauffeurByUserId(profile.userId);
+      if (partnerChauffeur) {
+        driverProfileIdSet.add(profile.id);
+      }
       const driverProfiles = await Promise.all(
-        assignments.map((a) => storage.getOperatorProfile(a.driverOperatorProfileId))
+        Array.from(driverProfileIdSet).map(async (dpId) => {
+          const p = await storage.getOperatorProfile(dpId);
+          if (p) return p;
+          if (dpId === profile.id) return profile;
+          return null;
+        })
       );
       const validDriverProfiles = driverProfiles.filter(Boolean);
       const liveDrivers = await Promise.all(
@@ -7509,13 +7554,25 @@ If you did not request this, you can ignore this email.`,
             storage.getUser(dp.userId),
             storage.getChauffeurByUserId(dp.userId)
           ]);
-          const assignment = assignments.find((a) => a.driverOperatorProfileId === dp.id && a.status === "active");
-          const vehicle = assignment ? vehicleMap.get(assignment.vehicleId) || await storage.getVehicle(assignment.vehicleId) : null;
+          const activeAssignment = assignments.find(
+            (a) => a.driverOperatorProfileId === dp.id && a.status === "active"
+          );
+          const anyAssignment = assignments.find(
+            (a) => a.driverOperatorProfileId === dp.id
+          );
+          const assignment = activeAssignment || anyAssignment;
+          let vehicle = assignment ? vehicleMap.get(assignment.vehicleId) || await storage.getVehicle(assignment.vehicleId) : null;
+          if (!vehicle && chauffeur2?.activeVehicleId) {
+            vehicle = vehicleMap.get(chauffeur2.activeVehicleId) || await storage.getVehicle(chauffeur2.activeVehicleId);
+          }
           const currentRide = chauffeur2 ? allRides.find((r) => r.chauffeurId === chauffeur2.id && activeStatuses.has(r.status)) : null;
-          const lat = chauffeur2?.lat ? parseFloat(chauffeur2.lat) : null;
-          const lng = chauffeur2?.lng ? parseFloat(chauffeur2.lng) : null;
+          const lat = chauffeur2?.lat != null ? parseFloat(String(chauffeur2.lat)) : null;
+          const lng = chauffeur2?.lng != null ? parseFloat(String(chauffeur2.lng)) : null;
           const heading = typeof chauffeur2?.heading === "number" ? chauffeur2.heading : void 0;
-          const isOnline = chauffeur2?.isOnline === true;
+          const hasFreshPing = Boolean(
+            chauffeur2?.locationUpdatedAt && !isNaN(new Date(chauffeur2.locationUpdatedAt).getTime()) && Date.now() - new Date(chauffeur2.locationUpdatedAt).getTime() <= 5 * 60 * 1e3
+          );
+          const isOnline = Boolean(chauffeur2?.isOnline) || hasFreshPing || Boolean(currentRide);
           const status = currentRide ? "in_trip" : isOnline ? "online" : "offline";
           const vehicleMake = vehicle?.carMake || vehicle?.make || chauffeur2?.carMake || "";
           const vehicleModel = vehicle?.vehicleModel || vehicle?.model || chauffeur2?.vehicleModel || "";
@@ -7536,6 +7593,7 @@ If you did not request this, you can ignore this email.`,
             speed: chauffeur2?.speed,
             isOnline,
             status,
+            activeVehicleId: vehicle?.id || chauffeur2?.activeVehicleId || null,
             todayEarnings: chauffeur2?.todayEarnings || 0,
             activeRide: currentRide ? {
               id: currentRide.id,
@@ -7559,7 +7617,12 @@ If you did not request this, you can ignore this email.`,
       const allFleetVehicles = await Promise.all(
         vehicles2.map(async (v) => {
           const activeAssignment = assignments.find((a) => a.vehicleId === v.id && a.status === "active");
-          const assignedDriver = activeAssignment ? liveDrivers.find((d) => d.id === activeAssignment.driverOperatorProfileId) : null;
+          let assignedDriver = activeAssignment ? liveDrivers.find((d) => d.id === activeAssignment.driverOperatorProfileId) : null;
+          if (!assignedDriver) {
+            assignedDriver = liveDrivers.find(
+              (d) => d.activeVehicleId === v.id || d.vehicle?.id === v.id
+            ) || null;
+          }
           const vehicleMake = v.carMake || v.make || "Vehicle";
           const vehicleModel = v.vehicleModel || v.model || "";
           const vehiclePlate = v.plateNumber || "";
@@ -7574,8 +7637,8 @@ If you did not request this, you can ignore this email.`,
             category: vehicleCategory,
             year: v.vehicleYear,
             status: v.status,
-            lat: assignedDriver?.lat || null,
-            lng: assignedDriver?.lng || null,
+            lat: assignedDriver?.lat || (v.lat ? parseFloat(String(v.lat)) : null),
+            lng: assignedDriver?.lng || (v.lng ? parseFloat(String(v.lng)) : null),
             assignedDriver: assignedDriver ? {
               id: assignedDriver.id,
               name: assignedDriver.name,

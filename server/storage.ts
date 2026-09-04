@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { eq, and, desc, avg, sql, or } from "drizzle-orm";
+import { eq, and, desc, avg, sql, or, inArray } from "drizzle-orm";
 import {
   users,
   chauffeurs,
@@ -123,6 +123,7 @@ export interface IStorage {
   getActiveVehicleAssignment(vehicleId: string, driverOperatorProfileId: string): Promise<VehicleAssignment | undefined>;
   getVehicleAssignments(filters?: {
     vehicleId?: string;
+    vehicleIds?: string[];
     driverOperatorProfileId?: string;
     assignedByOperatorProfileId?: string;
     status?: string;
@@ -586,12 +587,14 @@ export class DatabaseStorage implements IStorage {
 
   async getVehicleAssignments(filters: {
     vehicleId?: string;
+    vehicleIds?: string[];
     driverOperatorProfileId?: string;
     assignedByOperatorProfileId?: string;
     status?: string;
   } = {}): Promise<VehicleAssignment[]> {
     const conditions = [
       filters.vehicleId ? eq(vehicleAssignments.vehicleId, filters.vehicleId) : undefined,
+      filters.vehicleIds && filters.vehicleIds.length > 0 ? inArray(vehicleAssignments.vehicleId, filters.vehicleIds) : undefined,
       filters.driverOperatorProfileId ? eq(vehicleAssignments.driverOperatorProfileId, filters.driverOperatorProfileId) : undefined,
       filters.assignedByOperatorProfileId ? eq(vehicleAssignments.assignedByOperatorProfileId, filters.assignedByOperatorProfileId) : undefined,
       filters.status ? eq(vehicleAssignments.status, filters.status) : undefined,

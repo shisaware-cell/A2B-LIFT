@@ -346,7 +346,7 @@ export default function FleetLiveMapScreen() {
                 <View style={styles.activeRideBox}>
                   <Ionicons name="person" size={14} color="#1D4ED8" />
                   <Text style={styles.activeRideText} numberOfLines={1}>
-                    Driver: {assignedDriverName} ({selectedItem.assignedDriver.status || "offline"})
+                    Driver: {assignedDriverName} ({selectedItem.assignedDriver.status === "in_trip" ? "In Trip" : selectedItem.assignedDriver.status === "online" ? "Online" : "Offline"})
                   </Text>
                 </View>
               ) : null}
@@ -552,6 +552,7 @@ export default function FleetLiveMapScreen() {
                           </Text>
                           <Text style={[styles.drawerItemSub, { color: "#059669", marginTop: 2 }]}>
                             Driver: {vehicle.assignedDriver?.name || "Unassigned"}
+                            {vehicle.assignedDriver ? ` · ${vehicle.assignedDriver.status === "in_trip" ? "In Trip" : vehicle.assignedDriver.status === "online" ? "Online" : "Offline"}` : ""}
                           </Text>
                         </View>
                       </Pressable>
@@ -567,39 +568,6 @@ export default function FleetLiveMapScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0B0C10" },
-
-  // Marker
-  markerContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    width: 40,
-    height: 60,
-  },
-  carMarkerImage: {
-    width: 26,
-    height: 52,
-  },
-  selectedMarkerGlow: {
-    shadowColor: "#10B981",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 8,
-  },
-  onlinePulseDot: {
-    position: "absolute",
-    top: 0,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#10B981",
-  },
-  inTripBadge: {
-    position: "absolute",
-    top: -2,
-    backgroundColor: "#2563EB",
-    borderRadius: 8,
-    padding: 3,
-  },
 
   // Top Overlay & Header (Image 2 reference)
   topOverlay: {
