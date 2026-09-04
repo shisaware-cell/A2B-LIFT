@@ -145,7 +145,8 @@ export default function FleetLiveMapScreen() {
     Linking.openURL(`tel:${phone}`).catch(() => Alert.alert("Could not start call", phone));
   }
 
-  const isApprovedPartner = operatorProfile?.type === "partner" && operatorProfile?.status === "approved";
+  const isApprovedPartner =
+    Boolean((operatorProfile?.type === "partner" || operatorProfile?.type === "driver") && operatorProfile?.status === "approved");
 
   if (!profileLoading && !isApprovedPartner) {
     return (
@@ -153,9 +154,11 @@ export default function FleetLiveMapScreen() {
         <View style={styles.restrictedIconWrap}>
           <Ionicons name="business-outline" size={44} color="#111827" />
         </View>
-        <Text style={styles.restrictedTitle}>Partner Access Required</Text>
+        <Text style={styles.restrictedTitle}>
+          {operatorProfile?.type === "driver" ? "Driver Partner Access Required" : "Partner Access Required"}
+        </Text>
         <Text style={styles.restrictedDesc}>
-          Live GPS Fleet Tracking is exclusively available to approved A2B fleet partners.
+          Live GPS Fleet Tracking is exclusively available to approved A2B fleet partners and driver operators.
         </Text>
         <Pressable
           style={styles.restrictedBackBtn}

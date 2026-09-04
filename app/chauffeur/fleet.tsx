@@ -265,7 +265,8 @@ export default function FleetScreen() {
 
   if (loading) return <View style={[styles.container, styles.center]}><ActivityIndicator color={Colors.white} /></View>;
 
-  const isApprovedPartner = profile?.type === "partner" && profile?.status === "approved";
+  const isApprovedPartner =
+    Boolean((profile?.type === "partner" || profile?.type === "driver") && profile?.status === "approved");
   if (!isApprovedPartner) {
     return (
       <View style={[styles.container, styles.center, { paddingHorizontal: 28, paddingTop: insets.top + 40 }]}>
@@ -273,10 +274,10 @@ export default function FleetScreen() {
           <Ionicons name="business-outline" size={38} color={Colors.white} />
         </View>
         <Text style={{ color: Colors.white, fontSize: 20, fontFamily: "Inter_700Bold", textAlign: "center", marginBottom: 8 }}>
-          Partner Access Required
+          {profile?.type === "driver" ? "Driver Partner Access Required" : "Partner Access Required"}
         </Text>
         <Text style={{ color: Colors.textMuted, fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 20, marginBottom: 24 }}>
-          Fleet &amp; Driver management is exclusively available to approved A2B fleet partners.
+          Fleet &amp; Driver management is exclusively available to approved A2B fleet partners and driver operators.
         </Text>
         <Pressable
           style={{ backgroundColor: Colors.white, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 28, alignItems: "center" }}

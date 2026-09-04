@@ -129,6 +129,45 @@
       padding-right: 38px;
       cursor: pointer;
     }
+    /* Fleet & Partner Dashboard Styles */
+    .fleet-kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    @media(max-width: 900px) { .fleet-kpi-grid { grid-template-columns: 1fr 1fr; } }
+    @media(max-width: 500px) { .fleet-kpi-grid { grid-template-columns: 1fr; } }
+    .fleet-kpi-card { background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius); padding: 22px 24px; }
+    .fleet-kpi-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--grey-400); margin-bottom: 8px; }
+    .fleet-kpi-value { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: var(--grey-900); }
+    .fleet-kpi-sub { font-size: 12px; color: var(--grey-500); margin-top: 4px; }
+    #page-fleet input[type="text"],
+    #page-fleet input[type="number"],
+    #page-fleet select,
+    #page-fleet textarea {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1.5px solid var(--grey-200);
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-family: var(--font);
+      outline: none;
+      background: var(--white);
+      color: var(--grey-900);
+      box-sizing: border-box;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    #page-fleet select {
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      padding-right: 38px;
+      cursor: pointer;
+    }
+    #page-fleet input:focus,
+    #page-fleet select:focus,
+    #page-fleet textarea:focus {
+      border-color: var(--black);
+      box-shadow: 0 0 0 3px rgba(0,0,0,0.06);
+    }
     .lift-member-card { background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius); padding: 24px; margin-bottom: 24px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 20px; align-items: start; }
     .lift-member-card h3 { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 8px; }
     .lift-member-card p { color: var(--grey-500); font-size: 14px; line-height: 1.7; margin-bottom: 10px; }
@@ -481,12 +520,36 @@
         </div>
       </div>
 
-      <!-- FLEET & DRIVERS -->
+      <!-- FLEET & DRIVERS / PARTNER DASHBOARD -->
       <div class="dash-page" id="page-fleet">
-        <h1 class="dash-page-title">Fleet &amp; Drivers</h1>
-        <p style="font-size:14px;color:var(--grey-500);line-height:1.7;margin:-6px 0 20px;max-width:640px;">
-          Add other approved A2B drivers to drive your additional cars. Search for a driver, send them an invite (they get an app notification, plus email/SMS once enabled), and once they accept, assign them to one of your approved vehicles.
+        <h1 class="dash-page-title" id="fleetPageTitle">Partner Dashboard</h1>
+        <p id="fleetPageSub" style="font-size:14px;color:var(--grey-500);line-height:1.7;margin:-6px 0 20px;max-width:680px;">
+          Manage your fleet vehicles, invite approved A2B drivers, track live trip operations and monitor weekly revenue.
         </p>
+
+        <!-- Executive KPI Cards -->
+        <div class="fleet-kpi-grid">
+          <div class="fleet-kpi-card">
+            <div class="fleet-kpi-label">Fleet Vehicles</div>
+            <div class="fleet-kpi-value" id="kpiFleetVehicles">0</div>
+            <div class="fleet-kpi-sub">Approved cars</div>
+          </div>
+          <div class="fleet-kpi-card">
+            <div class="fleet-kpi-label">Active Drivers</div>
+            <div class="fleet-kpi-value" id="kpiFleetDrivers">0</div>
+            <div class="fleet-kpi-sub">Assigned to fleet</div>
+          </div>
+          <div class="fleet-kpi-card">
+            <div class="fleet-kpi-label">Active Trips</div>
+            <div class="fleet-kpi-value" id="kpiFleetTrips">0</div>
+            <div class="fleet-kpi-sub">Live operations now</div>
+          </div>
+          <div class="fleet-kpi-card">
+            <div class="fleet-kpi-label">Weekly Net Revenue</div>
+            <div class="fleet-kpi-value" id="kpiFleetRevenue" style="color:#16a34a;">ZAR 0.00</div>
+            <div class="fleet-kpi-sub">Net payout cycle</div>
+          </div>
+        </div>
 
         <div class="driver-apply-card" style="margin-bottom:18px;">
           <h3>Find an approved driver</h3>
@@ -1412,7 +1475,12 @@
         fleetState.profile = data.profile || null;
         const approved = fleetState.profile && fleetState.profile.status === 'approved';
         const nav = document.getElementById('nav-fleet');
-        if (nav) nav.style.display = approved ? 'flex' : 'none';
+        if (nav) {
+          nav.style.display = approved ? 'flex' : 'none';
+          const isDriver = fleetState.profile?.type === 'driver' || currentUser?.role === 'chauffeur';
+          const label = isDriver ? 'Driver Partner Dashboard' : 'Partner Dashboard';
+          nav.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>${label}`;
+        }
       } catch (e) {
         const nav = document.getElementById('nav-fleet');
         if (nav) nav.style.display = 'none';
@@ -1432,14 +1500,39 @@
 
     async function loadFleet() {
       try {
-        const [vehicleData, assignmentData, inviteData] = await Promise.all([
+        const [vehicleData, assignmentData, inviteData, overviewData, earningsData] = await Promise.all([
           fleetFetch('/api/vehicles'),
           fleetFetch('/api/fleet/assignments').catch(() => ({ assignments: [] })),
           fleetFetch('/api/fleet/invites').catch(() => ({ sentInvites: [], receivedInvites: [] })),
+          fleetFetch('/api/fleet/overview').catch(() => null),
+          fleetFetch('/api/fleet/earnings-summary').catch(() => null),
         ]);
         const owned = (vehicleData.vehicles || []).filter(v =>
           !fleetState.profile?.id || v.ownerOperatorProfileId === fleetState.profile.id);
         fleetState.vehicles = owned;
+
+        const isDriver = fleetState.profile?.type === 'driver' || currentUser?.role === 'chauffeur';
+        const pageTitle = document.getElementById('fleetPageTitle');
+        if (pageTitle) pageTitle.textContent = isDriver ? 'Driver Partner Dashboard' : 'Partner Dashboard';
+        const pageSub = document.getElementById('fleetPageSub');
+        if (pageSub) {
+          pageSub.textContent = isDriver
+            ? 'Manage your assigned vehicles, fleet connections, live trip operations and earnings in South African Rand (ZAR).'
+            : 'Manage your fleet vehicles, invite approved A2B drivers, track live trip operations and monitor weekly revenue.';
+        }
+
+        const kpiVehicles = document.getElementById('kpiFleetVehicles');
+        if (kpiVehicles) kpiVehicles.textContent = overviewData?.overview?.vehicles ?? owned.length;
+        const kpiDrivers = document.getElementById('kpiFleetDrivers');
+        if (kpiDrivers) kpiDrivers.textContent = overviewData?.overview?.assignedDrivers ?? (assignmentData.assignments || []).length;
+        const kpiTrips = document.getElementById('kpiFleetTrips');
+        if (kpiTrips) kpiTrips.textContent = overviewData?.overview?.activeTrips ?? 0;
+        const kpiRevenue = document.getElementById('kpiFleetRevenue');
+        if (kpiRevenue) {
+          const rev = Number(earningsData?.payout ?? earningsData?.totalGrossFares ?? 0);
+          kpiRevenue.textContent = `ZAR ${rev.toFixed(2)}`;
+        }
+
         renderFleetVehicles(owned);
         renderFleetAssignments(assignmentData.assignments || []);
         renderFleetSentInvites(inviteData.sentInvites || []);

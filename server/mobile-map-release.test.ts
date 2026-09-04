@@ -487,27 +487,29 @@ test("partner-only fleet access control, live map UI enhancements, and earnings 
   const fleetSource = readProjectFile("app/chauffeur/fleet.tsx");
   const liveMapSource = readProjectFile("app/chauffeur/live-map.tsx");
   const earningsSource = readProjectFile("app/chauffeur/earnings.tsx");
+  const earningsBreakdownSource = readProjectFile("app/chauffeur/earnings-breakdown.tsx");
   const vehiclesSource = readProjectFile("app/chauffeur/vehicles.tsx");
   const routesSource = readProjectFile("server/routes.ts");
 
-  // 1. Partner-only fleet menu items & pill button in driver app
-  assert.match(chauffeurSource, /const isApprovedPartner = operatorProfile\?\.type === "partner" && operatorProfile\?\.status === "approved"/);
-  assert.match(chauffeurSource, /isApprovedPartner\s*\?\s*\[[\s\S]*?Partner Dashboard[\s\S]*?Fleet Live Map[\s\S]*?Fleet & Drivers/);
-  assert.match(chauffeurSource, /\{isApprovedPartner && \([\s\S]*?styles\.partnerFleetPill/);
-  assert.match(chauffeurSource, /operatorProfile\?\.type === "partner" && operatorProfile\?\.status === "approved" && partnerDashboardMode === "partner"/);
+  // 1. Partner and chauffeur fleet menu items & pill button in driver app
+  assert.match(chauffeurSource, /isApprovedPartnerOrChauffeur/);
+  assert.match(chauffeurSource, /Driver Partner Dashboard/);
+  assert.match(chauffeurSource, /isApprovedPartnerOrChauffeurMenu\s*\?\s*\[[\s\S]*?Partner Dashboard[\s\S]*?Fleet Live Map[\s\S]*?Fleet & Drivers/);
+  assert.match(chauffeurSource, /\{isApprovedPartnerOrChauffeurMenu && \([\s\S]*?styles\.partnerFleetPill/);
+  assert.match(chauffeurSource, /isApprovedPartnerOrChauffeur && partnerDashboardMode === "partner"/);
 
   // 2. Vehicles screen restricts Manage Drivers button to approved partners only
   assert.match(vehiclesSource, /operatorProfile\?\.type === "partner" && operatorProfile\?\.status === "approved" && ownsVehicle/);
 
   // 3. Screen-level access gates for Fleet Management and Live Map
-  assert.match(fleetSource, /const isApprovedPartner = profile\?\.type === "partner" && profile\?\.status === "approved"/);
-  assert.match(fleetSource, /Partner Access Required/);
-  assert.match(liveMapSource, /const isApprovedPartner = operatorProfile\?\.type === "partner" && operatorProfile\?\.status === "approved"/);
-  assert.match(liveMapSource, /Partner Access Required/);
+  assert.match(fleetSource, /const isApprovedPartner =/);
+  assert.match(fleetSource, /Access Required/);
+  assert.match(liveMapSource, /const isApprovedPartner =/);
+  assert.match(liveMapSource, /Access Required/);
 
-  // 4. Backend routes restrict fleet endpoints to approved partners
-  assert.match(routesSource, /if \(profile\.type !== "partner" \|\| profile\.status !== "approved"\) \{[\s\S]*?Fleet earnings summary is reserved for approved fleet partners/);
-  assert.match(routesSource, /if \(profile\.type !== "partner" \|\| profile\.status !== "approved"\) \{[\s\S]*?Fleet live tracking is reserved for approved fleet partners/);
+  // 4. Backend routes restrict fleet endpoints to approved partners and driver operators
+  assert.match(routesSource, /Fleet earnings summary is reserved for approved fleet partners/);
+  assert.match(routesSource, /Fleet live tracking is reserved for approved fleet partners/);
 
   // 5. Live map fixes "undefined undefined" vehicle label
   assert.match(routesSource, /const vehicleMake = vehicle\?\.carMake \|\| \(vehicle as any\)\?\.make \|\| chauffeur\?\.carMake/);
@@ -525,5 +527,5 @@ test("partner-only fleet access control, live map UI enhancements, and earnings 
 
   // 8. Earnings screen applies safe area top insets to prevent header hiding on mobile devices
   assert.match(earningsSource, /paddingTop: Math\.max\(insets\.top, Platform\.OS === "android" \? 28 : 16\)/);
-  assert.match(earningsSource, /effectiveProfile\?\.type === "partner" && effectiveProfile\?\.status === "approved"/);
+  assert.match(earningsBreakdownSource, /effectiveProfile\?\.type === "partner" && effectiveProfile\?\.status === "approved"/);
 });

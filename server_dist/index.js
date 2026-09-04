@@ -4006,7 +4006,8 @@ async function registerRoutes(app2) {
       storage.getOperatorProfileByUserId(user.id).catch(() => void 0)
     ]);
     const partnerProfile = operatorProfile?.type === "partner" ? await storage.getPartnerProfileByOperatorId(operatorProfile.id).catch(() => void 0) : null;
-    const role = operatorProfile?.type === "partner" || safeUser.role === "partner" ? "partner" : safeUser.role;
+    const isPartner = operatorProfile?.type === "partner" || safeUser.role === "partner" || !!partnerProfile;
+    const role = isPartner ? "partner" : safeUser.role;
     return {
       ...safeUser,
       role,
@@ -6591,8 +6592,10 @@ If you did not request this, you can ignore this email.`,
             vehicleYear: normalizedVehicleYear
           });
         }
+        const existingTargetUser = await storage.getUser(req.body.userId);
+        const isTargetPartner = existingTargetUser?.role === "partner";
         await storage.updateUser(req.body.userId, {
-          role: "chauffeur",
+          ...isTargetPartner ? {} : { role: "chauffeur" },
           ...req.body.phone ? { phone: String(req.body.phone).trim() } : {}
         });
         const existingApp = await storage.getDriverApplicationByUserId(req.body.userId);
@@ -6865,7 +6868,12 @@ If you did not request this, you can ignore this email.`,
               isApproved: false
             });
           }
-          await storage.updateUser(req.auth.sub, { role: "chauffeur", phone });
+          const existingOperatorUser = await storage.getUser(req.auth.sub);
+          const isPartnerUser = existingOperatorUser?.role === "partner";
+          await storage.updateUser(req.auth.sub, {
+            role: isPartnerUser ? "partner" : "chauffeur",
+            phone
+          });
           return { profile: profile2, chauffeur: chauffeur3 };
         }
       );
@@ -7386,15 +7394,26 @@ If you did not request this, you can ignore this email.`,
     const weekStart = new Date(startLocal.getTime() - sastOffsetMs);
     const weekEnd = new Date(endLocal.getTime() - sastOffsetMs);
     const options = { month: "short", day: "numeric" };
-    const periodLabel = `${startLocal.toLocaleDateString("en-ZA", options)} - ${endLocal.toLocaleDateString("en-ZA", options)}`;
-    return { weekStart, weekEnd, periodLabel };
+    const startStr = startLocal.toLocaleDateString("en-US", options);
+    const endStr = new Date(startLocal.getTime() + 7 * 24 * 60 * 60 * 1e3).toLocaleDateString("en-US", options);
+    const periodLabel = `${startStr} - ${endStr}`;
+    const nextPayoutLabel = `${endStr} at 4:00 AM`;
+    const days = [];
+    const dayDates = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(startLocal);
+      d.setUTCDate(startLocal.getUTCDate() + i);
+      days.push(d.getUTCDate());
+      dayDates.push(new Date(d.getTime() - sastOffsetMs));
+    }
+    return { weekStart, weekEnd, periodLabel, nextPayoutLabel, days, dayDates };
   }
   app2.get("/api/fleet/earnings-summary", requireAuth, async (req, res) => {
     try {
       const profile = await storage.getOperatorProfileByUserId(req.auth.sub);
       if (!profile) return res.status(404).json({ message: "Operator profile not found" });
-      if (profile.type !== "partner" || profile.status !== "approved") {
-        return res.status(403).json({ message: "Fleet earnings summary is reserved for approved fleet partners." });
+      if (profile.type !== "partner" && profile.type !== "driver" || profile.status !== "approved") {
+        return res.status(403).json({ message: "Fleet earnings summary is reserved for approved fleet partners and driver partners." });
       }
       const vehicles2 = await storage.getVehiclesByOwnerOperator(profile.id);
       const vehicleIds = new Set(vehicles2.map((v) => v.id));
@@ -7505,8 +7524,8 @@ If you did not request this, you can ignore this email.`,
     try {
       const profile = await storage.getOperatorProfileByUserId(req.auth.sub);
       if (!profile) return res.status(404).json({ message: "Operator profile not found" });
-      if (profile.type !== "partner" || profile.status !== "approved") {
-        return res.status(403).json({ message: "Fleet live tracking is reserved for approved fleet partners." });
+      if (profile.type !== "partner" && profile.type !== "driver" || profile.status !== "approved") {
+        return res.status(403).json({ message: "Fleet live tracking is reserved for approved fleet partners and driver partners." });
       }
       const vehicles2 = await storage.getVehiclesByOwnerOperator(profile.id);
       const vehicleMap = new Map(vehicles2.map((v) => [v.id, v]));
@@ -11818,6 +11837,216 @@ If you did not request this, you can ignore this email.`,
     try {
       const earningsList = await storage.getEarningsByChauffeur(req.params.chauffeurId);
       return res.json(earningsList);
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.get("/api/earnings/chauffeur/:chauffeurId/overview", async (req, res) => {
+    try {
+      const chauffeur2 = await storage.getChauffeur(req.params.chauffeurId);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
+      const user = chauffeur2.userId ? await storage.getUser(chauffeur2.userId) : null;
+      const { weekStart, weekEnd, periodLabel, nextPayoutLabel } = getEarningsWeekBounds(/* @__PURE__ */ new Date());
+      const earningsList = await storage.getEarningsByChauffeur(chauffeur2.id);
+      const currentWeekEarnings = earningsList.filter((e) => {
+        if (!e.createdAt) return false;
+        const t = new Date(e.createdAt).getTime();
+        return t >= weekStart.getTime() && t <= weekEnd.getTime();
+      });
+      const currentWeekAmount = currentWeekEarnings.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+      const walletBalance = Number(user?.walletBalance ?? chauffeur2?.walletBalance ?? 0);
+      return res.json({
+        currentWeek: {
+          start: weekStart.toISOString(),
+          end: weekEnd.toISOString(),
+          periodLabel,
+          amount: currentWeekAmount
+        },
+        wallet: {
+          balance: walletBalance,
+          nextPayoutLabel
+        },
+        currency: "ZAR"
+      });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.get("/api/earnings/chauffeur/:chauffeurId/week-details", async (req, res) => {
+    try {
+      const chauffeur2 = await storage.getChauffeur(req.params.chauffeurId);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
+      const user = chauffeur2.userId ? await storage.getUser(chauffeur2.userId) : null;
+      const targetDate = req.query.weekStart ? new Date(String(req.query.weekStart)) : /* @__PURE__ */ new Date();
+      const currentBounds = getEarningsWeekBounds(/* @__PURE__ */ new Date());
+      const bounds = getEarningsWeekBounds(isNaN(targetDate.getTime()) ? /* @__PURE__ */ new Date() : targetDate);
+      const [earningsList, allRides] = await Promise.all([
+        storage.getEarningsByChauffeur(chauffeur2.id),
+        storage.getRidesByChauffeur(chauffeur2.id)
+      ]);
+      const weekEarnings = earningsList.filter((e) => {
+        if (!e.createdAt) return false;
+        const t = new Date(e.createdAt).getTime();
+        return t >= bounds.weekStart.getTime() && t <= bounds.weekEnd.getTime();
+      });
+      const weekRides = allRides.filter((r) => {
+        const t = r.completedAt ? new Date(r.completedAt).getTime() : new Date(r.createdAt).getTime();
+        return t >= bounds.weekStart.getTime() && t <= bounds.weekEnd.getTime() && r.status === "completed";
+      });
+      const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+      const dailyEarnings = bounds.days.map((dateNum, i) => {
+        const dayStart = new Date(bounds.dayDates[i]);
+        dayStart.setUTCHours(2, 0, 0, 0);
+        const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1e3 - 1);
+        const dayEarns = weekEarnings.filter((e) => {
+          const t = new Date(e.createdAt).getTime();
+          return t >= dayStart.getTime() && t <= dayEnd.getTime();
+        });
+        const dayRides = weekRides.filter((r) => {
+          const t = r.completedAt ? new Date(r.completedAt).getTime() : new Date(r.createdAt).getTime();
+          return t >= dayStart.getTime() && t <= dayEnd.getTime();
+        });
+        const dayAmount = dayEarns.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+        return {
+          dayIndex: i,
+          dayName: dayNames[i],
+          dateNum,
+          amount: dayAmount,
+          tripsCount: dayRides.length
+        };
+      });
+      const totalAmount = weekEarnings.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+      const prevWeekDate = new Date(bounds.weekStart.getTime() - 2 * 24 * 60 * 60 * 1e3);
+      const prevBounds = getEarningsWeekBounds(prevWeekDate);
+      const nextWeekDate = new Date(bounds.weekEnd.getTime() + 2 * 24 * 60 * 60 * 1e3);
+      const isCurrentOrFuture = bounds.weekStart.getTime() >= currentBounds.weekStart.getTime();
+      const nextBounds = isCurrentOrFuture ? null : getEarningsWeekBounds(nextWeekDate);
+      const onlineHoursEst = weekRides.length > 0 ? (weekRides.length * 0.75).toFixed(1) : "0";
+      const ratingPoints = Number(user?.rating || chauffeur2?.rating || 5).toFixed(1);
+      return res.json({
+        week: {
+          start: bounds.weekStart.toISOString(),
+          end: bounds.weekEnd.toISOString(),
+          label: bounds.periodLabel,
+          totalAmount
+        },
+        dailyEarnings,
+        stats: {
+          onlineSeconds: Math.round(parseFloat(onlineHoursEst) * 3600),
+          onlineFormatted: parseFloat(onlineHoursEst) > 0 ? `${onlineHoursEst} hrs` : "0 s",
+          trips: weekRides.length,
+          points: parseFloat(ratingPoints)
+        },
+        previousWeek: {
+          start: prevBounds.weekStart.toISOString(),
+          label: prevBounds.periodLabel
+        },
+        nextWeek: nextBounds ? {
+          start: nextBounds.weekStart.toISOString(),
+          label: nextBounds.periodLabel
+        } : null,
+        currency: "ZAR"
+      });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.get("/api/earnings/chauffeur/:chauffeurId/weeks", async (req, res) => {
+    try {
+      const chauffeur2 = await storage.getChauffeur(req.params.chauffeurId);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
+      const earningsList = await storage.getEarningsByChauffeur(chauffeur2.id);
+      const createdAt = chauffeur2.createdAt ? new Date(chauffeur2.createdAt) : new Date(Date.now() - 60 * 24 * 60 * 60 * 1e3);
+      const now = /* @__PURE__ */ new Date();
+      const page = Math.max(1, parseInt(String(req.query.page || "1"), 10));
+      const limit = Math.max(5, Math.min(52, parseInt(String(req.query.limit || "20"), 10)));
+      const allWeeks = [];
+      let cursorDate = new Date(now.getTime());
+      const earliestBound = getEarningsWeekBounds(createdAt).weekStart.getTime();
+      const currentBounds = getEarningsWeekBounds(now);
+      let safetyCounter = 0;
+      while (safetyCounter < 156) {
+        const b = getEarningsWeekBounds(cursorDate);
+        const wEarns = earningsList.filter((e) => {
+          if (!e.createdAt) return false;
+          const t = new Date(e.createdAt).getTime();
+          return t >= b.weekStart.getTime() && t <= b.weekEnd.getTime();
+        });
+        const amount = wEarns.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+        allWeeks.push({
+          id: b.weekStart.toISOString(),
+          label: b.periodLabel,
+          startDate: b.weekStart.toISOString(),
+          endDate: b.weekEnd.toISOString(),
+          amount,
+          days: b.days,
+          isCurrentWeek: b.weekStart.getTime() === currentBounds.weekStart.getTime(),
+          hasTrips: wEarns.length > 0
+        });
+        if (b.weekStart.getTime() <= earliestBound) {
+          break;
+        }
+        cursorDate = new Date(b.weekStart.getTime() - 24 * 60 * 60 * 1e3);
+        safetyCounter++;
+      }
+      const startIndex = (page - 1) * limit;
+      const paginatedWeeks = allWeeks.slice(startIndex, startIndex + limit);
+      return res.json({
+        weeks: paginatedWeeks,
+        totalWeeks: allWeeks.length,
+        page,
+        hasMore: startIndex + limit < allWeeks.length,
+        currency: "ZAR"
+      });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.get("/api/earnings/chauffeur/:chauffeurId/activity", async (req, res) => {
+    try {
+      const chauffeur2 = await storage.getChauffeur(req.params.chauffeurId);
+      if (!chauffeur2) return res.status(404).json({ message: "Chauffeur not found" });
+      const targetDate = req.query.weekStart ? new Date(String(req.query.weekStart)) : /* @__PURE__ */ new Date();
+      const bounds = getEarningsWeekBounds(isNaN(targetDate.getTime()) ? /* @__PURE__ */ new Date() : targetDate);
+      const [allRides, earningsList] = await Promise.all([
+        storage.getRidesByChauffeur(chauffeur2.id),
+        storage.getEarningsByChauffeur(chauffeur2.id)
+      ]);
+      const weekRides = allRides.filter((r) => {
+        const t = r.completedAt ? new Date(r.completedAt).getTime() : new Date(r.createdAt).getTime();
+        return t >= bounds.weekStart.getTime() && t <= bounds.weekEnd.getTime() && r.status === "completed";
+      });
+      const activities = weekRides.map((ride) => {
+        const matchingEarning = earningsList.find((e) => e.rideId === ride.id);
+        const netAmount = matchingEarning ? Number(matchingEarning.amount) : Number(ride.finalFare || ride.price || 0) * 0.8;
+        const completedDate = ride.completedAt ? new Date(ride.completedAt) : new Date(ride.createdAt);
+        return {
+          id: ride.id,
+          date: completedDate.toISOString(),
+          timeFormatted: completedDate.toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Johannesburg" }),
+          dateFormatted: completedDate.toLocaleDateString("en-ZA", { month: "short", day: "numeric", timeZone: "Africa/Johannesburg" }),
+          pickupAddress: ride.pickupAddress || "Pickup location",
+          dropoffAddress: ride.dropoffAddress || "Dropoff destination",
+          grossFare: Number(ride.finalFare || ride.price || 0),
+          netAmount,
+          vehicleType: ride.vehicleType || "standard",
+          paymentMethod: ride.paymentMethod || "card"
+        };
+      }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      const totalNet = activities.reduce((sum, a) => sum + a.netAmount, 0);
+      const sastOffsetMs = 2 * 60 * 60 * 1e3;
+      const startLocal = new Date(bounds.weekStart.getTime() + sastOffsetMs);
+      const endSunday = new Date(bounds.weekEnd.getTime() + sastOffsetMs - 4 * 60 * 60 * 1e3);
+      const startMonthDay = startLocal.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const endMonthDayYear = endSunday.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      const activityRangeLabel = `${startMonthDay} \u2013 ${endMonthDayYear}`;
+      return res.json({
+        periodLabel: activityRangeLabel,
+        activities,
+        totalAmount: totalNet,
+        totalTrips: activities.length,
+        currency: "ZAR"
+      });
     } catch (error) {
       return res.status(500).json({ message: error.message });
     }

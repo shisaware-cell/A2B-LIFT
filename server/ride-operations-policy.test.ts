@@ -349,10 +349,10 @@ test("partner earnings and fleet live map screens are properly integrated in rou
   assert.match(routesSource, /\/api\/fleet\/earnings-summary/);
   assert.match(routesSource, /\/api\/fleet\/live-locations/);
 
-  const earningsSource = readFileSync(resolve(process.cwd(), "app/chauffeur/earnings.tsx"), "utf-8");
-  assert.match(earningsSource, /Adjustments from previous periods/);
-  assert.match(earningsSource, /Driver Net earnings/);
-  assert.match(earningsSource, /An earnings week goes from Monday at 4:00 AM/);
+  const earningsBreakdownSource = readFileSync(resolve(process.cwd(), "app/chauffeur/earnings-breakdown.tsx"), "utf-8");
+  assert.match(earningsBreakdownSource, /Adjustments from previous periods/);
+  assert.match(earningsBreakdownSource, /Driver Net earnings/);
+  assert.match(earningsBreakdownSource, /An earnings week goes from Monday at 4:00 AM/);
 
   const liveMapSource = readFileSync(resolve(process.cwd(), "app/chauffeur/live-map.tsx"), "utf-8");
   assert.match(liveMapSource, /Live Demand/);
@@ -531,5 +531,64 @@ test("fleet map marker sizing prevents clipping on rotation and live-locations d
   // 4. Online detection considers heartbeat and active trips in addition to isOnline
   assert.match(serverRoutes, /hasFreshPing/);
   assert.match(serverRoutes, /isOnline\s*=\s*Boolean\(chauffeur\?\.isOnline\)\s*\|\|\s*hasFreshPing\s*\|\|\s*Boolean\(currentRide\)/);
+});
+
+test("chauffeur Driver partner dashboard, full mobile earnings suite (Images 1-4), and website executive dashboard are verified", () => {
+  const chauffeurIndex = readFileSync(resolve(process.cwd(), "app/chauffeur/index.tsx"), "utf-8");
+  const earningsMain = readFileSync(resolve(process.cwd(), "app/chauffeur/earnings.tsx"), "utf-8");
+  const earningsDetails = readFileSync(resolve(process.cwd(), "app/chauffeur/earnings-details.tsx"), "utf-8");
+  const earningsSelectWeek = readFileSync(resolve(process.cwd(), "app/chauffeur/earnings-select-week.tsx"), "utf-8");
+  const earningsActivity = readFileSync(resolve(process.cwd(), "app/chauffeur/earnings-activity.tsx"), "utf-8");
+  const earningsBreakdown = readFileSync(resolve(process.cwd(), "app/chauffeur/earnings-breakdown.tsx"), "utf-8");
+  const dashboardHtml = readFileSync(resolve(process.cwd(), "website/dashboard.html"), "utf-8");
+  const serverRoutes = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
+
+  // 1. Chauffeur access to Partner Dashboard mode with "Driver partner dashboard" title
+  assert.match(chauffeurIndex, /isApprovedPartnerOrChauffeur/);
+  assert.match(chauffeurIndex, /Driver partner dashboard/);
+  assert.match(chauffeurIndex, /isChauffeurRole\s*\?\s*"Driver partner dashboard"\s*:\s*"Partner Dashboard"/);
+  assert.match(chauffeurIndex, /minimumFontScale=\{0\.8\}/);
+
+  // 2. Server role preservation: user type partner is preserved when adding vehicles or chauffeurs
+  assert.match(serverRoutes, /isPartner = operatorProfile\?\.type === "partner" \|\| safeUser\.role === "partner" \|\| !!partnerProfile/);
+  assert.match(serverRoutes, /isTargetPartner = existingTargetUser\?\.role === "partner"/);
+  assert.match(serverRoutes, /\.\.\.\(isTargetPartner \? \{\} : \{ role: "chauffeur" \}\)/);
+
+  // 3. New earnings endpoints in server routes
+  assert.match(serverRoutes, /\/api\/earnings\/chauffeur\/:chauffeurId\/overview/);
+  assert.match(serverRoutes, /\/api\/earnings\/chauffeur\/:chauffeurId\/week-details/);
+  assert.match(serverRoutes, /\/api\/earnings\/chauffeur\/:chauffeurId\/weeks/);
+  assert.match(serverRoutes, /\/api\/earnings\/chauffeur\/:chauffeurId\/activity/);
+
+  // 4. Mobile Screen 1 (Earnings Main - Image 1)
+  assert.match(earningsMain, /View details/);
+  assert.match(earningsMain, /Cash out and more/);
+  assert.match(earningsMain, /See a map of earnings trends in Johannesburg and Pretoria/);
+  assert.match(earningsMain, /router\.push\("\/chauffeur\/earnings-details"/);
+
+  // 5. Mobile Screen 2 (Earnings Details - Image 2)
+  assert.match(earningsDetails, /router\.push\("\/chauffeur\/earnings-select-week"/);
+  assert.match(earningsDetails, /chartBarsContainer/);
+  assert.match(earningsDetails, /How we calculate stats/);
+  assert.match(earningsDetails, /Customer fare breakdown/);
+  assert.match(earningsDetails, /Earnings Activity/);
+
+  // 6. Mobile Screen 3 (Select Week - Image 3)
+  assert.match(earningsSelectWeek, /Select week/);
+  assert.match(earningsSelectWeek, /Weekly earnings/);
+  assert.match(earningsSelectWeek, /miniDayDot/);
+
+  // 7. Mobile Screen 4 (Earnings Activity - Image 4)
+  assert.match(earningsActivity, /Earnings Activity/);
+  assert.match(earningsActivity, /End of activities during/);
+  assert.match(earningsActivity, /Edit date range/);
+
+  // 8. Website Executive Dashboard with KPI cards & styled inputs
+  assert.match(dashboardHtml, /fleet-kpi-grid/);
+  assert.match(dashboardHtml, /kpiFleetVehicles/);
+  assert.match(dashboardHtml, /kpiFleetDrivers/);
+  assert.match(dashboardHtml, /kpiFleetTrips/);
+  assert.match(dashboardHtml, /kpiFleetRevenue/);
+  assert.match(dashboardHtml, /Driver Partner Dashboard/);
 });
 

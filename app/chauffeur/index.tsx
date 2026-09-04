@@ -2431,8 +2431,15 @@ export default function ChauffeurDashboard() {
     );
   }
 
-  if (operatorProfile?.type === "partner" && operatorProfile?.status === "approved" && partnerDashboardMode === "partner") {
-    const isApprovedPartner = true;
+  const isApprovedPartnerOrChauffeur =
+    Boolean(
+      (operatorProfile?.type === "partner" || operatorProfile?.type === "driver" || user?.role === "chauffeur") &&
+      (operatorProfile?.status === "approved" || chauffeur?.isApproved)
+    );
+
+  if (isApprovedPartnerOrChauffeur && partnerDashboardMode === "partner") {
+    const isChauffeurRole = operatorProfile?.type === "driver" || user?.role === "chauffeur";
+    const partnerTitle = isChauffeurRole ? "Driver partner dashboard" : "Partner Dashboard";
 
     return (
       <View style={[styles.partnerMainContainer, { paddingTop: insets.top + (Platform.OS === "web" ? 64 : 12) }]}>
@@ -2464,13 +2471,18 @@ export default function ChauffeurDashboard() {
                 </View>
                 <Text style={styles.partnerBrandTag}>A2B LIFT FLEET</Text>
               </View>
-              <Text style={styles.partnerWelcomeTitle} numberOfLines={1} adjustsFontSizeToFit>
-                {isApprovedPartner ? "Partner Dashboard" : "Partner Application Pending"}
+              <Text
+                style={styles.partnerWelcomeTitle}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.8}
+              >
+                {partnerTitle}
               </Text>
               <Text style={styles.partnerSubtitle}>
-                {isApprovedPartner
-                  ? "Manage vehicles, assign drivers, track live operations and revenue."
-                  : "Your partner fleet application is under review by A2B administrators."}
+                {isChauffeurRole
+                  ? "Manage assigned vehicles, fleet connections, and live operations."
+                  : "Manage vehicles, assign drivers, track live operations and revenue."}
               </Text>
             </View>
           </View>
@@ -2748,13 +2760,19 @@ export default function ChauffeurDashboard() {
 
   const isApprovedPartner = operatorProfile?.type === "partner" && operatorProfile?.status === "approved";
 
+  const isApprovedPartnerOrChauffeurMenu =
+    Boolean(
+      (operatorProfile?.type === "partner" || operatorProfile?.type === "driver" || user?.role === "chauffeur") &&
+      (operatorProfile?.status === "approved" || chauffeur?.isApproved)
+    );
+
   // ─── Menu items ───────────────────────────────────────────────────────────
   const menuItems = [
-    ...(isApprovedPartner
+    ...(isApprovedPartnerOrChauffeurMenu
       ? [
           {
             icon: "business-outline",
-            label: "Partner Dashboard",
+            label: operatorProfile?.type === "driver" || user?.role === "chauffeur" ? "Driver Partner Dashboard" : "Partner Dashboard",
             onPress: async () => {
               setPartnerDashboardMode("partner");
               await AsyncStorage.setItem("a2b_partner_dashboard_mode", "partner");
@@ -2982,8 +3000,8 @@ export default function ChauffeurDashboard() {
         <Text style={styles.pillText}>{isOnline ? "Online" : "Offline"}</Text>
       </Pressable>
 
-      {/* ─── Partner Fleet Dashboard Button (Top-Center for partner users in driver mode) ─── */}
-      {isApprovedPartner && (
+      {/* ─── Partner Fleet Dashboard Button (Top-Center for partner/chauffeur in driver mode) ─── */}
+      {isApprovedPartnerOrChauffeurMenu && (
         <Pressable
           style={[styles.partnerFleetPill, { top: insets.top + 16 }]}
           onPress={async () => {
@@ -2993,7 +3011,9 @@ export default function ChauffeurDashboard() {
           accessibilityLabel="Switch to Partner Fleet Dashboard"
         >
           <Ionicons name="business" size={14} color="#10B981" />
-          <Text style={styles.partnerFleetPillText}>Fleet Dashboard</Text>
+          <Text style={styles.partnerFleetPillText} numberOfLines={1}>
+            {operatorProfile?.type === "driver" || user?.role === "chauffeur" ? "Partner Mode" : "Fleet Dashboard"}
+          </Text>
         </Pressable>
       )}
 
