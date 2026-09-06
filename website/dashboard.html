@@ -9,6 +9,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <style>
     body { background: var(--grey-50); }
     .dash-layout { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - var(--nav-h)); max-width: 1200px; margin: 0 auto; padding: 0 24px; gap: 32px; }
@@ -168,6 +170,83 @@
       border-color: var(--black);
       box-shadow: 0 0 0 3px rgba(0,0,0,0.06);
     }
+    /* Fleet Header & Switch Hero */
+    .fleet-header-brand { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .fleet-brand-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: #ecfdf5; color: #065f46; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+    .fleet-switch-hero { background: linear-gradient(135deg, #0f172a, #1e293b); color: var(--white); border-radius: var(--radius); padding: 18px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+    .fleet-switch-hero-left { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 260px; }
+    .fleet-switch-hero-icon { width: 44px; height: 44px; border-radius: 12px; background: rgba(16,185,129,0.18); color: #10b981; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .fleet-switch-hero-title { font-size: 15px; font-weight: 800; margin-bottom: 2px; color: var(--white); }
+    .fleet-switch-hero-desc { font-size: 13px; color: rgba(255,255,255,0.7); line-height: 1.5; margin: 0; }
+
+    /* Fleet Tabs Bar */
+    .fleet-tabs-bar { display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 1px solid var(--grey-200); padding-bottom: 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .fleet-tab-btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 18px; border-radius: 999px; border: 1.5px solid var(--grey-200); background: var(--white); font-size: 13px; font-weight: 700; color: var(--grey-600); cursor: pointer; transition: all .15s; white-space: nowrap; }
+    .fleet-tab-btn:hover { background: var(--grey-100); color: var(--grey-900); }
+    .fleet-tab-btn.active { background: var(--black); color: var(--white); border-color: var(--black); }
+    .fleet-tab-pulse { width: 7px; height: 7px; border-radius: 50%; background: #10b981; display: inline-block; animation: fleetPulse 1.8s infinite; }
+    @keyframes fleetPulse { 0% { transform: scale(0.95); opacity: 0.8; } 50% { transform: scale(1.4); opacity: 1; } 100% { transform: scale(0.95); opacity: 0.8; } }
+    .fleet-tab-pane { display: none; }
+    .fleet-tab-pane.active { display: block; }
+
+    /* Earnings & Financial Breakdown Styles */
+    .fleet-earnings-hero { background: var(--black); color: var(--white); border-radius: var(--radius-lg); padding: 32px 36px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; position: relative; overflow: hidden; }
+    .fleet-earnings-hero::before { content: ''; position: absolute; right: -40px; top: -40px; width: 220px; height: 220px; border-radius: 50%; background: rgba(255,255,255,0.03); }
+    .fleet-earnings-period { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(255,255,255,0.55); margin-bottom: 8px; }
+    .fleet-earnings-amount { font-size: 44px; font-weight: 900; letter-spacing: -0.03em; margin-bottom: 6px; }
+    .fleet-earnings-sub { font-size: 13px; color: rgba(255,255,255,0.7); }
+    .fleet-chart-card { background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius); padding: 24px; margin-bottom: 24px; }
+    .fleet-chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; flex-wrap: wrap; gap: 10px; }
+    .fleet-chart-title { font-size: 16px; font-weight: 800; color: var(--grey-900); }
+    .fleet-chart-bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: 14px; height: 160px; align-items: flex-end; padding: 16px 0 10px; border-bottom: 1px solid var(--grey-100); }
+    .fleet-chart-col { display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; gap: 6px; }
+    .fleet-chart-val { font-size: 11px; font-weight: 700; color: var(--grey-500); }
+    .fleet-chart-bar { width: 100%; max-width: 36px; border-radius: 6px 6px 0 0; background: var(--grey-200); min-height: 6px; transition: height .3s, background .2s; }
+    .fleet-chart-bar.highlight { background: #10b981; }
+    .fleet-chart-bar:hover { background: var(--black); }
+    .fleet-chart-day { font-size: 12px; font-weight: 700; color: var(--grey-600); margin-top: 4px; }
+    .fleet-chart-stats { display: flex; justify-content: space-around; gap: 16px; margin-top: 18px; padding-top: 14px; flex-wrap: wrap; }
+    .fleet-chart-stat-item { text-align: center; }
+    .fleet-chart-stat-val { font-size: 18px; font-weight: 800; color: var(--grey-900); }
+    .fleet-chart-stat-lbl { font-size: 12px; color: var(--grey-400); margin-top: 2px; }
+
+    /* Customer Fare Breakdown Table */
+    .fleet-breakdown-card { background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius); padding: 24px 28px; margin-bottom: 24px; }
+    .fleet-breakdown-card h3 { font-size: 18px; font-weight: 800; margin-bottom: 18px; color: var(--grey-900); }
+    .fleet-breakdown-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; font-size: 15px; }
+    .fleet-breakdown-label { color: var(--grey-800); font-weight: 500; }
+    .fleet-breakdown-val { color: var(--grey-900); font-weight: 600; }
+    .fleet-breakdown-div { height: 1px; background: var(--grey-200); }
+    .fleet-breakdown-div-bold { height: 1.5px; background: var(--black); margin: 6px 0; }
+    .fleet-breakdown-end { font-size: 17px; font-weight: 800; color: var(--black); }
+
+    /* Policy Notice Card */
+    .fleet-notice-card { background: #EFF6FF; border: 1px solid #DBEAFE; border-radius: var(--radius); padding: 18px 20px; display: flex; align-items: flex-start; gap: 14px; margin-bottom: 24px; }
+    .fleet-notice-icon { width: 28px; height: 28px; border-radius: 8px; background: #1E40AF; color: var(--white); display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+    .fleet-notice-text { font-size: 13px; line-height: 1.6; color: #1E3A8A; flex: 1; margin: 0; }
+
+    /* Driver Net Earnings Table */
+    .fleet-drivernet-card { background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius); padding: 24px 28px; margin-bottom: 24px; }
+    .fleet-drivernet-card h3 { font-size: 18px; font-weight: 800; margin-bottom: 6px; }
+    .fleet-search-pill { display: flex; align-items: center; gap: 10px; background: var(--grey-50); border: 1.5px solid var(--grey-200); border-radius: 999px; padding: 10px 18px; margin: 16px 0 20px; width: 100%; max-width: 440px; }
+    .fleet-search-pill input { border: none !important; background: transparent !important; outline: none !important; font-size: 14px !important; width: 100% !important; padding: 0 !important; color: var(--grey-900) !important; }
+    .fleet-search-pill button { background: none; border: none; font-size: 14px; color: var(--grey-400); cursor: pointer; padding: 0; }
+
+    /* Live GPS Map Styles */
+    .fleet-livemap-box { background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius); overflow: hidden; margin-bottom: 24px; }
+    .fleet-livemap-top { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--grey-200); flex-wrap: wrap; gap: 12px; background: var(--grey-50); }
+    .fleet-livemap-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .fleet-livemap-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; background: #ecfdf5; color: #065f46; font-size: 12px; font-weight: 700; }
+    .fleet-livemap-layout { display: grid; grid-template-columns: 1fr 340px; min-height: 520px; }
+    @media(max-width: 900px) { .fleet-livemap-layout { grid-template-columns: 1fr; } }
+    #fleetLiveMap { width: 100%; height: 520px; background: #e2e8f0; }
+    .fleet-livemap-sidebar { border-left: 1px solid var(--grey-200); padding: 18px; max-height: 520px; overflow-y: auto; background: var(--white); }
+    .fleet-live-driver-item { padding: 12px 14px; border: 1px solid var(--grey-200); border-radius: 10px; margin-bottom: 10px; cursor: pointer; transition: border-color .15s, background .15s; }
+    .fleet-live-driver-item:hover { border-color: var(--black); background: var(--grey-50); }
+    .fleet-status-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; }
+    .fleet-status-pill.online { background: #dcfce7; color: #15803d; }
+    .fleet-status-pill.trip { background: #fef9c3; color: #854d0e; }
+    .fleet-status-pill.offline { background: #f1f5f9; color: #64748b; }
     .lift-member-card { background: var(--white); border: 1px solid var(--grey-200); border-radius: var(--radius); padding: 24px; margin-bottom: 24px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 20px; align-items: start; }
     .lift-member-card h3 { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 8px; }
     .lift-member-card p { color: var(--grey-500); font-size: 14px; line-height: 1.7; margin-bottom: 10px; }
@@ -522,10 +601,24 @@
 
       <!-- FLEET & DRIVERS / PARTNER DASHBOARD -->
       <div class="dash-page" id="page-fleet">
-        <h1 class="dash-page-title" id="fleetPageTitle">Partner Dashboard</h1>
-        <p id="fleetPageSub" style="font-size:14px;color:var(--grey-500);line-height:1.7;margin:-6px 0 20px;max-width:680px;">
-          Manage your fleet vehicles, invite approved A2B drivers, track live trip operations and monitor weekly revenue.
-        </p>
+        <div class="fleet-header-brand">
+          <div>
+            <h1 class="dash-page-title" id="fleetPageTitle" style="margin-bottom:4px;">Partner Dashboard</h1>
+            <p id="fleetPageSub" style="font-size:14px;color:var(--grey-500);line-height:1.7;margin:0 0 16px;max-width:680px;">
+              Manage your fleet vehicles, invite approved A2B drivers, track live trip operations and monitor weekly revenue.
+            </p>
+          </div>
+          <span class="fleet-brand-pill" id="fleetRoleBadge">A2B Fleet Partner</span>
+        </div>
+
+        <!-- Chauffeur / Driver Partner Mode Switch Hero -->
+        <div class="fleet-switch-hero" id="fleetSwitchHero" style="display:none;">
+          <div>
+            <div class="fleet-switch-hero-title">Driver Partner Access</div>
+            <p class="fleet-switch-hero-desc">You are viewing your Driver Partner Dashboard. Track your assigned fleet vehicles, live GPS operations, weekly customer fare earnings and driver network.</p>
+          </div>
+          <button class="btn btn-primary" onclick="showPage('rides')" style="background:#fff;color:#000;border-color:#fff;font-weight:700;white-space:nowrap;">Switch to My Rides</button>
+        </div>
 
         <!-- Executive KPI Cards -->
         <div class="fleet-kpi-grid">
@@ -551,66 +644,284 @@
           </div>
         </div>
 
-        <div class="driver-apply-card" style="margin-bottom:18px;">
-          <h3>Find an approved driver</h3>
-          <p>Search by name, phone or email. Only A2B-approved drivers appear here.</p>
-          <div style="display:flex;flex-direction:column;gap:14px;margin-bottom:16px;">
+        <!-- Fleet Tab Navigation Bar -->
+        <div class="fleet-tabs-bar">
+          <button class="fleet-tab-btn active" id="fleetTabBtn-earnings" onclick="setFleetTab('earnings')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            Overview &amp; Earnings
+          </button>
+          <button class="fleet-tab-btn" id="fleetTabBtn-map" onclick="setFleetTab('map')">
+            <span class="fleet-tab-pulse"></span>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+            Fleet Live Map
+          </button>
+          <button class="fleet-tab-btn" id="fleetTabBtn-vehicles" onclick="setFleetTab('vehicles')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+            Vehicles
+          </button>
+          <button class="fleet-tab-btn" id="fleetTabBtn-drivers" onclick="setFleetTab('drivers')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            Driver Management
+          </button>
+          <button class="fleet-tab-btn" id="fleetTabBtn-trips" onclick="setFleetTab('trips')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Fleet Trips
+          </button>
+        </div>
+
+        <!-- PANE 1: Overview & Earnings -->
+        <div class="fleet-tab-pane active" id="fleetTabPane-earnings">
+          <!-- Earnings Hero Banner -->
+          <div class="fleet-earnings-hero">
             <div>
-              <label style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--grey-400);display:block;margin-bottom:6px;">Search Driver</label>
-              <input type="text" id="fleetDriverSearch" placeholder="Search by name, phone, or email…" oninput="fleetSearchDebounced()" />
+              <div class="fleet-earnings-period" id="fleetEarningsPeriod">Current Week</div>
+              <div class="fleet-earnings-amount" id="fleetEarningsAmount">ZAR 0.00</div>
+              <div class="fleet-earnings-sub" id="fleetEarningsSub">Next payout Monday at 4:00 AM directly to verified bank account</div>
             </div>
-            <div>
-              <label style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--grey-400);display:block;margin-bottom:6px;">Invite Message (Optional)</label>
-              <textarea id="fleetInviteMessage" placeholder="Write an optional note to include with your invite (e.g. which vehicle they will be driving)…" rows="2"></textarea>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;z-index:2;">
+              <button class="btn btn-primary" onclick="openFleetPayoutModal()" style="background:#10b981;border-color:#10b981;color:#fff;font-weight:700;display:inline-flex;align-items:center;gap:6px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                Cash Out / Payout
+              </button>
+              <button class="btn btn-outline" onclick="loadFleetEarnings()" style="border-color:rgba(255,255,255,0.3);color:#fff;display:inline-flex;align-items:center;gap:6px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                Refresh
+              </button>
             </div>
           </div>
-          <div id="fleetSearchResults"><div class="empty-state"><p>Start typing to find drivers.</p></div></div>
-        </div>
 
-        <div class="driver-apply-card" style="margin-bottom:18px;">
-          <h3>Add a vehicle</h3>
-          <p>Register a car to your fleet. It goes to A2B for approval before you can assign a driver to it.</p>
-          <div class="ld-form-grid">
-            <div><label>Make</label><input type="text" id="vehMake" placeholder="e.g. Toyota" /></div>
-            <div><label>Model</label><input type="text" id="vehModel" placeholder="e.g. Quantum" /></div>
-            <div><label>Year</label><input type="number" id="vehYear" placeholder="e.g. 2020" /></div>
-            <div><label>Number plate</label><input type="text" id="vehPlate" placeholder="e.g. ABC123GP" /></div>
-            <div><label>Class</label>
-              <select id="vehType">
-                <option value="budget">Budget</option>
-                <option value="luxury">Luxury</option>
-                <option value="business">Business Class</option>
-                <option value="van">Van</option>
-                <option value="luxury_van">Luxury Van (V-Class)</option>
-              </select>
+          <!-- 7-Day Interactive Daily Earnings Bar Chart -->
+          <div class="fleet-chart-card">
+            <div class="fleet-chart-head">
+              <div>
+                <div class="fleet-chart-title">Daily Earnings Breakdown (Mon – Sun)</div>
+                <div style="font-size:12px;color:var(--grey-500);margin-top:2px;">Track revenue fluctuations across the current weekly cycle</div>
+              </div>
+              <div style="font-size:13px;color:var(--grey-700);font-weight:700;" id="fleetChartSummary">Total: ZAR 0.00 · 0 Trips</div>
             </div>
-            <div><label>Colour</label><input type="text" id="vehColor" placeholder="e.g. White" /></div>
-            <div><label>Passenger capacity</label><input type="number" id="vehPax" placeholder="4" /></div>
-            <div><label>Luggage capacity</label><input type="number" id="vehLuggage" placeholder="2" /></div>
+            <div class="fleet-chart-bars" id="fleetChartBars">
+              <!-- Rendered via JS -->
+            </div>
+            <div class="fleet-chart-stats">
+              <div class="fleet-chart-stat-item">
+                <div class="fleet-chart-stat-val" id="fleetStatTrips">0</div>
+                <div class="fleet-chart-stat-lbl">Completed Trips</div>
+              </div>
+              <div class="fleet-chart-stat-item">
+                <div class="fleet-chart-stat-val" id="fleetStatAvgFare">ZAR 0.00</div>
+                <div class="fleet-chart-stat-lbl">Average Net / Trip</div>
+              </div>
+              <div class="fleet-chart-stat-item">
+                <div class="fleet-chart-stat-val" style="color:#10b981;">85%</div>
+                <div class="fleet-chart-stat-lbl">Partner Net Share</div>
+              </div>
+            </div>
           </div>
-          <button class="btn btn-primary" id="addVehicleBtn" style="margin-top:14px;" onclick="addFleetVehicle()">Add vehicle for review</button>
+
+          <!-- Customer Fare Breakdown (Image 1 Ledger) -->
+          <div class="fleet-breakdown-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+              <h3 style="margin:0;">Customer fare breakdown</h3>
+              <span style="font-size:12px;font-weight:700;color:var(--grey-400);text-transform:uppercase;letter-spacing:0.05em;">Audited Cycle</span>
+            </div>
+            <div class="fleet-breakdown-row">
+              <span class="fleet-breakdown-label">Start balance</span>
+              <span class="fleet-breakdown-val" id="bkStartBalance">ZAR 0.00</span>
+            </div>
+            <div class="fleet-breakdown-div"></div>
+            <div class="fleet-breakdown-row">
+              <span class="fleet-breakdown-label">Total earnings</span>
+              <span class="fleet-breakdown-val" id="bkTotalEarnings">ZAR 0.00</span>
+            </div>
+            <div class="fleet-breakdown-div"></div>
+            <div class="fleet-breakdown-row">
+              <span class="fleet-breakdown-label">Refunds &amp; Expenses</span>
+              <span class="fleet-breakdown-val" id="bkRefunds">ZAR 0.00</span>
+            </div>
+            <div class="fleet-breakdown-div"></div>
+            <div class="fleet-breakdown-row">
+              <span class="fleet-breakdown-label">Adjustments from previous periods</span>
+              <span class="fleet-breakdown-val" id="bkAdjustments">ZAR 0.00</span>
+            </div>
+            <div class="fleet-breakdown-div"></div>
+            <div class="fleet-breakdown-row">
+              <span class="fleet-breakdown-label">Payout</span>
+              <span class="fleet-breakdown-val" id="bkPayout">ZAR 0.00</span>
+            </div>
+            <div class="fleet-breakdown-div-bold"></div>
+            <div class="fleet-breakdown-row fleet-breakdown-end">
+              <span>End Balance</span>
+              <span id="bkEndBalance">ZAR 0.00</span>
+            </div>
+            <div class="fleet-breakdown-div-bold"></div>
+          </div>
+
+          <!-- Policy Notice Card -->
+          <div class="fleet-notice-card">
+            <div class="fleet-notice-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+            </div>
+            <p class="fleet-notice-text">
+              An earnings week runs from Monday at 00:00 to Sunday at 23:59. Real-time trip earnings, customer fare shares, and platform adjustments update automatically. Verified payouts are disbursed on Mondays directly to your South African bank account.
+            </p>
+          </div>
+
+          <!-- Driver Net Earnings Section (Image 2) -->
+          <div class="fleet-drivernet-card">
+            <h3>Driver Net earnings</h3>
+            <p style="font-size:13px;color:var(--grey-500);margin:0 0 14px;">Review individual fare totals, platform commissions, and net earnings for each driver in your fleet.</p>
+            <div class="fleet-search-pill">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" id="fleetDriverNetSearch" placeholder="Search driver by name or phone…" oninput="filterFleetDriverNetTable()" />
+            </div>
+            <div style="overflow-x:auto;">
+              <table class="dash-table" style="width:100%;margin-top:0;">
+                <thead>
+                  <tr>
+                    <th>Driver</th>
+                    <th>Vehicle</th>
+                    <th style="text-align:center;">Trips</th>
+                    <th style="text-align:right;">Gross Fares</th>
+                    <th style="text-align:right;">Commission (15%)</th>
+                    <th style="text-align:right;">Net Earnings</th>
+                  </tr>
+                </thead>
+                <tbody id="fleetDriverNetTbody">
+                  <tr><td colspan="6" style="text-align:center;color:var(--grey-400);padding:24px;">Loading driver net earnings…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
-        <div class="driver-apply-card" style="margin-bottom:18px;">
-          <h3>Your vehicles</h3>
-          <p>Approved cars can be assigned to a driver. Pending cars are awaiting A2B review.</p>
-          <div id="fleetVehicles"><div class="empty-state"><p>Loading your vehicles…</p></div></div>
+        <!-- PANE 2: Fleet Live Map -->
+        <div class="fleet-tab-pane" id="fleetTabPane-map">
+          <div class="fleet-livemap-box">
+            <div class="fleet-livemap-top">
+              <div style="display:flex;align-items:center;gap:12px;">
+                <div class="fleet-livemap-badge">
+                  <span class="fleet-tab-pulse"></span>
+                  <span id="fleetLiveMapBadgeText">Tracking Fleet</span>
+                </div>
+                <span style="font-size:12px;color:var(--grey-500);" id="fleetLiveMapLastUpdate">Live auto-updating</span>
+              </div>
+              <div class="fleet-livemap-actions">
+                <input type="text" id="fleetLiveMapSearch" placeholder="Filter driver or car…" style="padding:6px 12px;border:1px solid var(--grey-300);border-radius:999px;font-size:13px;width:180px;" oninput="filterFleetLiveMapItems()" />
+                <button class="btn btn-outline btn-sm" onclick="loadFleetLiveMap()" style="display:inline-flex;align-items:center;gap:4px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                  Refresh Map
+                </button>
+              </div>
+            </div>
+            <div class="fleet-livemap-layout">
+              <div id="fleetLiveMap"></div>
+              <div class="fleet-livemap-sidebar" id="fleetMapDriverList">
+                <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--grey-400);margin-bottom:12px;letter-spacing:0.06em;">Fleet Drivers &amp; Vehicles</div>
+                <div id="fleetMapDriverItems"><div class="empty-state"><p>Loading live fleet positions…</p></div></div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="driver-apply-card" style="margin-bottom:18px;">
-          <h3>Invites you've sent</h3>
-          <div id="fleetSentInvites"><div class="empty-state"><p>No invites sent yet.</p></div></div>
+        <!-- PANE 3: Vehicles -->
+        <div class="fleet-tab-pane" id="fleetTabPane-vehicles">
+          <div class="driver-apply-card" style="margin-bottom:18px;">
+            <h3>Add a vehicle</h3>
+            <p>Register a car to your fleet. It goes to A2B for approval before you can assign a driver to it.</p>
+            <div class="ld-form-grid">
+              <div><label>Make</label><input type="text" id="vehMake" placeholder="e.g. Toyota" /></div>
+              <div><label>Model</label><input type="text" id="vehModel" placeholder="e.g. Quantum" /></div>
+              <div><label>Year</label><input type="number" id="vehYear" placeholder="e.g. 2020" /></div>
+              <div><label>Number plate</label><input type="text" id="vehPlate" placeholder="e.g. ABC123GP" /></div>
+              <div><label>Class</label>
+                <select id="vehType">
+                  <option value="budget">Budget</option>
+                  <option value="luxury">Luxury</option>
+                  <option value="business">Business Class</option>
+                  <option value="van">Van</option>
+                  <option value="luxury_van">Luxury Van (V-Class)</option>
+                </select>
+              </div>
+              <div><label>Colour</label><input type="text" id="vehColor" placeholder="e.g. White" /></div>
+              <div><label>Passenger capacity</label><input type="number" id="vehPax" placeholder="4" /></div>
+              <div><label>Luggage capacity</label><input type="number" id="vehLuggage" placeholder="2" /></div>
+            </div>
+            <button class="btn btn-primary" id="addVehicleBtn" style="margin-top:14px;" onclick="addFleetVehicle()">Add vehicle for review</button>
+          </div>
+
+          <div class="driver-apply-card" style="margin-bottom:18px;">
+            <h3>Your vehicles</h3>
+            <p>Approved cars can be assigned to a driver. Pending cars are awaiting A2B review.</p>
+            <div id="fleetVehicles"><div class="empty-state"><p>Loading your vehicles…</p></div></div>
+          </div>
         </div>
 
-        <div class="driver-apply-card" id="fleetReceivedCard" style="margin-bottom:18px;display:none;">
-          <h3>Invitations for you</h3>
-          <p>Another operator wants you to drive one of their vehicles.</p>
-          <div id="fleetReceivedInvites"></div>
+        <!-- PANE 4: Driver Management & Marketplace -->
+        <div class="fleet-tab-pane" id="fleetTabPane-drivers">
+          <div class="driver-apply-card" style="margin-bottom:18px;">
+            <h3>Find an approved driver</h3>
+            <p>Search by name, phone or email. Only A2B-approved drivers appear here.</p>
+            <div style="display:flex;flex-direction:column;gap:14px;margin-bottom:16px;">
+              <div>
+                <label style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--grey-400);display:block;margin-bottom:6px;">Search Driver</label>
+                <input type="text" id="fleetDriverSearch" placeholder="Search by name, phone, or email…" oninput="fleetSearchDebounced()" />
+              </div>
+              <div>
+                <label style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--grey-400);display:block;margin-bottom:6px;">Invite Message (Optional)</label>
+                <textarea id="fleetInviteMessage" placeholder="Write an optional note to include with your invite (e.g. which vehicle they will be driving)…" rows="2"></textarea>
+              </div>
+            </div>
+            <div id="fleetSearchResults"><div class="empty-state"><p>Start typing to find drivers.</p></div></div>
+          </div>
+
+          <div class="driver-apply-card" style="margin-bottom:18px;">
+            <h3>Invites you've sent</h3>
+            <div id="fleetSentInvites"><div class="empty-state"><p>No invites sent yet.</p></div></div>
+          </div>
+
+          <div class="driver-apply-card" id="fleetReceivedCard" style="margin-bottom:18px;display:none;">
+            <h3>Invitations for you</h3>
+            <p>Another operator wants you to drive one of their vehicles.</p>
+            <div id="fleetReceivedInvites"></div>
+          </div>
+
+          <div class="driver-apply-card">
+            <h3>Current assignments</h3>
+            <div id="fleetAssignments"><div class="empty-state"><p>No assignments yet.</p></div></div>
+          </div>
         </div>
 
-        <div class="driver-apply-card">
-          <h3>Current assignments</h3>
-          <div id="fleetAssignments"><div class="empty-state"><p>No assignments yet.</p></div></div>
+        <!-- PANE 5: Fleet Trips & Activity History -->
+        <div class="fleet-tab-pane" id="fleetTabPane-trips">
+          <div class="driver-apply-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+              <div>
+                <h3 style="margin:0;">Fleet Trips &amp; Activity</h3>
+                <p style="font-size:13px;color:var(--grey-500);margin:4px 0 0;">All completed and active rides across your fleet drivers and vehicles.</p>
+              </div>
+              <button class="btn btn-outline btn-sm" onclick="loadFleetTrips()" style="display:inline-flex;align-items:center;gap:4px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                Refresh Trips
+              </button>
+            </div>
+            <div style="overflow-x:auto;">
+              <table class="dash-table" style="width:100%;margin-top:0;">
+                <thead>
+                  <tr>
+                    <th>Date &amp; Time</th>
+                    <th>Route</th>
+                    <th>Driver</th>
+                    <th>Status</th>
+                    <th style="text-align:right;">Fare</th>
+                    <th style="text-align:right;">Net Amount</th>
+                  </tr>
+                </thead>
+                <tbody id="fleetTripsTbody">
+                  <tr><td colspan="6" style="text-align:center;color:var(--grey-400);padding:24px;">Loading fleet trips…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -659,6 +970,61 @@
       <div class="modal-actions">
         <button class="btn btn-ghost" onclick="closeTopup()">Cancel</button>
         <button class="btn btn-primary" onclick="confirmTopup()" style="display:flex;align-items:center;gap:8px;justify-content:center;"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>Pay with Credit/Debit card</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fleet Payout / Withdrawal Modal -->
+  <div class="modal-overlay" id="fleetPayoutModal">
+    <div class="modal-box" style="max-width:480px;">
+      <button class="modal-close" onclick="closeFleetPayoutModal()">×</button>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <div style="width:36px;height:36px;border-radius:10px;background:#ecfdf5;color:#10b981;display:flex;align-items:center;justify-content:center;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <div>
+          <h3 style="margin:0;font-size:18px;font-weight:800;">Withdraw Fleet Earnings</h3>
+          <div style="font-size:12px;color:var(--grey-500);">Direct transfer to verified South African bank</div>
+        </div>
+      </div>
+
+      <div style="background:var(--grey-50);border:1px solid var(--grey-200);border-radius:10px;padding:12px 16px;margin:16px 0;display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:13px;color:var(--grey-600);font-weight:600;">Available to withdraw:</span>
+        <span style="font-size:16px;font-weight:900;color:var(--black);" id="payoutAvailableBalance">ZAR 0.00</span>
+      </div>
+
+      <div class="modal-input-group" style="margin-bottom:12px;">
+        <label style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--grey-500);display:block;margin-bottom:4px;">Bank Name</label>
+        <select id="payoutBankSelect" style="width:100%;padding:10px 12px;border:1px solid var(--grey-200);border-radius:8px;font-size:14px;background:#fff;">
+          <option value="">Loading banks…</option>
+        </select>
+      </div>
+
+      <div class="modal-input-group" style="margin-bottom:12px;">
+        <label style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--grey-500);display:block;margin-bottom:4px;">Account Number</label>
+        <input type="text" id="payoutAccountNum" placeholder="e.g. 1234567890" style="width:100%;padding:10px 12px;border:1px solid var(--grey-200);border-radius:8px;font-size:14px;" />
+      </div>
+
+      <div class="modal-input-group" style="margin-bottom:12px;">
+        <label style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--grey-500);display:block;margin-bottom:4px;">Account Holder Name</label>
+        <input type="text" id="payoutAccountName" placeholder="e.g. S. Mokoena / Fleet Logistics (Pty) Ltd" style="width:100%;padding:10px 12px;border:1px solid var(--grey-200);border-radius:8px;font-size:14px;" />
+      </div>
+
+      <div class="modal-input-group" style="margin-bottom:16px;">
+        <label style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--grey-500);display:block;margin-bottom:4px;">Amount (ZAR)</label>
+        <div style="display:flex;gap:8px;">
+          <input type="number" id="payoutAmount" placeholder="e.g. 500" min="50" step="10" style="flex:1;padding:10px 12px;border:1px solid var(--grey-200);border-radius:8px;font-size:14px;" />
+          <button type="button" class="btn btn-outline btn-sm" onclick="setMaxPayoutAmount()" style="white-space:nowrap;padding:0 14px;">Use Max</button>
+        </div>
+      </div>
+
+      <div style="font-size:12px;color:var(--grey-400);margin-bottom:18px;line-height:1.5;">
+        Transfers are processed securely via Paystack Instant EFT. Funds reflect within 24 business hours.
+      </div>
+
+      <div class="modal-actions" style="display:flex;gap:10px;justify-content:flex-end;">
+        <button class="btn btn-ghost" onclick="closeFleetPayoutModal()">Cancel</button>
+        <button class="btn btn-primary" id="submitPayoutBtn" onclick="submitFleetPayout()" style="background:#10b981;border-color:#10b981;color:#fff;font-weight:700;">Initiate Payout</button>
       </div>
     </div>
   </div>
@@ -1455,7 +1821,22 @@
     }
 
     // ── Fleet & Drivers ──────────────────────────────────────────────────────
-    const fleetState = { profile: null, selectedVehicleId: '', vehicles: [], searchTimer: null };
+    const fleetState = {
+      profile: null,
+      selectedVehicleId: '',
+      vehicles: [],
+      searchTimer: null,
+      activeTab: 'earnings',
+      earningsData: null,
+      mapInstance: null,
+      mapMarkers: [],
+      mapInterval: null,
+      userHasPannedMap: false,
+      allDriversNet: [],
+      allLiveDrivers: [],
+      allFleetRides: [],
+      banks: [],
+    };
 
     function fleetToken() { return localStorage.getItem('a2b_token'); }
     async function fleetFetch(path, opts = {}) {
@@ -1498,10 +1879,39 @@
       }
     }
 
+    function setFleetTab(tabName) {
+      fleetState.activeTab = tabName;
+      ['earnings', 'map', 'vehicles', 'drivers', 'trips'].forEach(t => {
+        const btn = document.getElementById(`fleetTabBtn-${t}`);
+        const pane = document.getElementById(`fleetTabPane-${t}`);
+        if (btn) btn.classList.toggle('active', t === tabName);
+        if (pane) pane.classList.toggle('active', t === tabName);
+      });
+
+      if (tabName === 'map') {
+        initOrResizeFleetMap();
+        loadFleetLiveMap();
+        if (!fleetState.mapInterval) {
+          fleetState.mapInterval = setInterval(loadFleetLiveMap, 10000);
+        }
+      } else {
+        if (fleetState.mapInterval) {
+          clearInterval(fleetState.mapInterval);
+          fleetState.mapInterval = null;
+        }
+      }
+
+      if (tabName === 'earnings') {
+        loadFleetEarnings();
+      } else if (tabName === 'trips') {
+        loadFleetTrips();
+      }
+    }
+
     async function loadFleet() {
       try {
         const [vehicleData, assignmentData, inviteData, overviewData, earningsData] = await Promise.all([
-          fleetFetch('/api/vehicles'),
+          fleetFetch('/api/vehicles').catch(() => ({ vehicles: [] })),
           fleetFetch('/api/fleet/assignments').catch(() => ({ assignments: [] })),
           fleetFetch('/api/fleet/invites').catch(() => ({ sentInvites: [], receivedInvites: [] })),
           fleetFetch('/api/fleet/overview').catch(() => null),
@@ -1521,6 +1931,16 @@
             : 'Manage your fleet vehicles, invite approved A2B drivers, track live trip operations and monitor weekly revenue.';
         }
 
+        const roleBadge = document.getElementById('fleetRoleBadge');
+        if (roleBadge) {
+          roleBadge.textContent = isDriver ? 'A2B Driver Partner' : 'A2B Fleet Partner';
+        }
+
+        const switchHero = document.getElementById('fleetSwitchHero');
+        if (switchHero) {
+          switchHero.style.display = isDriver ? 'flex' : 'none';
+        }
+
         const kpiVehicles = document.getElementById('kpiFleetVehicles');
         if (kpiVehicles) kpiVehicles.textContent = overviewData?.overview?.vehicles ?? owned.length;
         const kpiDrivers = document.getElementById('kpiFleetDrivers');
@@ -1529,7 +1949,7 @@
         if (kpiTrips) kpiTrips.textContent = overviewData?.overview?.activeTrips ?? 0;
         const kpiRevenue = document.getElementById('kpiFleetRevenue');
         if (kpiRevenue) {
-          const rev = Number(earningsData?.payout ?? earningsData?.totalGrossFares ?? 0);
+          const rev = Number(earningsData?.payout ?? earningsData?.totalFleetNetEarnings ?? earningsData?.totalEarnings ?? 0);
           kpiRevenue.textContent = `ZAR ${rev.toFixed(2)}`;
         }
 
@@ -1537,8 +1957,406 @@
         renderFleetAssignments(assignmentData.assignments || []);
         renderFleetSentInvites(inviteData.sentInvites || []);
         renderFleetReceivedInvites(inviteData.receivedInvites || []);
+
+        if (earningsData) {
+          renderFleetEarnings(earningsData);
+        } else {
+          loadFleetEarnings();
+        }
       } catch (e) {
         showNotification(e.message || 'Could not load fleet.', 'error');
+      }
+    }
+
+    async function loadFleetEarnings() {
+      try {
+        const data = await fleetFetch('/api/fleet/earnings-summary');
+        fleetState.earningsData = data;
+        renderFleetEarnings(data);
+      } catch (e) {
+        // silent
+      }
+    }
+
+    function renderFleetEarnings(data) {
+      if (!data) return;
+      fleetState.earningsData = data;
+
+      const periodEl = document.getElementById('fleetEarningsPeriod');
+      if (periodEl) periodEl.textContent = data.period || 'Current Week';
+
+      const totalNet = Number(data.totalFleetNetEarnings ?? data.totalEarnings ?? 0);
+      const amountEl = document.getElementById('fleetEarningsAmount');
+      if (amountEl) amountEl.textContent = `ZAR ${totalNet.toFixed(2)}`;
+
+      const subEl = document.getElementById('fleetEarningsSub');
+      if (subEl) {
+        subEl.textContent = `Next payout ${data.nextPayoutLabel || 'Monday at 4:00 AM'} directly to verified bank account`;
+      }
+
+      const startBal = Number(data.startBalance ?? 0);
+      const totalEarn = Number(data.totalEarnings ?? totalNet);
+      const refunds = Number(data.refundsAndExpenses ?? 0);
+      const adjustments = Number(data.adjustmentsFromPreviousPeriods ?? 0);
+      const payoutVal = Number(data.payout ?? 0);
+      const endBal = Number(data.endBalance ?? Math.max(0, startBal + totalEarn - refunds + adjustments - payoutVal));
+
+      const setVal = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = `ZAR ${Number(val).toFixed(2)}`;
+      };
+      setVal('bkStartBalance', startBal);
+      setVal('bkTotalEarnings', totalEarn);
+      setVal('bkRefunds', refunds);
+      setVal('bkAdjustments', adjustments);
+      setVal('bkPayout', payoutVal);
+      setVal('bkEndBalance', endBal);
+
+      const availBal = document.getElementById('payoutAvailableBalance');
+      if (availBal) availBal.textContent = `ZAR ${endBal.toFixed(2)}`;
+
+      const daily = Array.isArray(data.dailyEarnings) && data.dailyEarnings.length === 7
+        ? data.dailyEarnings
+        : [
+            { dayName: 'Mon', dateNum: '', amount: 0, tripsCount: 0 },
+            { dayName: 'Tue', dateNum: '', amount: 0, tripsCount: 0 },
+            { dayName: 'Wed', dateNum: '', amount: 0, tripsCount: 0 },
+            { dayName: 'Thu', dateNum: '', amount: 0, tripsCount: 0 },
+            { dayName: 'Fri', dateNum: '', amount: 0, tripsCount: 0 },
+            { dayName: 'Sat', dateNum: '', amount: 0, tripsCount: 0 },
+            { dayName: 'Sun', dateNum: '', amount: 0, tripsCount: 0 },
+          ];
+
+      const maxDaily = Math.max(10, ...daily.map(d => Number(d.amount) || 0));
+      const chartBarsEl = document.getElementById('fleetChartBars');
+      if (chartBarsEl) {
+        chartBarsEl.innerHTML = daily.map(d => {
+          const amt = Number(d.amount) || 0;
+          const pct = Math.max(6, Math.min(100, (amt / maxDaily) * 100));
+          const highlight = amt > 0;
+          return `<div class="fleet-chart-col" title="${escapeHtml(d.dayName)}: ZAR ${amt.toFixed(2)} (${d.tripsCount || 0} trips)">
+            <div class="fleet-chart-val">${amt > 0 ? 'R' + Math.round(amt) : ''}</div>
+            <div class="fleet-chart-bar ${highlight ? 'highlight' : ''}" style="height:${pct}%;"></div>
+            <div class="fleet-chart-day">${escapeHtml(d.dayName)}</div>
+          </div>`;
+        }).join('');
+      }
+
+      const totalTrips = daily.reduce((sum, d) => sum + (d.tripsCount || 0), 0) || (data.activeTripsCount || 0);
+      const avgFare = totalTrips > 0 ? totalNet / totalTrips : 0;
+
+      const summaryEl = document.getElementById('fleetChartSummary');
+      if (summaryEl) summaryEl.textContent = `Total: ZAR ${totalNet.toFixed(2)} · ${totalTrips} Trips`;
+
+      const statTripsEl = document.getElementById('fleetStatTrips');
+      if (statTripsEl) statTripsEl.textContent = totalTrips;
+
+      const statAvgFareEl = document.getElementById('fleetStatAvgFare');
+      if (statAvgFareEl) statAvgFareEl.textContent = `ZAR ${avgFare.toFixed(2)}`;
+
+      fleetState.allDriversNet = Array.isArray(data.drivers) ? data.drivers : [];
+      renderFleetDriverNetTable(fleetState.allDriversNet);
+    }
+
+    function renderFleetDriverNetTable(drivers) {
+      const tbody = document.getElementById('fleetDriverNetTbody');
+      if (!tbody) return;
+      if (!drivers.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--grey-400);padding:24px;">No driver earnings recorded this cycle.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = drivers.map(d => {
+        const name = d.driverName || 'Driver';
+        const phone = d.driverPhone || '';
+        const vehicle = d.vehicle || 'Assigned Car';
+        const trips = d.totalTrips || 0;
+        const gross = Number(d.grossFares || 0).toFixed(2);
+        const comm = Number(d.commissionTotal || 0).toFixed(2);
+        const net = Number(d.netEarnings || 0).toFixed(2);
+
+        return `<tr>
+          <td>
+            <div style="font-weight:700;color:var(--grey-900);">${escapeHtml(name)}</div>
+            ${phone ? `<div style="font-size:12px;color:var(--grey-400);">${escapeHtml(phone)}</div>` : ''}
+          </td>
+          <td style="font-size:13px;color:var(--grey-700);">${escapeHtml(vehicle)}</td>
+          <td style="text-align:center;font-weight:700;">${trips}</td>
+          <td style="text-align:right;color:var(--grey-600);">ZAR ${gross}</td>
+          <td style="text-align:right;color:#dc2626;">-ZAR ${comm}</td>
+          <td style="text-align:right;font-weight:800;color:#16a34a;">ZAR ${net}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function filterFleetDriverNetTable() {
+      const q = (document.getElementById('fleetDriverNetSearch')?.value || '').trim().toLowerCase();
+      if (!q) {
+        renderFleetDriverNetTable(fleetState.allDriversNet);
+        return;
+      }
+      const filtered = fleetState.allDriversNet.filter(d => {
+        const target = [d.driverName, d.driverPhone, d.vehicle].filter(Boolean).join(' ').toLowerCase();
+        return target.includes(q);
+      });
+      renderFleetDriverNetTable(filtered);
+    }
+
+    function initOrResizeFleetMap() {
+      if (!fleetState.mapInstance) {
+        const mapContainer = document.getElementById('fleetLiveMap');
+        if (!mapContainer || typeof L === 'undefined') return;
+        fleetState.mapInstance = L.map('fleetLiveMap', {
+          zoomControl: true,
+          scrollWheelZoom: true
+        }).setView([-26.2041, 28.0473], 11);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '© OpenStreetMap contributors'
+        }).addTo(fleetState.mapInstance);
+      }
+      setTimeout(() => {
+        if (fleetState.mapInstance) fleetState.mapInstance.invalidateSize();
+      }, 100);
+    }
+
+    async function loadFleetLiveMap() {
+      try {
+        const data = await fleetFetch('/api/fleet/live-locations');
+        fleetState.allLiveDrivers = data.drivers || [];
+        renderFleetLiveMap(data);
+      } catch (e) {
+        // silent
+      }
+    }
+
+    function renderFleetLiveMap(data) {
+      const drivers = data.drivers || [];
+      const vehicles = data.vehicles || [];
+      const onlineCount = data.onlineDrivers || drivers.filter(d => d.isOnline).length;
+      const totalCount = data.totalDrivers || drivers.length;
+
+      const badgeText = document.getElementById('fleetLiveMapBadgeText');
+      if (badgeText) {
+        badgeText.textContent = `${onlineCount} of ${totalCount} Drivers Online`;
+      }
+      const lastUpdate = document.getElementById('fleetLiveMapLastUpdate');
+      if (lastUpdate) {
+        lastUpdate.textContent = `Updated ${new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+      }
+
+      renderFleetMapDriverSidebar(drivers);
+
+      if (!fleetState.mapInstance || typeof L === 'undefined') return;
+
+      (fleetState.mapMarkers || []).forEach(m => fleetState.mapInstance.removeLayer(m));
+      fleetState.mapMarkers = [];
+
+      const bounds = [];
+
+      drivers.forEach(d => {
+        const lat = Number(d.latitude || d.location?.latitude || d.location?.lat);
+        const lng = Number(d.longitude || d.location?.longitude || d.location?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+        bounds.push([lat, lng]);
+
+        const isTrip = Boolean(d.inTrip || d.activeRideId);
+        const isOnline = Boolean(d.isOnline);
+        const color = isTrip ? '#eab308' : (isOnline ? '#10b981' : '#94a3b8');
+        const statusLabel = isTrip ? 'On Trip' : (isOnline ? 'Online' : 'Offline');
+
+        const carIcon = L.divIcon({
+          className: 'fleet-map-custom-marker',
+          html: `<div style="width:34px;height:34px;border-radius:50%;background:${color};border:2px solid #ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;color:#ffffff;font-size:16px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.85 7h10.29l1.04 3H5.81l1.04-3zM19 17H5v-4.66l.12-.34h13.77l.11.34V17z"/><circle cx="7.5" cy="14.5" r="1.5"/><circle cx="16.5" cy="14.5" r="1.5"/></svg>
+          </div>`,
+          iconSize: [34, 34],
+          iconAnchor: [17, 17],
+          popupAnchor: [0, -18]
+        });
+
+        const vehLabel = d.vehicle ? `${d.vehicle.make || ''} ${d.vehicle.model || ''} (${d.vehicle.plateNumber || ''})` : 'Vehicle';
+        const popupContent = `<div style="font-family:Inter,sans-serif;min-width:180px;">
+          <div style="font-weight:800;font-size:14px;color:#111;">${escapeHtml(d.name || 'Driver')}</div>
+          <div style="font-size:12px;color:#666;margin:2px 0 6px;">${escapeHtml(vehLabel)}</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">
+            <span class="fleet-status-pill ${isTrip ? 'trip' : (isOnline ? 'online' : 'offline')}">${statusLabel}</span>
+            ${d.phone ? `<a href="tel:${escapeHtml(d.phone)}" style="font-size:12px;color:#059669;font-weight:700;text-decoration:none;">Call</a>` : ''}
+          </div>
+        </div>`;
+
+        const marker = L.marker([lat, lng], { icon: carIcon }).bindPopup(popupContent).addTo(fleetState.mapInstance);
+        fleetState.mapMarkers.push(marker);
+      });
+
+      if (bounds.length > 0 && !fleetState.userHasPannedMap) {
+        fleetState.mapInstance.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+      }
+    }
+
+    function renderFleetMapDriverSidebar(drivers) {
+      const box = document.getElementById('fleetMapDriverItems');
+      if (!box) return;
+      if (!drivers.length) {
+        box.innerHTML = '<div class="empty-state"><p>No fleet drivers reported location yet.</p></div>';
+        return;
+      }
+      box.innerHTML = drivers.map(d => {
+        const isTrip = Boolean(d.inTrip || d.activeRideId);
+        const isOnline = Boolean(d.isOnline);
+        const statusClass = isTrip ? 'trip' : (isOnline ? 'online' : 'offline');
+        const statusLabel = isTrip ? '🟡 On Trip' : (isOnline ? '🟢 Online' : '⚪ Offline');
+        const veh = d.vehicle ? `${d.vehicle.make || ''} ${d.vehicle.model || ''}`.trim() : 'Vehicle';
+        const plate = d.vehicle?.plateNumber || '';
+        const lat = Number(d.latitude || d.location?.latitude || d.location?.lat);
+        const lng = Number(d.longitude || d.location?.longitude || d.location?.lng);
+        const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+
+        return `<div class="fleet-live-driver-item" onclick="${hasCoords ? `focusFleetMap(${lat}, ${lng})` : ''}">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div>
+              <div style="font-weight:700;font-size:14px;color:var(--grey-900);">${escapeHtml(d.name || 'Driver')}</div>
+              <div style="font-size:12px;color:var(--grey-500);">${escapeHtml(veh)}${plate ? ' · ' + escapeHtml(plate) : ''}</div>
+            </div>
+            <span class="fleet-status-pill ${statusClass}">${statusLabel}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:12px;">
+            ${d.phone ? `<a href="tel:${escapeHtml(d.phone)}" onclick="event.stopPropagation();" style="color:var(--primary);font-weight:600;text-decoration:none;">📞 Call</a>` : '<span></span>'}
+            ${hasCoords ? `<span style="color:#2563eb;font-weight:600;">Locate on map →</span>` : '<span style="color:var(--grey-400);">No GPS</span>'}
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function focusFleetMap(lat, lng) {
+      if (!fleetState.mapInstance) return;
+      fleetState.userHasPannedMap = true;
+      fleetState.mapInstance.setView([lat, lng], 15, { animate: true });
+    }
+
+    function filterFleetLiveMapItems() {
+      const q = (document.getElementById('fleetLiveMapSearch')?.value || '').trim().toLowerCase();
+      if (!q) {
+        renderFleetMapDriverSidebar(fleetState.allLiveDrivers);
+        return;
+      }
+      const filtered = fleetState.allLiveDrivers.filter(d => {
+        const target = [d.name, d.phone, d.vehicle?.make, d.vehicle?.model, d.vehicle?.plateNumber].filter(Boolean).join(' ').toLowerCase();
+        return target.includes(q);
+      });
+      renderFleetMapDriverSidebar(filtered);
+    }
+
+    async function loadFleetTrips() {
+      const tbody = document.getElementById('fleetTripsTbody');
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--grey-400);padding:24px;">Loading fleet rides…</td></tr>';
+      try {
+        const data = await fleetFetch('/api/fleet/rides');
+        const rides = data.rides || [];
+        fleetState.allFleetRides = rides;
+        renderFleetTrips(rides);
+      } catch (e) {
+        if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--grey-400);padding:24px;">${escapeHtml(e.message || 'Could not load rides')}</td></tr>`;
+      }
+    }
+
+    function renderFleetTrips(rides) {
+      const tbody = document.getElementById('fleetTripsTbody');
+      if (!tbody) return;
+      if (!rides.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--grey-400);padding:24px;">No trips found across your fleet vehicles yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rides.map(r => {
+        const dateStr = r.createdAt ? new Date(r.createdAt).toLocaleString('en-ZA', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+        const pickup = r.pickupAddress || 'Pickup';
+        const dropoff = r.dropoffAddress || 'Dropoff';
+        const driver = r.driverName || 'Driver';
+        const fare = Number(r.grossFare || r.price || 0).toFixed(2);
+        const net = Number(r.netEarnings || (r.price * 0.85) || 0).toFixed(2);
+        const isCompleted = r.status === 'completed' || r.status === 'trip_completed';
+        const statusBadge = isCompleted ? '<span class="status-pill status-completed">Completed</span>' : `<span class="status-pill status-active">${escapeHtml(r.status || 'Active')}</span>`;
+
+        return `<tr>
+          <td style="white-space:nowrap;font-size:13px;color:var(--grey-600);">${escapeHtml(dateStr)}</td>
+          <td style="max-width:240px;">
+            <div style="font-weight:600;font-size:13px;color:var(--grey-900);text-overflow:ellipsis;overflow:hidden;white-space:nowrap;">📍 ${escapeHtml(pickup)}</div>
+            <div style="font-size:12px;color:var(--grey-500);text-overflow:ellipsis;overflow:hidden;white-space:nowrap;">🏁 ${escapeHtml(dropoff)}</div>
+          </td>
+          <td style="font-size:13px;font-weight:600;">${escapeHtml(driver)}</td>
+          <td>${statusBadge}</td>
+          <td style="text-align:right;font-size:13px;color:var(--grey-600);">ZAR ${fare}</td>
+          <td style="text-align:right;font-size:14px;font-weight:800;color:#16a34a;">ZAR ${net}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    async function openFleetPayoutModal() {
+      const modal = document.getElementById('fleetPayoutModal');
+      if (modal) modal.classList.add('active');
+
+      const availBal = Number(fleetState.earningsData?.endBalance ?? 0);
+      const availEl = document.getElementById('payoutAvailableBalance');
+      if (availEl) availEl.textContent = `ZAR ${availBal.toFixed(2)}`;
+
+      const select = document.getElementById('payoutBankSelect');
+      if (select && (!fleetState.banks || !fleetState.banks.length)) {
+        try {
+          const res = await fetch(`${API}/api/wallet/banks`);
+          fleetState.banks = await res.json();
+          select.innerHTML = '<option value="">Select South African bank…</option>' +
+            fleetState.banks.map(b => `<option value="${escapeHtml(b.code)}" data-name="${escapeHtml(b.name)}">${escapeHtml(b.name)}</option>`).join('');
+        } catch (e) {
+          select.innerHTML = '<option value="">Failed to load banks</option>';
+        }
+      }
+    }
+
+    function closeFleetPayoutModal() {
+      const modal = document.getElementById('fleetPayoutModal');
+      if (modal) modal.classList.remove('active');
+    }
+
+    function setMaxPayoutAmount() {
+      const availBal = Number(fleetState.earningsData?.endBalance ?? 0);
+      const input = document.getElementById('payoutAmount');
+      if (input) input.value = Math.max(0, availBal);
+    }
+
+    async function submitFleetPayout() {
+      const select = document.getElementById('payoutBankSelect');
+      const bankCode = select?.value;
+      const bankName = select?.options[select.selectedIndex]?.dataset?.name || select?.options[select.selectedIndex]?.text || '';
+      const accountNumber = document.getElementById('payoutAccountNum')?.value?.trim();
+      const accountName = document.getElementById('payoutAccountName')?.value?.trim();
+      const amount = parseFloat(document.getElementById('payoutAmount')?.value || '0');
+      const availBal = Number(fleetState.earningsData?.endBalance ?? 0);
+
+      if (!bankCode) { showNotification('Please select your bank.', 'error'); return; }
+      if (!accountNumber) { showNotification('Please enter your account number.', 'error'); return; }
+      if (!accountName) { showNotification('Please enter the account holder name.', 'error'); return; }
+      if (!amount || amount <= 0) { showNotification('Please enter a valid payout amount.', 'error'); return; }
+      if (amount > availBal && availBal > 0) {
+        showNotification(`Amount exceeds your available balance of ZAR ${availBal.toFixed(2)}.`, 'error');
+        return;
+      }
+
+      const btn = document.getElementById('submitPayoutBtn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Processing…'; }
+
+      try {
+        const res = await fleetFetch('/api/wallet/withdraw', {
+          method: 'POST',
+          body: JSON.stringify({ amount, bankCode, bankName, accountNumber, accountName }),
+        });
+        showNotification(res.message || 'Payout transfer initiated successfully.', 'success');
+        closeFleetPayoutModal();
+        await loadFleet();
+      } catch (e) {
+        showNotification(e.message || 'Payout failed. Please verify bank details.', 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Initiate Payout'; }
       }
     }
 

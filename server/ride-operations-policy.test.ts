@@ -592,3 +592,76 @@ test("chauffeur Driver partner dashboard, full mobile earnings suite (Images 1-4
   assert.match(dashboardHtml, /Driver Partner Dashboard/);
 });
 
+test("website partner dashboard provides complete parity with mobile driver partner suite", () => {
+  const dashboardHtml = readFileSync(resolve(process.cwd(), "website/dashboard.html"), "utf-8");
+  const routesSource = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
+
+  // 1. Tabbed Navigation Bar & Panes
+  assert.match(dashboardHtml, /class="fleet-tabs-bar"/);
+  assert.match(dashboardHtml, /id="fleetTabBtn-earnings"/);
+  assert.match(dashboardHtml, /id="fleetTabBtn-map"/);
+  assert.match(dashboardHtml, /id="fleetTabBtn-vehicles"/);
+  assert.match(dashboardHtml, /id="fleetTabBtn-drivers"/);
+  assert.match(dashboardHtml, /id="fleetTabBtn-trips"/);
+
+  assert.match(dashboardHtml, /id="fleetTabPane-earnings"/);
+  assert.match(dashboardHtml, /id="fleetTabPane-map"/);
+  assert.match(dashboardHtml, /id="fleetTabPane-vehicles"/);
+  assert.match(dashboardHtml, /id="fleetTabPane-drivers"/);
+  assert.match(dashboardHtml, /id="fleetTabPane-trips"/);
+
+  // 2. Chauffeur / Driver Partner Mode Switch Hero
+  assert.match(dashboardHtml, /id="fleetSwitchHero"/);
+  assert.match(dashboardHtml, /Switch to My Rides/);
+
+  // 3. Earnings Hero & 7-Day Bar Chart
+  assert.match(dashboardHtml, /id="fleetEarningsPeriod"/);
+  assert.match(dashboardHtml, /id="fleetEarningsAmount"/);
+  assert.match(dashboardHtml, /id="fleetEarningsSub"/);
+  assert.match(dashboardHtml, /id="fleetChartBars"/);
+  assert.match(dashboardHtml, /id="fleetStatTrips"/);
+  assert.match(dashboardHtml, /id="fleetStatAvgFare"/);
+
+  // 4. Exact 6-row Customer Fare Breakdown Table
+  assert.match(dashboardHtml, /Customer fare breakdown/);
+  assert.match(dashboardHtml, /id="bkStartBalance"/);
+  assert.match(dashboardHtml, /id="bkTotalEarnings"/);
+  assert.match(dashboardHtml, /id="bkRefunds"/);
+  assert.match(dashboardHtml, /id="bkAdjustments"/);
+  assert.match(dashboardHtml, /id="bkPayout"/);
+  assert.match(dashboardHtml, /id="bkEndBalance"/);
+
+  // 5. Policy Notice Card
+  assert.match(dashboardHtml, /class="fleet-notice-card"/);
+  assert.match(dashboardHtml, /class="fleet-notice-text"/);
+  assert.match(dashboardHtml, /An earnings week runs from Monday at 00:00 to Sunday at 23:59/);
+
+  // 6. Driver Net Earnings Table with live search
+  assert.match(dashboardHtml, /id="fleetDriverNetSearch"/);
+  assert.match(dashboardHtml, /id="fleetDriverNetTbody"/);
+  assert.match(dashboardHtml, /filterFleetDriverNetTable/);
+
+  // 7. Interactive Leaflet Live Map & Sidebar
+  assert.match(dashboardHtml, /id="fleetLiveMap"/);
+  assert.match(dashboardHtml, /id="fleetLiveMapBadgeText"/);
+  assert.match(dashboardHtml, /id="fleetMapDriverItems"/);
+  assert.match(dashboardHtml, /leaflet\.js/);
+  assert.match(dashboardHtml, /initOrResizeFleetMap/);
+  assert.match(dashboardHtml, /loadFleetLiveMap/);
+
+  // 8. Instant Bank Payout Modal
+  assert.match(dashboardHtml, /id="fleetPayoutModal"/);
+  assert.match(dashboardHtml, /id="payoutBankSelect"/);
+  assert.match(dashboardHtml, /id="payoutAccountNum"/);
+  assert.match(dashboardHtml, /id="payoutAccountName"/);
+  assert.match(dashboardHtml, /id="payoutAmount"/);
+  assert.match(dashboardHtml, /id="payoutAvailableBalance"/);
+  assert.match(dashboardHtml, /submitFleetPayout/);
+
+  // 9. Backend Endpoints for Fleet Rides and Daily Earnings Breakdown
+  assert.match(routesSource, /app\.get\("\/api\/fleet\/rides"/);
+  assert.match(routesSource, /dailyEarnings/);
+  assert.match(routesSource, /nextPayoutLabel/);
+});
+
+

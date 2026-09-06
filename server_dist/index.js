@@ -7427,7 +7427,7 @@ If you did not request this, you can ignore this email.`,
         assignedByOperatorProfileId: profile.id
       });
       assignments.forEach((a) => vehicleIds.add(a.vehicleId));
-      const { weekStart, weekEnd, periodLabel } = getEarningsWeekBounds();
+      const { weekStart, weekEnd, periodLabel, days, dayDates, nextPayoutLabel } = getEarningsWeekBounds();
       const driverProfiles = await Promise.all(
         assignments.map((a) => storage.getOperatorProfile(a.driverOperatorProfileId))
       );
@@ -7511,10 +7511,39 @@ If you did not request this, you can ignore this email.`,
       const refundsAndExpenses = 0;
       const adjustmentsFromPreviousPeriods = 0;
       const endBalance = Math.max(0, Math.round((startBalance + totalEarnings - refundsAndExpenses - totalPayouts + adjustmentsFromPreviousPeriods) * 100) / 100);
+      const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+      const dailyEarnings = (days || []).map((dateNum, i) => {
+        const dayDate = dayDates[i] || /* @__PURE__ */ new Date();
+        const dayStart = new Date(dayDate);
+        dayStart.setUTCHours(2, 0, 0, 0);
+        const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1e3 - 1);
+        const dayRides = allRides.filter((r) => {
+          if (!driverEarningsList.some((d) => d.chauffeurId === r.chauffeurId || d.driverOperatorProfileId === r.driverOperatorProfileId)) return false;
+          if (r.status !== "trip_completed" && r.status !== "completed") return false;
+          const completedAt = r.completedAt ? new Date(r.completedAt) : r.createdAt ? new Date(r.createdAt) : null;
+          if (!completedAt) return false;
+          return completedAt >= dayStart && completedAt <= dayEnd;
+        });
+        const gross = dayRides.reduce((sum, r) => sum + (parseFloat(r.price) || 0), 0);
+        const comm = dayRides.reduce((sum, r) => {
+          const fare = parseFloat(r.price) || 0;
+          const rate = parseFloat(r.commissionRate) || 0.15;
+          return sum + fare * rate;
+        }, 0);
+        const net = Math.max(0, gross - comm);
+        return {
+          dayIndex: i,
+          dayName: dayNames[i] || `Day ${i + 1}`,
+          dateNum: dateNum || "",
+          amount: Math.round(net * 100) / 100,
+          tripsCount: dayRides.length
+        };
+      });
       return res.json({
         period: periodLabel,
         weekStart: weekStart.toISOString(),
         weekEnd: weekEnd.toISOString(),
+        nextPayoutLabel,
         startBalance,
         totalEarnings,
         refundsAndExpenses,
@@ -7522,6 +7551,7 @@ If you did not request this, you can ignore this email.`,
         payout: Math.round(totalPayouts * 100) / 100,
         endBalance,
         totalFleetNetEarnings,
+        dailyEarnings,
         drivers: driverEarningsList,
         totalDrivers: driverEarningsList.length,
         activeTripsCount: allRides.filter(
@@ -7532,9 +7562,66 @@ If you did not request this, you can ignore this email.`,
       return res.status(500).json({ message: error.message || "Failed to load fleet earnings summary" });
     }
   });
+  app2.get("/api/fleet/rides", requireAuth, async (req, res) => {
+    try {
+      let profile = await storage.getOperatorProfileByUserId(req.auth.sub);
+      if (!profile) {
+        const chauffeur2 = await storage.getChauffeurByUserId(req.auth.sub);
+        if (chauffeur2) {
+          profile = await ensureOperatorProfileForUser(req.auth.sub, "driver");
+        }
+      }
+      if (!profile) return res.status(404).json({ message: "Operator profile not found" });
+      if (profile.type !== "partner" && profile.type !== "driver" || profile.status !== "approved") {
+        return res.status(403).json({ message: "Fleet rides are reserved for approved fleet partners and driver partners." });
+      }
+      const assignments = await storage.getVehicleAssignments({
+        assignedByOperatorProfileId: profile.id
+      });
+      const driverProfileIds = new Set(assignments.map((a) => a.driverOperatorProfileId));
+      driverProfileIds.add(profile.id);
+      const allRides = await storage.getAllRides();
+      const chauffeurProfiles = await Promise.all(
+        Array.from(driverProfileIds).map(async (dpId) => {
+          const dp = await storage.getOperatorProfile(dpId);
+          if (!dp) return null;
+          const ch = await storage.getChauffeurByUserId(dp.userId);
+          const u = await storage.getUser(dp.userId);
+          return { dpId, chauffeurId: ch?.id, user: u };
+        })
+      );
+      const validChauffeurs = chauffeurProfiles.filter(Boolean);
+      const chauffeurIdMap = new Map(validChauffeurs.map((c) => [c.chauffeurId, c]));
+      const fleetRides = allRides.filter((r) => {
+        return chauffeurIdMap.has(r.chauffeurId) || driverProfileIds.has(r.driverOperatorProfileId);
+      }).map((r) => {
+        const c = chauffeurIdMap.get(r.chauffeurId);
+        const fare = parseFloat(r.price) || 0;
+        const commRate = parseFloat(r.commissionRate) || 0.15;
+        const commission = fare * commRate;
+        const net = Math.max(0, fare - commission);
+        return {
+          ...r,
+          driverName: c?.user?.name || "Assigned Driver",
+          grossFare: Math.round(fare * 100) / 100,
+          commission: Math.round(commission * 100) / 100,
+          netEarnings: Math.round(net * 100) / 100
+        };
+      }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      return res.json({ rides: fleetRides });
+    } catch (e) {
+      return res.status(500).json({ message: e.message || "Failed to load fleet rides" });
+    }
+  });
   app2.get("/api/fleet/live-locations", requireAuth, async (req, res) => {
     try {
-      const profile = await storage.getOperatorProfileByUserId(req.auth.sub);
+      let profile = await storage.getOperatorProfileByUserId(req.auth.sub);
+      if (!profile) {
+        const chauffeur2 = await storage.getChauffeurByUserId(req.auth.sub);
+        if (chauffeur2) {
+          profile = await ensureOperatorProfileForUser(req.auth.sub, "driver");
+        }
+      }
       if (!profile) return res.status(404).json({ message: "Operator profile not found" });
       if (profile.type !== "partner" && profile.type !== "driver" || profile.status !== "approved") {
         return res.status(403).json({ message: "Fleet live tracking is reserved for approved fleet partners and driver partners." });
