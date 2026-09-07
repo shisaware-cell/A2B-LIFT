@@ -1917,11 +1917,21 @@
           fleetFetch('/api/fleet/overview').catch(() => null),
           fleetFetch('/api/fleet/earnings-summary').catch(() => null),
         ]);
-        const owned = (vehicleData.vehicles || []).filter(v =>
-          !fleetState.profile?.id || v.ownerOperatorProfileId === fleetState.profile.id);
-        fleetState.vehicles = owned;
-
         const isDriver = fleetState.profile?.type === 'driver' || currentUser?.role === 'chauffeur';
+        let relevantVehicles = (vehicleData.vehicles || []).filter(v =>
+          !fleetState.profile?.id || v.ownerOperatorProfileId === fleetState.profile.id);
+        if (isDriver) {
+          const assignedVehicles = (assignmentData.assignments || [])
+            .map(a => a.vehicle)
+            .filter(Boolean);
+          for (const av of assignedVehicles) {
+            if (!relevantVehicles.some(v => v.id === av.id)) {
+              relevantVehicles.push(av);
+            }
+          }
+        }
+        fleetState.vehicles = relevantVehicles;
+
         const pageTitle = document.getElementById('fleetPageTitle');
         if (pageTitle) pageTitle.textContent = isDriver ? 'Driver Partner Dashboard' : 'Partner Dashboard';
         const pageSub = document.getElementById('fleetPageSub');
@@ -1942,7 +1952,7 @@
         }
 
         const kpiVehicles = document.getElementById('kpiFleetVehicles');
-        if (kpiVehicles) kpiVehicles.textContent = overviewData?.overview?.vehicles ?? owned.length;
+        if (kpiVehicles) kpiVehicles.textContent = overviewData?.overview?.vehicles ?? relevantVehicles.length;
         const kpiDrivers = document.getElementById('kpiFleetDrivers');
         if (kpiDrivers) kpiDrivers.textContent = overviewData?.overview?.assignedDrivers ?? (assignmentData.assignments || []).length;
         const kpiTrips = document.getElementById('kpiFleetTrips');
@@ -1953,7 +1963,7 @@
           kpiRevenue.textContent = `ZAR ${rev.toFixed(2)}`;
         }
 
-        renderFleetVehicles(owned);
+        renderFleetVehicles(relevantVehicles);
         renderFleetAssignments(assignmentData.assignments || []);
         renderFleetSentInvites(inviteData.sentInvites || []);
         renderFleetReceivedInvites(inviteData.receivedInvites || []);
@@ -2110,20 +2120,28 @@
           scrollWheelZoom: true
         }).setView([-26.2041, 28.0473], 11);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          maxZoom: 19,
-          attribution: '© OpenStreetMap contributors'
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+          maxZoom: 20,
+          subdomains: 'abcd',
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
         }).addTo(fleetState.mapInstance);
+
+        window.addEventListener('resize', () => {
+          if (fleetState.mapInstance) fleetState.mapInstance.invalidateSize();
+        });
       }
-      setTimeout(() => {
-        if (fleetState.mapInstance) fleetState.mapInstance.invalidateSize();
-      }, 100);
+      [50, 150, 300, 600].forEach(ms => {
+        setTimeout(() => {
+          if (fleetState.mapInstance) fleetState.mapInstance.invalidateSize();
+        }, ms);
+      });
     }
 
     async function loadFleetLiveMap() {
       try {
         const data = await fleetFetch('/api/fleet/live-locations');
         fleetState.allLiveDrivers = data.drivers || [];
+        fleetState.allLiveVehicles = data.vehicles || [];
         renderFleetLiveMap(data);
       } catch (e) {
         // silent
@@ -2133,36 +2151,92 @@
     function renderFleetLiveMap(data) {
       const drivers = data.drivers || [];
       const vehicles = data.vehicles || [];
-      const onlineCount = data.onlineDrivers || drivers.filter(d => d.isOnline).length;
-      const totalCount = data.totalDrivers || drivers.length;
+      const onlineDriversCount = data.onlineDrivers || drivers.filter(d => d.isOnline || d.status === 'online' || d.status === 'in_trip').length;
+      const totalVehiclesCount = data.totalVehicles || vehicles.length;
+      const totalDriversCount = data.totalDrivers || drivers.length;
 
       const badgeText = document.getElementById('fleetLiveMapBadgeText');
       if (badgeText) {
-        badgeText.textContent = `${onlineCount} of ${totalCount} Drivers Online`;
+        badgeText.textContent = `${totalVehiclesCount} Fleet Cars · ${onlineDriversCount} of ${totalDriversCount} Drivers Online`;
       }
       const lastUpdate = document.getElementById('fleetLiveMapLastUpdate');
       if (lastUpdate) {
         lastUpdate.textContent = `Updated ${new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
       }
 
-      renderFleetMapDriverSidebar(drivers);
+      renderFleetMapDriverSidebar(drivers, vehicles);
 
       if (!fleetState.mapInstance || typeof L === 'undefined') return;
 
       (fleetState.mapMarkers || []).forEach(m => fleetState.mapInstance.removeLayer(m));
       fleetState.mapMarkers = [];
+      fleetState.markerMap = new Map();
 
       const bounds = [];
+      const plottedVehicleIds = new Set();
 
+      // 1. Plot all fleet vehicles
+      vehicles.forEach(v => {
+        const lat = Number(v.lat ?? v.latitude);
+        const lng = Number(v.lng ?? v.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+        plottedVehicleIds.add(v.id);
+        bounds.push([lat, lng]);
+
+        const assigned = v.assignedDriver;
+        const isTrip = v.status === 'in_trip' || assigned?.status === 'in_trip';
+        const isOnline = v.status === 'online' || v.status === 'available' || assigned?.status === 'online';
+        const color = isTrip ? '#eab308' : (isOnline ? '#10b981' : '#64748b');
+        const statusLabel = isTrip ? 'On Trip' : (isOnline ? 'Online' : 'Parked');
+        const plate = v.plateNumber || 'No Plate';
+        const carName = `${v.make || ''} ${v.model || ''}`.trim() || 'Vehicle';
+
+        const carIcon = L.divIcon({
+          className: 'fleet-map-custom-marker',
+          html: `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;">
+            <div style="width:36px;height:36px;border-radius:50%;background:${color};border:2.5px solid #ffffff;box-shadow:0 3px 10px rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;color:#ffffff;font-size:16px;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.85 7h10.29l1.04 3H5.81l1.04-3zM19 17H5v-4.66l.12-.34h13.77l.11.34V17z"/><circle cx="7.5" cy="14.5" r="1.5"/><circle cx="16.5" cy="14.5" r="1.5"/></svg>
+            </div>
+            <div style="background:#111827;color:#f9fafb;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;margin-top:2px;box-shadow:0 2px 4px rgba(0,0,0,0.3);letter-spacing:0.5px;white-space:nowrap;">${escapeHtml(plate)}</div>
+          </div>`,
+          iconSize: [44, 52],
+          iconAnchor: [22, 26],
+          popupAnchor: [0, -28]
+        });
+
+        const popupContent = `<div style="font-family:Inter,sans-serif;min-width:200px;">
+          <div style="font-weight:800;font-size:15px;color:#111;">${escapeHtml(plate)}</div>
+          <div style="font-size:13px;color:#475569;font-weight:600;margin:2px 0 6px;">${escapeHtml(carName)}</div>
+          <div style="font-size:11px;color:#64748b;margin-bottom:8px;">${v.color ? escapeHtml(v.color) + ' · ' : ''}${v.category ? escapeHtml(v.category) : ''}</div>
+          <div style="border-top:1px solid #e2e8f0;padding-top:8px;margin-top:6px;">
+            <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;font-weight:700;">Assigned Driver</div>
+            <div style="font-size:13px;font-weight:700;color:#1e293b;">${assigned ? escapeHtml(assigned.name) : '<span style="color:#94a3b8;font-weight:normal;">Unassigned / Parked</span>'}</div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;">
+            <span class="fleet-status-pill ${isTrip ? 'trip' : (isOnline ? 'online' : 'offline')}">${statusLabel}</span>
+            ${assigned?.phone ? `<a href="tel:${escapeHtml(assigned.phone)}" style="font-size:12px;color:#059669;font-weight:700;text-decoration:none;padding:3px 8px;border-radius:4px;background:#ecfdf5;">📞 Call Driver</a>` : ''}
+          </div>
+        </div>`;
+
+        const marker = L.marker([lat, lng], { icon: carIcon }).bindPopup(popupContent).addTo(fleetState.mapInstance);
+        fleetState.mapMarkers.push(marker);
+        fleetState.markerMap.set('veh_' + v.id, marker);
+      });
+
+      // 2. Plot any online drivers not associated with a plotted vehicle
       drivers.forEach(d => {
-        const lat = Number(d.latitude || d.location?.latitude || d.location?.lat);
-        const lng = Number(d.longitude || d.location?.longitude || d.location?.lng);
+        if (d.activeVehicleId && plottedVehicleIds.has(d.activeVehicleId)) return;
+        if (d.vehicle?.id && plottedVehicleIds.has(d.vehicle.id)) return;
+
+        const lat = Number(d.lat ?? d.latitude ?? d.location?.latitude ?? d.location?.lat);
+        const lng = Number(d.lng ?? d.longitude ?? d.location?.longitude ?? d.location?.lng);
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
 
         bounds.push([lat, lng]);
 
-        const isTrip = Boolean(d.inTrip || d.activeRideId);
-        const isOnline = Boolean(d.isOnline);
+        const isTrip = Boolean(d.inTrip || d.activeRideId || d.status === 'in_trip');
+        const isOnline = Boolean(d.isOnline || d.status === 'online');
         const color = isTrip ? '#eab308' : (isOnline ? '#10b981' : '#94a3b8');
         const statusLabel = isTrip ? 'On Trip' : (isOnline ? 'Online' : 'Offline');
 
@@ -2188,64 +2262,122 @@
 
         const marker = L.marker([lat, lng], { icon: carIcon }).bindPopup(popupContent).addTo(fleetState.mapInstance);
         fleetState.mapMarkers.push(marker);
+        fleetState.markerMap.set('drv_' + d.id, marker);
       });
 
       if (bounds.length > 0 && !fleetState.userHasPannedMap) {
-        fleetState.mapInstance.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+        if (bounds.length === 1) {
+          fleetState.mapInstance.setView(bounds[0], 14);
+        } else {
+          fleetState.mapInstance.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+        }
       }
     }
 
-    function renderFleetMapDriverSidebar(drivers) {
+    function renderFleetMapDriverSidebar(drivers, vehicles) {
       const box = document.getElementById('fleetMapDriverItems');
       if (!box) return;
-      if (!drivers.length) {
-        box.innerHTML = '<div class="empty-state"><p>No fleet drivers reported location yet.</p></div>';
+
+      drivers = drivers || fleetState.allLiveDrivers || [];
+      vehicles = vehicles || fleetState.allLiveVehicles || [];
+
+      if (!drivers.length && !vehicles.length) {
+        box.innerHTML = '<div class="empty-state"><p>No fleet vehicles or drivers loaded yet.</p></div>';
         return;
       }
-      box.innerHTML = drivers.map(d => {
-        const isTrip = Boolean(d.inTrip || d.activeRideId);
-        const isOnline = Boolean(d.isOnline);
-        const statusClass = isTrip ? 'trip' : (isOnline ? 'online' : 'offline');
-        const statusLabel = isTrip ? '🟡 On Trip' : (isOnline ? '🟢 Online' : '⚪ Offline');
-        const veh = d.vehicle ? `${d.vehicle.make || ''} ${d.vehicle.model || ''}`.trim() : 'Vehicle';
-        const plate = d.vehicle?.plateNumber || '';
-        const lat = Number(d.latitude || d.location?.latitude || d.location?.lat);
-        const lng = Number(d.longitude || d.location?.longitude || d.location?.lng);
-        const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
 
-        return `<div class="fleet-live-driver-item" onclick="${hasCoords ? `focusFleetMap(${lat}, ${lng})` : ''}">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-            <div>
-              <div style="font-weight:700;font-size:14px;color:var(--grey-900);">${escapeHtml(d.name || 'Driver')}</div>
-              <div style="font-size:12px;color:var(--grey-500);">${escapeHtml(veh)}${plate ? ' · ' + escapeHtml(plate) : ''}</div>
+      let html = '';
+
+      // Render Vehicles section first
+      if (vehicles.length > 0) {
+        html += `<div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--grey-500);margin:4px 0 10px;letter-spacing:0.05em;">Fleet Cars (${vehicles.length})</div>`;
+        html += vehicles.map(v => {
+          const lat = Number(v.lat ?? v.latitude);
+          const lng = Number(v.lng ?? v.longitude);
+          const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+          const assigned = v.assignedDriver;
+          const isTrip = v.status === 'in_trip' || assigned?.status === 'in_trip';
+          const isOnline = v.status === 'online' || v.status === 'available' || assigned?.status === 'online';
+          const statusClass = isTrip ? 'trip' : (isOnline ? 'online' : 'offline');
+          const statusLabel = isTrip ? '🟡 On Trip' : (isOnline ? '🟢 Online' : '⚪ Parked');
+          const carMakeModel = `${v.make || ''} ${v.model || ''}`.trim() || 'Vehicle';
+          const plate = v.plateNumber || 'No Plate';
+
+          return `<div class="fleet-live-driver-item" onclick="${hasCoords ? `focusFleetMap(${lat}, ${lng}, 'veh_${v.id}')` : ''}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+              <div>
+                <div style="font-weight:800;font-size:14px;color:var(--grey-900);letter-spacing:0.5px;">${escapeHtml(plate)}</div>
+                <div style="font-size:12px;color:var(--grey-600);margin-top:1px;">${escapeHtml(carMakeModel)}</div>
+                <div style="font-size:11px;color:var(--grey-400);margin-top:2px;">${assigned ? 'Driver: ' + escapeHtml(assigned.name) : 'No driver assigned'}</div>
+              </div>
+              <span class="fleet-status-pill ${statusClass}">${statusLabel}</span>
             </div>
-            <span class="fleet-status-pill ${statusClass}">${statusLabel}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:12px;">
-            ${d.phone ? `<a href="tel:${escapeHtml(d.phone)}" onclick="event.stopPropagation();" style="color:var(--primary);font-weight:600;text-decoration:none;">📞 Call</a>` : '<span></span>'}
-            ${hasCoords ? `<span style="color:#2563eb;font-weight:600;">Locate on map →</span>` : '<span style="color:var(--grey-400);">No GPS</span>'}
-          </div>
-        </div>`;
-      }).join('');
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:12px;">
+              ${assigned?.phone ? `<a href="tel:${escapeHtml(assigned.phone)}" onclick="event.stopPropagation();" style="color:var(--primary);font-weight:600;text-decoration:none;">📞 Call</a>` : '<span></span>'}
+              ${hasCoords ? `<span style="color:#2563eb;font-weight:600;">Locate on map →</span>` : '<span style="color:var(--grey-400);">No GPS</span>'}
+            </div>
+          </div>`;
+        }).join('');
+      }
+
+      // If there are online drivers not tied to a vehicle
+      const unassignedOnlineDrivers = drivers.filter(d => !vehicles.some(v => v.assignedDriver?.id === d.id || v.id === d.activeVehicleId));
+      if (unassignedOnlineDrivers.length > 0) {
+        html += `<div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--grey-500);margin:14px 0 10px;letter-spacing:0.05em;">Other Drivers (${unassignedOnlineDrivers.length})</div>`;
+        html += unassignedOnlineDrivers.map(d => {
+          const isTrip = Boolean(d.inTrip || d.activeRideId || d.status === 'in_trip');
+          const isOnline = Boolean(d.isOnline || d.status === 'online');
+          const statusClass = isTrip ? 'trip' : (isOnline ? 'online' : 'offline');
+          const statusLabel = isTrip ? '🟡 On Trip' : (isOnline ? '🟢 Online' : '⚪ Offline');
+          const lat = Number(d.lat ?? d.latitude ?? d.location?.latitude ?? d.location?.lat);
+          const lng = Number(d.lng ?? d.longitude ?? d.location?.longitude ?? d.location?.lng);
+          const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+
+          return `<div class="fleet-live-driver-item" onclick="${hasCoords ? `focusFleetMap(${lat}, ${lng}, 'drv_${d.id}')` : ''}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+              <div>
+                <div style="font-weight:700;font-size:14px;color:var(--grey-900);">${escapeHtml(d.name || 'Driver')}</div>
+                <div style="font-size:12px;color:var(--grey-500);">${escapeHtml(d.vehicle?.make || '')} ${escapeHtml(d.vehicle?.model || '')}</div>
+              </div>
+              <span class="fleet-status-pill ${statusClass}">${statusLabel}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:12px;">
+              ${d.phone ? `<a href="tel:${escapeHtml(d.phone)}" onclick="event.stopPropagation();" style="color:var(--primary);font-weight:600;text-decoration:none;">📞 Call</a>` : '<span></span>'}
+              ${hasCoords ? `<span style="color:#2563eb;font-weight:600;">Locate on map →</span>` : '<span style="color:var(--grey-400);">No GPS</span>'}
+            </div>
+          </div>`;
+        }).join('');
+      }
+
+      box.innerHTML = html;
     }
 
-    function focusFleetMap(lat, lng) {
+    function focusFleetMap(lat, lng, markerKey) {
       if (!fleetState.mapInstance) return;
       fleetState.userHasPannedMap = true;
-      fleetState.mapInstance.setView([lat, lng], 15, { animate: true });
+      fleetState.mapInstance.flyTo([lat, lng], 15, { animate: true, duration: 0.8 });
+      if (markerKey && fleetState.markerMap && fleetState.markerMap.has(markerKey)) {
+        setTimeout(() => {
+          fleetState.markerMap.get(markerKey).openPopup();
+        }, 300);
+      }
     }
 
     function filterFleetLiveMapItems() {
       const q = (document.getElementById('fleetLiveMapSearch')?.value || '').trim().toLowerCase();
       if (!q) {
-        renderFleetMapDriverSidebar(fleetState.allLiveDrivers);
+        renderFleetMapDriverSidebar(fleetState.allLiveDrivers, fleetState.allLiveVehicles);
         return;
       }
-      const filtered = fleetState.allLiveDrivers.filter(d => {
+      const filteredDrivers = (fleetState.allLiveDrivers || []).filter(d => {
         const target = [d.name, d.phone, d.vehicle?.make, d.vehicle?.model, d.vehicle?.plateNumber].filter(Boolean).join(' ').toLowerCase();
         return target.includes(q);
       });
-      renderFleetMapDriverSidebar(filtered);
+      const filteredVehicles = (fleetState.allLiveVehicles || []).filter(v => {
+        const target = [v.make, v.model, v.plateNumber, v.color, v.category, v.assignedDriver?.name, v.assignedDriver?.phone].filter(Boolean).join(' ').toLowerCase();
+        return target.includes(q);
+      });
+      renderFleetMapDriverSidebar(filteredDrivers, filteredVehicles);
     }
 
     async function loadFleetTrips() {

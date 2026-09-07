@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>A2B LIFT — Admin</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 :root {
   --bg: #f5f5f0; --white: #ffffff; --black: #000000;
@@ -257,6 +259,21 @@ tbody tr:hover { background:#fafaf8; }
   .btn-logout { padding:6px 10px; font-size:11px; }
   table { min-width:480px; }
 }
+
+/* LIVE FLEET MAP */
+.livemap-container { display: grid; grid-template-columns: 1fr 340px; gap: 16px; min-height: 580px; margin-top: 14px; }
+@media (max-width: 960px) { .livemap-container { grid-template-columns: 1fr; } }
+#adminLiveMap { width: 100%; height: 580px; border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow); z-index: 1; }
+.livemap-sidebar { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; max-height: 580px; display: flex; flex-direction: column; }
+.livemap-cars-list { flex: 1; overflow-y: auto; margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.livemap-car-item { padding: 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: all 0.15s; background: var(--surface); }
+.livemap-car-item:hover { border-color: var(--black); background: var(--white); transform: translateY(-1px); box-shadow: var(--shadow); }
+.livemap-city-pills { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; margin-top: 10px; scrollbar-width: thin; }
+.livemap-city-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--white); font-size: 12px; font-weight: 600; color: var(--text); cursor: pointer; white-space: nowrap; transition: all 0.15s; }
+.livemap-city-pill:hover { border-color: var(--black); }
+.livemap-city-pill.active { background: var(--black); color: var(--white); border-color: var(--black); }
+.livemap-pill-badge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: rgba(0,0,0,0.08); font-family: var(--mono); }
+.livemap-city-pill.active .livemap-pill-badge { background: rgba(255,255,255,0.25); color: #fff; }
 </style>
 </head>
 <body>
@@ -291,6 +308,10 @@ tbody tr:hover { background:#fafaf8; }
     </div>
 
     <div class="nav-section">Operations</div>
+    <div class="nav-item" onclick="go('liveMap',this);closeSidebar()">
+      <span class="nav-icon">🗺️</span> Live Fleet Map
+      <span class="nav-badge" id="nb-livemap" style="display:none;background:#10b981;">0</span>
+    </div>
     <div class="nav-item" onclick="go('vehicles',this);closeSidebar()">
       <span class="nav-icon">🚘</span> Vehicle Approvals
       <span class="nav-badge" id="nb-vehicles" style="display:none">0</span>
@@ -449,6 +470,155 @@ tbody tr:hover { background:#fafaf8; }
         </div>
       </div>
       <div class="table-card" id="documents-table"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- LIVE FLEET MAP -->
+    <div class="view" id="view-liveMap">
+      <div class="sec-head">
+        <div>
+          <div class="sec-title" style="display:flex;align-items:center;gap:10px;">
+            <span>Live Fleet Operations Map</span>
+            <span style="font-size:12px;padding:3px 8px;border-radius:999px;background:#ecfdf5;color:#065f46;font-weight:700;display:inline-flex;align-items:center;gap:4px;">
+              <span style="width:6px;height:6px;border-radius:50%;background:#10b981;display:inline-block;animation:pulse 2s infinite;"></span>
+              Live GPS Tracking
+            </span>
+          </div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px;">
+            Real-time positions of online chauffeurs and fleet vehicles across South African metropolitan hubs.
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button class="btn-sm btn-outline" onclick="loadLiveMap()" style="display:inline-flex;align-items:center;gap:6px;">
+            <span>🔄</span> Refresh Map
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Map KPI Chips -->
+      <div class="stats-row" style="margin-top:14px;">
+        <div class="stat-card">
+          <div class="stat-label">Online in Scope</div>
+          <div class="stat-val" id="admin-map-stat-online">0</div>
+          <div class="stat-sub" id="admin-map-stat-city">All South Africa</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Available for Trips</div>
+          <div class="stat-val" id="admin-map-stat-available" style="color:var(--green);">0</div>
+          <div class="stat-sub">Ready to receive ride offers</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Currently On Trip</div>
+          <div class="stat-val" id="admin-map-stat-intrip" style="color:var(--yellow);">0</div>
+          <div class="stat-sub">Active in-progress rides</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Countrywide</div>
+          <div class="stat-val" id="admin-map-stat-countrywide">0</div>
+          <div class="stat-sub">Online chauffeurs nationally</div>
+        </div>
+      </div>
+
+      <!-- City Filtering Bar -->
+      <div style="background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;margin-top:14px;box-shadow:var(--shadow);">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <label style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;">Filter by City:</label>
+            <select id="admin-map-city-select" onchange="changeAdminMapCity(this.value)" class="f-input" style="width:220px;padding:6px 12px;font-size:13px;border-radius:8px;">
+              <option value="all">🇿🇦 All South African Cities</option>
+              <option value="johannesburg">Johannesburg (Gauteng)</option>
+              <option value="pretoria">Pretoria (Gauteng)</option>
+              <option value="cape_town">Cape Town (Western Cape)</option>
+              <option value="durban">Durban (KwaZulu-Natal)</option>
+              <option value="gqeberha">Gqeberha / Port Elizabeth (Eastern Cape)</option>
+              <option value="bloemfontein">Bloemfontein (Free State)</option>
+              <option value="east_london">East London (Eastern Cape)</option>
+              <option value="polokwane">Polokwane (Limpopo)</option>
+              <option value="nelspruit">Nelspruit / Mbombela (Mpumalanga)</option>
+              <option value="pietermaritzburg">Pietermaritzburg (KwaZulu-Natal)</option>
+              <option value="kimberley">Kimberley (Northern Cape)</option>
+              <option value="rustenburg">Rustenburg (North West)</option>
+            </select>
+            <div style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+              <button class="btn-sm" id="btn-status-all" onclick="setAdminMapStatusFilter('all')" style="border-radius:0;border:none;background:var(--black);color:#fff;padding:6px 12px;cursor:pointer;font-weight:600;">All Online</button>
+              <button class="btn-sm" id="btn-status-available" onclick="setAdminMapStatusFilter('available')" style="border-radius:0;border:none;background:var(--white);color:var(--text);padding:6px 12px;cursor:pointer;font-weight:600;">🟢 Available</button>
+              <button class="btn-sm" id="btn-status-in_trip" onclick="setAdminMapStatusFilter('in_trip')" style="border-radius:0;border:none;background:var(--white);color:var(--text);padding:6px 12px;cursor:pointer;font-weight:600;">🟡 On Trip</button>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <input type="text" id="admin-map-search" placeholder="Search car, plate or driver…" oninput="filterAdminMapCars()" class="f-input" style="width:200px;padding:6px 12px;font-size:13px;border-radius:999px;" />
+          </div>
+        </div>
+
+        <!-- Quick City Filter Pills -->
+        <div class="livemap-city-pills" id="admin-map-city-pills">
+          <div class="livemap-city-pill active" data-city="all" onclick="changeAdminMapCity('all')">
+            <span>🇿🇦 All Cities</span>
+            <span class="livemap-pill-badge" id="pill-badge-all">0</span>
+          </div>
+          <div class="livemap-city-pill" data-city="johannesburg" onclick="changeAdminMapCity('johannesburg')">
+            <span>Johannesburg</span>
+            <span class="livemap-pill-badge" id="pill-badge-johannesburg">0</span>
+          </div>
+          <div class="livemap-city-pill" data-city="pretoria" onclick="changeAdminMapCity('pretoria')">
+            <span>Pretoria</span>
+            <span class="livemap-pill-badge" id="pill-badge-pretoria">0</span>
+          </div>
+          <div class="livemap-city-pill" data-city="cape_town" onclick="changeAdminMapCity('cape_town')">
+            <span>Cape Town</span>
+            <span class="livemap-pill-badge" id="pill-badge-cape_town">0</span>
+          </div>
+          <div class="livemap-city-pill" data-city="durban" onclick="changeAdminMapCity('durban')">
+            <span>Durban</span>
+            <span class="livemap-pill-badge" id="pill-badge-durban">0</span>
+          </div>
+          <div class="livemap-city-pill" data-city="gqeberha" onclick="changeAdminMapCity('gqeberha')">
+            <span>Gqeberha</span>
+            <span class="livemap-pill-badge" id="pill-badge-gqeberha">0</span>
+          </div>
+          <div class="livemap-city-pill" data-city="bloemfontein" onclick="changeAdminMapCity('bloemfontein')">
+            <span>Bloemfontein</span>
+            <span class="livemap-pill-badge" id="pill-badge-bloemfontein">0</span>
+          </div>
+          <div class="livemap-city-pill" data-city="east_london" onclick="changeAdminMapCity('east_london')">
+            <span>East London</span>
+            <span class="livemap-pill-badge" id="pill-badge-east_london">0</span>
+          </div>
+          <div class="livemap-city-pill" data-city="polokwane" onclick="changeAdminMapCity('polokwane')">
+            <span>Polokwane</span>
+            <span class="livemap-pill-badge" id="pill-badge-polokwane">0</span>
+          </div>
+          <div class="livemap-city-pill" data-city="nelspruit" onclick="changeAdminMapCity('nelspruit')">
+            <span>Nelspruit</span>
+            <span class="livemap-pill-badge" id="pill-badge-nelspruit">0</span>
+          </div>
+          <div class="livemap-city-pill" data-city="pietermaritzburg" onclick="changeAdminMapCity('pietermaritzburg')">
+            <span>Pietermaritzburg</span>
+            <span class="livemap-pill-badge" id="pill-badge-pietermaritzburg">0</span>
+          </div>
+          <div class="livemap-city-pill" data-city="kimberley" onclick="changeAdminMapCity('kimberley')">
+            <span>Kimberley</span>
+            <span class="livemap-pill-badge" id="pill-badge-kimberley">0</span>
+          </div>
+          <div class="livemap-city-pill" data-city="rustenburg" onclick="changeAdminMapCity('rustenburg')">
+            <span>Rustenburg</span>
+            <span class="livemap-pill-badge" id="pill-badge-rustenburg">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Map + Side Cars List Layout -->
+      <div class="livemap-container">
+        <div id="adminLiveMap"></div>
+        <div class="livemap-sidebar">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:1px solid var(--border);">
+            <div style="font-weight:700;font-size:14px;color:var(--text);" id="admin-map-sidebar-title">Cars in Scope</div>
+            <span class="badge b-online" id="admin-map-sidebar-count">0 cars</span>
+          </div>
+          <div class="livemap-cars-list" id="admin-map-cars-list">
+            <div class="loading">Loading online cars…</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- RIDES -->
@@ -774,7 +944,7 @@ async function doLogout() {
 let curView = 'overview';
 let tripPage = 1, tripPageSize = 25, tripTotalPages = 1, tripSearchTimer = null, selectedTripId = null;
 let allChauf = [], allWd = [], allSafe = [], allApps = [], allPartners = [], allVehicles = [], allDocuments = [], allSelfies = [], allUsers = [], allReferrals = [], allLiftClubMemberships = [], allLiftClubRoutes = [], allPayLater = [], chaufFilter = 'all', wdFilter = 'all', safeFilter = 'all', appsFilter = 'all', partnersFilter = 'all', vehiclesFilter = 'all', documentsFilter = 'all', referralFilter = 'all', liftClubFilter = 'all', liftClubRouteFilter = 'all';
-const VIEW_TITLES = { overview:'Dashboard', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', documents:'Document Review', rides:'Trips', tripDetail:'Trip Details', payments:'Payments', liftClubApplications:'Lift Club', payLater:'Pay Later', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users', referrals:'Referral Summary' };
+const VIEW_TITLES = { overview:'Dashboard', liveMap:'Live Fleet Map', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', documents:'Document Review', rides:'Trips', tripDetail:'Trip Details', payments:'Payments', liftClubApplications:'Lift Club', payLater:'Pay Later', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users', referrals:'Referral Summary' };
 
 function go(view, el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -784,15 +954,26 @@ function go(view, el) {
   document.getElementById('page-title').textContent = VIEW_TITLES[view] || view;
   document.getElementById('srch').value = '';
   curView = view;
+  if (view === 'liveMap') {
+    if (!liveMapInterval) {
+      liveMapInterval = setInterval(loadLiveMap, 10000);
+    }
+  } else {
+    if (liveMapInterval) {
+      clearInterval(liveMapInterval);
+      liveMapInterval = null;
+    }
+  }
   loadView();
 }
 
 function loadView() {
-  ({ overview:loadOverview, chauffeurs:loadChauf, applications:loadApps, partners:loadPartners, vehicles:loadVehicles, documents:loadDocuments, rides:loadRides, payments:loadPay, liftClubApplications:loadLiftClubApplications, payLater:loadPayLater, selfies:loadSelfies, withdrawals:loadWd, safety:loadSafe, users:loadUsers, referrals:loadReferrals })[curView]?.();
+  ({ overview:loadOverview, liveMap:loadLiveMap, chauffeurs:loadChauf, applications:loadApps, partners:loadPartners, vehicles:loadVehicles, documents:loadDocuments, rides:loadRides, payments:loadPay, liftClubApplications:loadLiftClubApplications, payLater:loadPayLater, selfies:loadSelfies, withdrawals:loadWd, safety:loadSafe, users:loadUsers, referrals:loadReferrals })[curView]?.();
 }
 
 function loadAll() {
   loadOverview();
+  loadLiveMap();
   loadChauf();
   loadApps();
   loadPartners();
@@ -3389,6 +3570,266 @@ function toast(msg, type = 'ok') {
   t.textContent = msg;
   t.className = `toast t-${type} show`;
   setTimeout(() => t.classList.remove('show'), 3500);
+}
+
+// ── LIVE FLEET MAP ──
+let liveMapInstance = null;
+let liveMapMarkers = [];
+let liveMapMarkerMap = new Map();
+let liveMapInterval = null;
+let liveMapData = null;
+let selectedAdminCity = 'all';
+let adminMapStatusFilter = 'all';
+let adminMapUserPanned = false;
+
+function initAdminLiveMap() {
+  if (typeof L === 'undefined') return;
+  if (!liveMapInstance) {
+    const container = document.getElementById('adminLiveMap');
+    if (!container) return;
+    liveMapInstance = L.map('adminLiveMap', {
+      zoomControl: true,
+      scrollWheelZoom: true,
+    }).setView([-28.4793, 24.6727], 6);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 20,
+      subdomains: 'abcd',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+    }).addTo(liveMapInstance);
+
+    window.addEventListener('resize', () => {
+      if (liveMapInstance) liveMapInstance.invalidateSize();
+    });
+  }
+
+  [50, 150, 300, 600].forEach(ms => {
+    setTimeout(() => {
+      if (liveMapInstance) liveMapInstance.invalidateSize();
+    }, ms);
+  });
+}
+
+async function loadLiveMap() {
+  initAdminLiveMap();
+  try {
+    const url = `/api/admin/live-map?city=${encodeURIComponent(selectedAdminCity)}&status=${encodeURIComponent(adminMapStatusFilter)}`;
+    const res = await fetch(url, { credentials: 'include' });
+    if (res.status === 401) { logout(); return; }
+    if (!res.ok) throw new Error('Failed to load live fleet map');
+    const data = await res.json();
+    liveMapData = data;
+    renderAdminLiveMap(data);
+  } catch (err) {
+    console.error('loadLiveMap error:', err);
+  }
+}
+
+function renderAdminLiveMap(data) {
+  const cars = data.cars || [];
+  const stats = data.stats || {};
+  const cities = data.cities || [];
+
+  const elOnline = document.getElementById('admin-map-stat-online');
+  if (elOnline) elOnline.textContent = stats.totalOnline ?? cars.length;
+  const elCity = document.getElementById('admin-map-stat-city');
+  if (elCity) elCity.textContent = data.selectedCity ? `City: ${data.selectedCity}` : 'All South Africa';
+  const elAvail = document.getElementById('admin-map-stat-available');
+  if (elAvail) elAvail.textContent = stats.available ?? cars.filter(c => c.status === 'available').length;
+  const elInTrip = document.getElementById('admin-map-stat-intrip');
+  if (elInTrip) elInTrip.textContent = stats.inTrip ?? cars.filter(c => c.status === 'in_trip').length;
+  const elCountry = document.getElementById('admin-map-stat-countrywide');
+  if (elCountry) elCountry.textContent = stats.totalCountrywideOnline ?? data.allCarsCount ?? cars.length;
+
+  const navBadge = document.getElementById('nb-livemap');
+  if (navBadge) {
+    const totalCount = stats.totalCountrywideOnline ?? cars.length;
+    navBadge.textContent = totalCount;
+    navBadge.style.display = totalCount > 0 ? 'inline-block' : 'none';
+  }
+
+  cities.forEach(c => {
+    const badge = document.getElementById(`pill-badge-${c.key}`);
+    if (badge) badge.textContent = c.total;
+  });
+  const allBadge = document.getElementById('pill-badge-all');
+  if (allBadge) allBadge.textContent = stats.totalCountrywideOnline ?? data.allCarsCount ?? cars.length;
+
+  const sideTitle = document.getElementById('admin-map-sidebar-title');
+  if (sideTitle) sideTitle.textContent = `${data.selectedCity || 'All Cities'} (${cars.length})`;
+  const sideCount = document.getElementById('admin-map-sidebar-count');
+  if (sideCount) sideCount.textContent = `${cars.length} cars`;
+
+  renderAdminMapCarsList(cars);
+
+  if (!liveMapInstance || typeof L === 'undefined') return;
+
+  liveMapMarkers.forEach(m => liveMapInstance.removeLayer(m));
+  liveMapMarkers = [];
+  liveMapMarkerMap = new Map();
+
+  const bounds = [];
+
+  cars.forEach(c => {
+    const lat = Number(c.lat ?? c.latitude);
+    const lng = Number(c.lng ?? c.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+    bounds.push([lat, lng]);
+
+    const isTrip = c.status === 'in_trip';
+    const color = isTrip ? '#eab308' : '#10b981';
+    const statusLabel = isTrip ? 'On Trip' : 'Available';
+    const plate = c.plateNumber || 'No Plate';
+    const carName = `${c.make || ''} ${c.model || ''}`.trim() || 'Vehicle';
+
+    const carIcon = L.divIcon({
+      className: 'admin-map-car-marker',
+      html: `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;">
+        <div style="width:34px;height:34px;border-radius:50%;background:${color};border:2px solid #ffffff;box-shadow:0 3px 10px rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;color:#ffffff;font-size:15px;">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.85 7h10.29l1.04 3H5.81l1.04-3zM19 17H5v-4.66l.12-.34h13.77l.11.34V17z"/><circle cx="7.5" cy="14.5" r="1.5"/><circle cx="16.5" cy="14.5" r="1.5"/></svg>
+        </div>
+        <div style="background:#0f172a;color:#f8fafc;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;margin-top:2px;box-shadow:0 2px 4px rgba(0,0,0,0.35);letter-spacing:0.4px;white-space:nowrap;">${escapeHtml(plate)}</div>
+      </div>`,
+      iconSize: [42, 50],
+      iconAnchor: [21, 25],
+      popupAnchor: [0, -26]
+    });
+
+    const popupContent = `<div style="font-family:Plus Jakarta Sans,sans-serif;min-width:220px;padding:2px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <span style="font-weight:800;font-size:15px;color:#0f172a;">${escapeHtml(plate)}</span>
+        <span class="badge ${isTrip ? 'b-in-progress' : 'b-online'}" style="font-size:10px;">${statusLabel}</span>
+      </div>
+      <div style="font-size:13px;font-weight:700;color:#334155;">${escapeHtml(carName)} ${c.color ? '(' + escapeHtml(c.color) + ')' : ''}</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:8px;">${escapeHtml(c.category || 'Standard')} · ${escapeHtml(c.city || 'South Africa')}</div>
+      <div style="border-top:1px solid #e2e8f0;padding-top:6px;margin-top:6px;">
+        <div style="font-size:11px;color:#94a3b8;font-weight:700;text-transform:uppercase;">Chauffeur</div>
+        <div style="font-size:13px;font-weight:700;color:#0f172a;">${escapeHtml(c.driverName || 'Chauffeur')}</div>
+        ${c.driverPhone ? `<div style="font-size:12px;color:#059669;margin-top:2px;">📞 <a href="tel:${escapeHtml(c.driverPhone)}" style="color:#059669;text-decoration:none;font-weight:600;">${escapeHtml(c.driverPhone)}</a></div>` : ''}
+      </div>
+      ${c.activeRide ? `<div style="background:#fefce8;border:1px solid #fef08a;border-radius:6px;padding:8px;margin-top:8px;font-size:11px;">
+        <div style="font-weight:700;color:#854d0e;">Active Ride: ${escapeHtml(c.activeRide.status)}</div>
+        <div style="color:#713f12;margin-top:2px;">📍 Dropoff: ${escapeHtml(c.activeRide.dropoffAddress || 'En route')}</div>
+      </div>` : ''}
+    </div>`;
+
+    const marker = L.marker([lat, lng], { icon: carIcon }).bindPopup(popupContent).addTo(liveMapInstance);
+    liveMapMarkers.push(marker);
+    liveMapMarkerMap.set(c.id, marker);
+  });
+
+  if (!adminMapUserPanned) {
+    if (data.selectedCityKey !== 'all' && data.center) {
+      liveMapInstance.flyTo([data.center.lat, data.center.lng], data.center.zoom || 12, { animate: true, duration: 1 });
+    } else if (bounds.length > 0) {
+      if (bounds.length === 1) {
+        liveMapInstance.setView(bounds[0], 14);
+      } else {
+        liveMapInstance.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+      }
+    } else if (data.center) {
+      liveMapInstance.setView([data.center.lat, data.center.lng], data.center.zoom || 6);
+    }
+  }
+}
+
+function renderAdminMapCarsList(cars) {
+  const listEl = document.getElementById('admin-map-cars-list');
+  if (!listEl) return;
+  if (!cars || cars.length === 0) {
+    listEl.innerHTML = `<div class="empty" style="padding:40px 10px;text-align:center;">
+      <div style="font-size:24px;margin-bottom:8px;">🚗</div>
+      <div style="font-weight:700;color:var(--text);font-size:13px;">No cars online in this city</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px;">Try selecting "All Cities" or another hub.</div>
+    </div>`;
+    return;
+  }
+
+  listEl.innerHTML = cars.map(c => {
+    const lat = Number(c.lat ?? c.latitude);
+    const lng = Number(c.lng ?? c.longitude);
+    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+    const isTrip = c.status === 'in_trip';
+    const statusLabel = isTrip ? '🟡 On Trip' : '🟢 Available';
+    const badgeClass = isTrip ? 'b-in-progress' : 'b-online';
+    const plate = c.plateNumber || 'No Plate';
+    const carName = `${c.make || ''} ${c.model || ''}`.trim() || 'Vehicle';
+
+    return `<div class="livemap-car-item" onclick="${hasCoords ? `focusAdminMap(${lat}, ${lng}, '${c.id}')` : ''}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div>
+          <div style="font-weight:800;font-size:13.5px;color:var(--text);letter-spacing:0.4px;">${escapeHtml(plate)}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px;">${escapeHtml(carName)} · ${escapeHtml(c.category || 'Standard')}</div>
+          <div style="font-size:11.5px;color:var(--text);font-weight:600;margin-top:3px;">👤 ${escapeHtml(c.driverName || 'Driver')}</div>
+        </div>
+        <span class="badge ${badgeClass}" style="font-size:10px;">${statusLabel}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:6px;border-top:1px solid rgba(0,0,0,0.05);font-size:11px;">
+        <span style="color:var(--muted);">📍 ${escapeHtml(c.city || 'SA')}</span>
+        ${hasCoords ? `<span style="color:var(--blue);font-weight:700;">Locate on Map →</span>` : '<span style="color:var(--muted);">No GPS</span>'}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function focusAdminMap(lat, lng, carId) {
+  if (!liveMapInstance) return;
+  adminMapUserPanned = true;
+  liveMapInstance.flyTo([lat, lng], 16, { animate: true, duration: 0.8 });
+  if (carId && liveMapMarkerMap && liveMapMarkerMap.has(carId)) {
+    setTimeout(() => {
+      liveMapMarkerMap.get(carId).openPopup();
+    }, 350);
+  }
+}
+
+function changeAdminMapCity(cityKey) {
+  selectedAdminCity = cityKey;
+  adminMapUserPanned = false;
+
+  const select = document.getElementById('admin-map-city-select');
+  if (select && select.value !== cityKey) select.value = cityKey;
+
+  document.querySelectorAll('.livemap-city-pill').forEach(pill => {
+    pill.classList.toggle('active', pill.getAttribute('data-city') === cityKey);
+  });
+
+  loadLiveMap();
+}
+
+function setAdminMapStatusFilter(status) {
+  adminMapStatusFilter = status;
+  adminMapUserPanned = false;
+
+  ['all', 'available', 'in_trip'].forEach(s => {
+    const btn = document.getElementById(`btn-status-${s}`);
+    if (btn) {
+      if (s === status) {
+        btn.style.background = 'var(--black)';
+        btn.style.color = '#fff';
+      } else {
+        btn.style.background = 'var(--white)';
+        btn.style.color = 'var(--text)';
+      }
+    }
+  });
+
+  loadLiveMap();
+}
+
+function filterAdminMapCars() {
+  const q = (document.getElementById('admin-map-search')?.value || '').trim().toLowerCase();
+  if (!liveMapData || !liveMapData.cars) return;
+  if (!q) {
+    renderAdminMapCarsList(liveMapData.cars);
+    return;
+  }
+  const filtered = liveMapData.cars.filter(c => {
+    const target = [c.plateNumber, c.make, c.model, c.driverName, c.driverPhone, c.city, c.category].filter(Boolean).join(' ').toLowerCase();
+    return target.includes(q);
+  });
+  renderAdminMapCarsList(filtered);
 }
 
 // ── BOOT ──

@@ -664,4 +664,67 @@ test("website partner dashboard provides complete parity with mobile driver part
   assert.match(routesSource, /nextPayoutLabel/);
 });
 
+test("partner dashboard fleet live map stability, complete vehicle visibility, and driver parity are verified", () => {
+  const dashboardHtml = readFileSync(resolve(process.cwd(), "website/dashboard.html"), "utf-8");
+  const serverRoutes = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
+
+  // 1. High-stability retina CartoDB Voyager tile layer
+  assert.match(dashboardHtml, /basemaps\.cartocdn\.com\/rastertiles\/voyager/);
+
+  // 2. Multi-stage invalidateSize calls to guarantee crisp layout on tab switches and window resize
+  assert.match(dashboardHtml, /\[50,\s*150,\s*300,\s*600\]\.forEach/);
+  assert.match(dashboardHtml, /window\.addEventListener\(['"]resize['"]/);
+
+  // 3. Plots all fleet vehicles as well as active drivers
+  assert.match(dashboardHtml, /fleetState\.allLiveVehicles\s*=/);
+  assert.match(dashboardHtml, /renderFleetMapDriverSidebar\(drivers,\s*vehicles\)/);
+  assert.match(dashboardHtml, /Fleet Cars \(\$\{vehicles\.length\}\)/);
+
+  // 4. Single-point zoom clamping prevents excessive zoom disorientation
+  assert.match(dashboardHtml, /fleetState\.mapInstance\.setView\(bounds\[0\],\s*14\)/);
+
+  // 5. Driver partner assigned vehicle inclusion and parity
+  assert.match(dashboardHtml, /const assignedVehicles\s*=\s*\(assignmentData\.assignments\s*\|\|\s*\[\]\)/);
+  assert.match(dashboardHtml, /fleetState\.vehicles\s*=\s*relevantVehicles/);
+
+  // 6. Backend /api/fleet/live-locations supports assigned vehicles for driver operators
+  assert.match(serverRoutes, /driverAssignments\s*=\s*await storage\.getVehicleAssignments\(\{\s*driverOperatorProfileId:\s*profile\.id\s*\}\)/);
+  assert.match(serverRoutes, /approvalStatus:\s*v\.status/);
+});
+
+test("admin dashboard live fleet map with South African city filtering and auto-refresh are verified", () => {
+  const adminHtml = readFileSync(resolve(process.cwd(), "server/templates/admin.html"), "utf-8");
+  const a2bAdminHtml = readFileSync(resolve(process.cwd(), "a2b-admin.html"), "utf-8");
+  const serverRoutes = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
+
+  // 1. Leaflet CDN in admin head
+  assert.match(adminHtml, /leaflet@1\.9\.4\/dist\/leaflet\.css/);
+  assert.match(adminHtml, /leaflet@1\.9\.4\/dist\/leaflet\.js/);
+  assert.strictEqual(adminHtml, a2bAdminHtml, "server/templates/admin.html and a2b-admin.html must be identical");
+
+  // 2. Nav item in sidebar
+  assert.match(adminHtml, /onclick="go\('liveMap',this\);closeSidebar\(\)"/);
+  assert.match(adminHtml, /Live Fleet Map/);
+  assert.match(adminHtml, /id="nb-livemap"/);
+
+  // 3. View view-liveMap with South African city filters
+  assert.match(adminHtml, /id="view-liveMap"/);
+  assert.match(adminHtml, /id="adminLiveMap"/);
+  assert.match(adminHtml, /id="admin-map-city-select"/);
+  assert.match(adminHtml, /id="admin-map-city-pills"/);
+  assert.match(adminHtml, /id="admin-map-cars-list"/);
+
+  // 4. Main South African cities present in city filter
+  for (const city of ["Johannesburg", "Pretoria", "Cape Town", "Durban", "Gqeberha", "Bloemfontein", "East London", "Polokwane", "Nelspruit", "Pietermaritzburg", "Kimberley", "Rustenburg"]) {
+    assert.match(adminHtml, new RegExp(city));
+  }
+
+  // 5. Backend GET /api/admin/live-map route with role check and proximity resolution
+  assert.match(serverRoutes, /app\.get\("\/api\/admin\/live-map",\s*requireAuth,\s*requireRole\(\["admin"\]\)/);
+  assert.match(serverRoutes, /SA_MAIN_CITIES/);
+  assert.match(serverRoutes, /getHaversineDistanceKm/);
+  assert.match(serverRoutes, /resolveSouthAfricanCity/);
+  assert.match(serverRoutes, /totalCountrywideOnline/);
+});
+
 

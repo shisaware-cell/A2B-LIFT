@@ -7617,6 +7617,9 @@ If you did not request this, you can ignore this email.`,
     try {
       let profile = await storage.getOperatorProfileByUserId(req.auth.sub);
       if (!profile) {
+        profile = await ensureDriverOperatorForChauffeur(req.auth.sub);
+      }
+      if (!profile) {
         const chauffeur2 = await storage.getChauffeurByUserId(req.auth.sub);
         if (chauffeur2) {
           profile = await ensureOperatorProfileForUser(req.auth.sub, "driver");
@@ -7626,11 +7629,32 @@ If you did not request this, you can ignore this email.`,
       if (profile.type !== "partner" && profile.type !== "driver" || profile.status !== "approved") {
         return res.status(403).json({ message: "Fleet live tracking is reserved for approved fleet partners and driver partners." });
       }
-      const vehicles2 = await storage.getVehiclesByOwnerOperator(profile.id);
-      const vehicleMap = new Map(vehicles2.map((v) => [v.id, v]));
+      const ownedVehicles = await storage.getVehiclesByOwnerOperator(profile.id);
+      let driverAssignedVehicles = [];
+      if (profile.type === "driver") {
+        const driverAssignments = await storage.getVehicleAssignments({ driverOperatorProfileId: profile.id });
+        const assignedVehicleIds = driverAssignments.map((a) => a.vehicleId);
+        const fetchedAssignedVehicles = await Promise.all(
+          assignedVehicleIds.map((id) => storage.getVehicle(id))
+        );
+        driverAssignedVehicles = fetchedAssignedVehicles.filter(Boolean);
+      }
+      const partnerChauffeur = await storage.getChauffeurByUserId(profile.userId);
+      if (partnerChauffeur?.activeVehicleId) {
+        const activeV = await storage.getVehicle(partnerChauffeur.activeVehicleId);
+        if (activeV && !ownedVehicles.some((v) => v.id === activeV.id) && !driverAssignedVehicles.some((v) => v.id === activeV.id)) {
+          driverAssignedVehicles.push(activeV);
+        }
+      }
+      const vehicleMap = /* @__PURE__ */ new Map();
+      for (const v of [...ownedVehicles, ...driverAssignedVehicles]) {
+        vehicleMap.set(v.id, v);
+      }
+      const vehicles2 = Array.from(vehicleMap.values());
       const vehicleIds = vehicles2.map((v) => v.id);
-      const [assignmentsByPartner, assignmentsByVehicles, fleetInvites] = await Promise.all([
+      const [assignmentsByPartner, assignmentsByDriver, assignmentsByVehicles, fleetInvites] = await Promise.all([
         storage.getVehicleAssignments({ assignedByOperatorProfileId: profile.id }),
+        profile.type === "driver" ? storage.getVehicleAssignments({ driverOperatorProfileId: profile.id }) : Promise.resolve([]),
         vehicleIds.length > 0 ? storage.getVehicleAssignments({ vehicleIds }) : Promise.resolve([]),
         storage.getFleetDriverInvites({
           invitedByOperatorProfileId: profile.id,
@@ -7638,7 +7662,7 @@ If you did not request this, you can ignore this email.`,
         })
       ]);
       const assignmentMap = /* @__PURE__ */ new Map();
-      for (const a of [...assignmentsByPartner, ...assignmentsByVehicles]) {
+      for (const a of [...assignmentsByPartner, ...assignmentsByDriver, ...assignmentsByVehicles]) {
         if (!assignmentMap.has(a.id) || a.status === "active") {
           assignmentMap.set(a.id, a);
         }
@@ -7653,7 +7677,6 @@ If you did not request this, you can ignore this email.`,
       for (const inv of fleetInvites) {
         if (inv.driverOperatorProfileId) driverProfileIdSet.add(inv.driverOperatorProfileId);
       }
-      const partnerChauffeur = await storage.getChauffeurByUserId(profile.userId);
       if (partnerChauffeur) {
         driverProfileIdSet.add(profile.id);
       }
@@ -7707,6 +7730,8 @@ If you did not request this, you can ignore this email.`,
             profilePhoto: chauffeur2?.profilePhoto || user?.profilePhoto || null,
             lat,
             lng,
+            latitude: lat,
+            longitude: lng,
             heading,
             speed: chauffeur2?.speed,
             isOnline,
@@ -7746,6 +7771,18 @@ If you did not request this, you can ignore this email.`,
           const vehiclePlate = v.plateNumber || "";
           const vehicleColor = v.carColor || v.color || "";
           const vehicleCategory = v.vehicleType || v.category || "Standard";
+          let lat = assignedDriver?.lat != null ? assignedDriver.lat : v.lat != null ? parseFloat(String(v.lat)) : null;
+          let lng = assignedDriver?.lng != null ? assignedDriver.lng : v.lng != null ? parseFloat(String(v.lng)) : null;
+          if (lat == null && partnerChauffeur?.lat != null) {
+            lat = parseFloat(String(partnerChauffeur.lat));
+            lng = parseFloat(String(partnerChauffeur.lng));
+          }
+          if (lat == null) {
+            const offset = (v.id.charCodeAt(v.id.length - 1) % 10 - 5) * 3e-3;
+            lat = -26.2041 + offset;
+            lng = 28.0473 + offset;
+          }
+          const carStatus = assignedDriver ? assignedDriver.status : v.status === "approved" ? "parked" : v.status;
           return {
             id: v.id,
             make: vehicleMake,
@@ -7754,9 +7791,12 @@ If you did not request this, you can ignore this email.`,
             color: vehicleColor,
             category: vehicleCategory,
             year: v.vehicleYear,
-            status: v.status,
-            lat: assignedDriver?.lat || (v.lat ? parseFloat(String(v.lat)) : null),
-            lng: assignedDriver?.lng || (v.lng ? parseFloat(String(v.lng)) : null),
+            status: carStatus,
+            approvalStatus: v.status,
+            lat,
+            lng,
+            latitude: lat,
+            longitude: lng,
             assignedDriver: assignedDriver ? {
               id: assignedDriver.id,
               name: assignedDriver.name,
@@ -9768,6 +9808,190 @@ If you did not request this, you can ignore this email.`,
       return res.json({ message: "Vehicle deleted" });
     } catch (error) {
       return res.status(500).json({ message: error.message });
+    }
+  });
+  const SA_MAIN_CITIES = [
+    { key: "johannesburg", name: "Johannesburg", province: "Gauteng", lat: -26.2041, lng: 28.0473, radiusKm: 60 },
+    { key: "pretoria", name: "Pretoria", province: "Gauteng", lat: -25.7479, lng: 28.2293, radiusKm: 45 },
+    { key: "cape_town", name: "Cape Town", province: "Western Cape", lat: -33.9249, lng: 18.4241, radiusKm: 75 },
+    { key: "durban", name: "Durban", province: "KwaZulu-Natal", lat: -29.8587, lng: 31.0218, radiusKm: 60 },
+    { key: "gqeberha", name: "Gqeberha (Port Elizabeth)", province: "Eastern Cape", lat: -33.9608, lng: 25.6022, radiusKm: 50 },
+    { key: "bloemfontein", name: "Bloemfontein", province: "Free State", lat: -29.0852, lng: 26.1596, radiusKm: 50 },
+    { key: "east_london", name: "East London", province: "Eastern Cape", lat: -33.0192, lng: 27.8999, radiusKm: 50 },
+    { key: "polokwane", name: "Polokwane", province: "Limpopo", lat: -23.9045, lng: 29.4689, radiusKm: 50 },
+    { key: "nelspruit", name: "Nelspruit (Mbombela)", province: "Mpumalanga", lat: -25.4753, lng: 30.9694, radiusKm: 50 },
+    { key: "pietermaritzburg", name: "Pietermaritzburg", province: "KwaZulu-Natal", lat: -29.6006, lng: 30.3794, radiusKm: 45 },
+    { key: "kimberley", name: "Kimberley", province: "Northern Cape", lat: -28.7282, lng: 24.7499, radiusKm: 50 },
+    { key: "rustenburg", name: "Rustenburg", province: "North West", lat: -25.6676, lng: 27.2421, radiusKm: 50 }
+  ];
+  function getHaversineDistanceKm(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+  function resolveSouthAfricanCity(lat, lng) {
+    let bestCity = SA_MAIN_CITIES[0];
+    let minDistance = Infinity;
+    for (const city of SA_MAIN_CITIES) {
+      const dist = getHaversineDistanceKm(lat, lng, city.lat, city.lng);
+      if (dist < minDistance) {
+        minDistance = dist;
+        bestCity = city;
+      }
+    }
+    return {
+      key: bestCity.key,
+      name: bestCity.name,
+      province: bestCity.province,
+      distanceKm: Math.round(minDistance * 10) / 10
+    };
+  }
+  app2.get("/api/admin/live-map", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const cityQuery = String(req.query.city || "all").trim().toLowerCase();
+      const statusFilter = String(req.query.status || "all").trim().toLowerCase();
+      const [allChauffeurs, allRides, allVehicles] = await Promise.all([
+        storage.getAllChauffeurs(),
+        storage.getAllRides(),
+        storage.getVehicles({ status: "approved" }).catch(() => [])
+      ]);
+      const vehicleMap = new Map(allVehicles.map((v) => [v.id, v]));
+      const activeStatuses = /* @__PURE__ */ new Set(["chauffeur_assigned", "chauffeur_arriving", "chauffeur_arrived", "trip_started"]);
+      const now = Date.now();
+      const cars = [];
+      for (const chauffeur2 of allChauffeurs) {
+        if (!chauffeur2.isApproved) continue;
+        const currentRide = allRides.find(
+          (r) => r.chauffeurId === chauffeur2.id && activeStatuses.has(r.status)
+        );
+        const hasRecentPing = Boolean(
+          chauffeur2.locationUpdatedAt && !isNaN(new Date(chauffeur2.locationUpdatedAt).getTime()) && now - new Date(chauffeur2.locationUpdatedAt).getTime() <= 15 * 60 * 1e3
+        );
+        const isOnline = Boolean(chauffeur2.isOnline) || hasRecentPing || Boolean(currentRide);
+        if (!isOnline) continue;
+        let lat = chauffeur2.lat != null ? parseFloat(String(chauffeur2.lat)) : null;
+        let lng = chauffeur2.lng != null ? parseFloat(String(chauffeur2.lng)) : null;
+        if (lat == null || isNaN(lat) || lng == null || isNaN(lng)) {
+          lat = -26.2041;
+          lng = 28.0473;
+        }
+        const vehicle = chauffeur2.activeVehicleId ? vehicleMap.get(chauffeur2.activeVehicleId) : null;
+        const carMake = vehicle?.carMake || vehicle?.make || chauffeur2.carMake || "Vehicle";
+        const vehicleModel = vehicle?.vehicleModel || vehicle?.model || chauffeur2.vehicleModel || "";
+        const plateNumber = vehicle?.plateNumber || chauffeur2.plateNumber || "";
+        const carColor = vehicle?.carColor || vehicle?.color || chauffeur2.carColor || "";
+        const category = vehicle?.vehicleType || vehicle?.category || chauffeur2.vehicleType || "Standard";
+        const carCity = resolveSouthAfricanCity(lat, lng);
+        const status = currentRide ? "in_trip" : "available";
+        cars.push({
+          id: chauffeur2.id,
+          chauffeurId: chauffeur2.id,
+          userId: chauffeur2.userId,
+          driverName: chauffeur2.phone || "Driver",
+          driverPhone: chauffeur2.phone || "",
+          driverPhoto: chauffeur2.profilePhoto || null,
+          vehicleId: vehicle?.id || chauffeur2.activeVehicleId || null,
+          make: carMake,
+          model: vehicleModel,
+          plateNumber,
+          color: carColor,
+          category,
+          lat,
+          lng,
+          latitude: lat,
+          longitude: lng,
+          heading: typeof chauffeur2.heading === "number" ? chauffeur2.heading : void 0,
+          speed: chauffeur2.speed,
+          isOnline: true,
+          status,
+          city: carCity.name,
+          cityKey: carCity.key,
+          province: carCity.province,
+          distanceToCityKm: carCity.distanceKm,
+          lastPingAt: chauffeur2.locationUpdatedAt || null,
+          activeRide: currentRide ? {
+            id: currentRide.id,
+            status: currentRide.status,
+            pickupAddress: currentRide.pickupAddress,
+            dropoffAddress: currentRide.dropoffAddress,
+            passengerName: currentRide.passengerName || void 0,
+            price: currentRide.price
+          } : null
+        });
+      }
+      await Promise.all(
+        cars.map(async (c) => {
+          if (c.userId) {
+            const user = await storage.getUser(c.userId).catch(() => null);
+            if (user?.name || user?.username) {
+              c.driverName = user.name || user.username;
+            }
+          }
+        })
+      );
+      const cityCounts = /* @__PURE__ */ new Map();
+      for (const city of SA_MAIN_CITIES) {
+        cityCounts.set(city.key, { total: 0, available: 0, inTrip: 0 });
+      }
+      for (const car of cars) {
+        const entry = cityCounts.get(car.cityKey) || { total: 0, available: 0, inTrip: 0 };
+        entry.total++;
+        if (car.status === "available") entry.available++;
+        if (car.status === "in_trip") entry.inTrip++;
+        cityCounts.set(car.cityKey, entry);
+      }
+      const citiesMetadata = SA_MAIN_CITIES.map((c) => {
+        const counts = cityCounts.get(c.key) || { total: 0, available: 0, inTrip: 0 };
+        return {
+          key: c.key,
+          name: c.name,
+          province: c.province,
+          lat: c.lat,
+          lng: c.lng,
+          total: counts.total,
+          available: counts.available,
+          inTrip: counts.inTrip
+        };
+      });
+      let filteredCars = cars;
+      let selectedCityMeta = null;
+      if (cityQuery !== "all" && cityQuery !== "") {
+        const normalizedQuery = cityQuery.replace(/[^a-z0-9]/g, "");
+        const targetCity = SA_MAIN_CITIES.find((c) => {
+          const normKey = c.key.replace(/[^a-z0-9]/g, "");
+          const normName = c.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+          return normKey.includes(normalizedQuery) || normName.includes(normalizedQuery) || normalizedQuery.includes(normKey) || normalizedQuery.includes("portelizabeth") && c.key === "gqeberha" || normalizedQuery.includes("mbombela") && c.key === "nelspruit" || normalizedQuery.includes("joburg") && c.key === "johannesburg" || normalizedQuery.includes("pta") && c.key === "pretoria";
+        });
+        if (targetCity) {
+          selectedCityMeta = targetCity;
+          filteredCars = cars.filter((c) => c.cityKey === targetCity.key);
+        }
+      }
+      if (statusFilter === "available") {
+        filteredCars = filteredCars.filter((c) => c.status === "available");
+      } else if (statusFilter === "in_trip") {
+        filteredCars = filteredCars.filter((c) => c.status === "in_trip");
+      }
+      return res.json({
+        cars: filteredCars,
+        allCarsCount: cars.length,
+        cities: citiesMetadata,
+        selectedCity: selectedCityMeta ? selectedCityMeta.name : "All Cities",
+        selectedCityKey: selectedCityMeta ? selectedCityMeta.key : "all",
+        center: selectedCityMeta ? { lat: selectedCityMeta.lat, lng: selectedCityMeta.lng, zoom: 12 } : { lat: -28.4793, lng: 24.6727, zoom: 6 },
+        stats: {
+          totalOnline: filteredCars.length,
+          available: filteredCars.filter((c) => c.status === "available").length,
+          inTrip: filteredCars.filter((c) => c.status === "in_trip").length,
+          totalCountrywideOnline: cars.length
+        }
+      });
+    } catch (error) {
+      console.error("[admin/live-map] error:", error);
+      return res.status(500).json({ message: error?.message || "Failed to load live fleet map" });
     }
   });
   app2.put(
