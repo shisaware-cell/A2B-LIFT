@@ -632,12 +632,12 @@ function sameCoordinate(
 }
 
 function sameCoordinateList(
-  left: Array<{ id?: string | number; lat: number; lng: number }> = [],
-  right: Array<{ id?: string | number; lat: number; lng: number }> = [],
+  left: Array<{ id?: string | number; lat: number; lng: number; heading?: number }> = [],
+  right: Array<{ id?: string | number; lat: number; lng: number; heading?: number }> = [],
 ) {
   return left.length === right.length && left.every((point, index) => {
     const other = right[index];
-    return point.id === other?.id && point.lat === other?.lat && point.lng === other?.lng;
+    return point.id === other?.id && point.lat === other?.lat && point.lng === other?.lng && point.heading === other?.heading;
   });
 }
 

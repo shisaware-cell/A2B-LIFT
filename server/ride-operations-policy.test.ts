@@ -727,4 +727,97 @@ test("admin dashboard live fleet map with South African city filtering and auto-
   assert.match(serverRoutes, /totalCountrywideOnline/);
 });
 
+test("category max seats policy enforces user specifications and admin editing across all platforms", () => {
+  const { CATEGORY_MAX_SEATS, getCategoryMaxSeats, VEHICLE_CATEGORY_PRICING } = require("../shared/fare-policy");
+  const serverRoutes = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
+  const chauffeurVehicles = readFileSync(resolve(process.cwd(), "app/chauffeur/vehicles.tsx"), "utf-8");
+  const dashboardHtml = readFileSync(resolve(process.cwd(), "website/dashboard.html"), "utf-8");
+  const adminHtml = readFileSync(resolve(process.cwd(), "server/templates/admin.html"), "utf-8");
+  const a2bAdminHtml = readFileSync(resolve(process.cwd(), "a2b-admin.html"), "utf-8");
+
+  // 1. Shared fare policy exact seat definitions:
+  // A2b lite 2, Budget 4, Luxury 4, business 4, v-class 6, Vip 4, Van 7
+  assert.equal(getCategoryMaxSeats("a2b_lite"), 2);
+  assert.equal(getCategoryMaxSeats("a2b-lite"), 2);
+  assert.equal(getCategoryMaxSeats("budget"), 4);
+  assert.equal(getCategoryMaxSeats("luxury"), 4);
+  assert.equal(getCategoryMaxSeats("business"), 4);
+  assert.equal(getCategoryMaxSeats("v-class"), 6);
+  assert.equal(getCategoryMaxSeats("v_class"), 6);
+  assert.equal(getCategoryMaxSeats("luxury_van"), 6);
+  assert.equal(getCategoryMaxSeats("vip"), 4);
+  assert.equal(getCategoryMaxSeats("van"), 7);
+  assert.equal(VEHICLE_CATEGORY_PRICING.van.maxPassengers, 7);
+
+  // 2. Backend POST /api/vehicles enforces seat limits and rejects excess
+  assert.match(serverRoutes, /const maxAllowedSeats = getCategoryMaxSeats\(vehicleType\)/);
+  assert.match(serverRoutes, /if \(requestedCapacity > maxAllowedSeats\)/);
+  assert.match(serverRoutes, /Maximum seats allowed for/);
+
+  // 3. Backend PUT /api/vehicles/:id enforces category seat limits for non-admin
+  assert.match(serverRoutes, /if \(req\.auth!\.role !== "admin" && requestedCap > maxAllowedSeats\)/);
+
+  // 4. Backend POST /api/chauffeurs enforces seat limits
+  assert.match(serverRoutes, /const maxAllowedSeats = getCategoryMaxSeats\(normalizedType\)/);
+  assert.match(serverRoutes, /if \(requestedCapacity > maxAllowedSeats\)/);
+
+  // 5. Backend PUT /api/admin/vehicles/:id allows admin to edit passenger capacity
+  assert.match(serverRoutes, /if \(req\.body\.passengerCapacity !== undefined\) update\.passengerCapacity/);
+
+  // 6. Mobile Chauffeur App UI clamps and validates category seats
+  assert.match(chauffeurVehicles, /id:\s*"a2b_lite",\s*label:\s*"A2B Lite \(Max 2 seats\)",\s*maxSeats:\s*2/);
+  assert.match(chauffeurVehicles, /id:\s*"budget",\s*label:\s*"Budget \(Max 4 seats\)",\s*maxSeats:\s*4/);
+  assert.match(chauffeurVehicles, /id:\s*"luxury",\s*label:\s*"Luxury \(Max 4 seats\)",\s*maxSeats:\s*4/);
+  assert.match(chauffeurVehicles, /id:\s*"business",\s*label:\s*"VIP \/ Business Class \(Max 4 seats\)",\s*maxSeats:\s*4/);
+  assert.match(chauffeurVehicles, /id:\s*"luxury_van",\s*label:\s*"V-Class \/ Luxury Van \(Max 6 seats\)",\s*maxSeats:\s*6/);
+  assert.match(chauffeurVehicles, /id:\s*"van",\s*label:\s*"Van \(Max 7 seats\)",\s*maxSeats:\s*7/);
+  assert.match(chauffeurVehicles, /if \(requestedSeats > maxSeats\)/);
+  assert.match(chauffeurVehicles, /currentSeats > maxSeats \? String\(maxSeats\) : form\.passengerCapacity/);
+
+  // 7. Website Partner Dashboard UI enforces seat limits
+  assert.match(dashboardHtml, /<option value="a2b_lite">A2B Lite \(Max 2 seats\)<\/option>/);
+  assert.match(dashboardHtml, /<option value="van">Van \(Max 7 seats\)<\/option>/);
+  assert.match(dashboardHtml, /function onVehTypeChange\(\)/);
+  assert.match(dashboardHtml, /if \(paxNum > maxSeats\)/);
+
+  // 8. Admin Dashboard synchronization & seat editing
+  assert.strictEqual(adminHtml, a2bAdminHtml, "server/templates/admin.html and a2b-admin.html must be identical");
+  assert.match(adminHtml, /\['a2b_lite',\s*'A2B Lite \(Max 2 seats\)'\]/);
+  assert.match(adminHtml, /\['van',\s*'Van \(Max 7 seats\)'\]/);
+  assert.match(adminHtml, /<option value="a2b_lite" \$\{c\.vehicleType==='a2b_lite'\?'selected':''\}>a2b_lite \(Max 2 seats\)<\/option>/);
+  assert.match(adminHtml, /<option value="van" \$\{c\.vehicleType==='van'\?'selected':''\}>van \(Max 7 seats\)<\/option>/);
+});
+
+test("client app map renders realistic top-down car markers within 4km radius matching Uber", () => {
+  const clientIndex = readFileSync(resolve(process.cwd(), "app/client/index.tsx"), "utf-8");
+  const webMap = readFileSync(resolve(process.cwd(), "components/A2BMap.web.tsx"), "utf-8");
+  const nativeMap = readFileSync(resolve(process.cwd(), "components/A2BMap.native.tsx"), "utf-8");
+  const serverRoutes = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
+
+  // 1. Backend dedicated GET /api/chauffeurs/nearby endpoint with 4km radius
+  assert.match(serverRoutes, /app\.get\("\/api\/chauffeurs\/nearby",/);
+  assert.match(serverRoutes, /calculateHaversineDistanceKm\(lat, lng, Number\(c\.lat\), Number\(c\.lng\)\)/);
+  assert.match(serverRoutes, /dist <= radiusKm/);
+
+  // 2. Client queries within 4km radius
+  assert.match(clientIndex, /\/api\/chauffeurs\/nearby\?lat=\$\{center\.lat\}&lng=\$\{center\.lng\}&radius=4/);
+  assert.match(clientIndex, /haversineDistance\(center\.lat, center\.lng, Number\(c\.lat\), Number\(c\.lng\)\) <= 4/);
+
+  // 3. Client generates 7 realistic nearby fleet cars with diverse headings
+  assert.match(clientIndex, /function generateNearbyFleetCars/);
+  assert.match(clientIndex, /fleet-car-\$\{index \+ 1\}/);
+  assert.match(clientIndex, /dLat:\s*0\.0125,\s*dLng:\s*0\.0030,\s*heading:\s*188/);
+
+  // 4. Web map uses top-down vehicle overlay with CSS rotate matching heading and drop-shadow
+  assert.match(webMap, /google\.maps\.OverlayView/);
+  assert.match(webMap, /\/assets\/images\/nearby-car-marker\.png/);
+  assert.match(webMap, /translate\(-50%, -50%\) rotate\(\$\{this\.hdg\}deg\)/);
+  assert.match(webMap, /drop-shadow/);
+
+  // 5. Native map uses NEARBY_CAR_MARKER with rotation
+  assert.match(nativeMap, /NEARBY_CAR_MARKER = require\("\.\.\/assets\/images\/nearby-car-marker\.png"\)/);
+  assert.match(nativeMap, /rotation=\{heading \|\| 0\}/);
+  assert.match(nativeMap, /point\.heading === other\?\.heading/);
+});
+
 

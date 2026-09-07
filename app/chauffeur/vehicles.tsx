@@ -27,12 +27,12 @@ const VEHICLE_PHOTO_ANGLES = [
 ] as const;
 
 const VEHICLE_CATEGORIES = [
-  { id: "a2b_lite", label: "A2B Lite", desc: "Hyundai i10 and similar compact cars" },
-  { id: "budget", label: "Budget", desc: "Toyota Corolla, Toyota Quest" },
-  { id: "luxury_van", label: "V-Class / Luxury Van", desc: "Mercedes-Benz V-Class" },
-  { id: "luxury", label: "Luxury", desc: "BMW 3 Series, Mercedes C Class" },
-  { id: "business", label: "VIP / Business Class", desc: "BMW 5 Series, Mercedes E Class" },
-  { id: "van", label: "Van", desc: "Hyundai H1, Mercedes Vito, Staria" },
+  { id: "a2b_lite", label: "A2B Lite (Max 2 seats)", maxSeats: 2, desc: "Hyundai i10 and similar compact cars" },
+  { id: "budget", label: "Budget (Max 4 seats)", maxSeats: 4, desc: "Toyota Corolla, Toyota Quest" },
+  { id: "luxury", label: "Luxury (Max 4 seats)", maxSeats: 4, desc: "BMW 3 Series, Mercedes C Class" },
+  { id: "business", label: "VIP / Business Class (Max 4 seats)", maxSeats: 4, desc: "BMW 5 Series, Mercedes E Class" },
+  { id: "luxury_van", label: "V-Class / Luxury Van (Max 6 seats)", maxSeats: 6, desc: "Mercedes-Benz V-Class" },
+  { id: "van", label: "Van (Max 7 seats)", maxSeats: 7, desc: "Hyundai H1, Mercedes Vito, Staria" },
 ];
 
 type PhotoDraft = { uri: string; name?: string; uploadedUrl?: string; base64?: string };
@@ -121,12 +121,19 @@ export default function VehiclesScreen() {
       Alert.alert("Missing details", "Please complete the vehicle details.");
       return;
     }
+    const cat = VEHICLE_CATEGORIES.find((item) => item.id === form.vehicleType);
+    const maxSeats = cat?.maxSeats || 4;
+    const requestedSeats = Number.parseInt(form.passengerCapacity, 10) || maxSeats;
+    if (requestedSeats > maxSeats) {
+      Alert.alert("Seat limit exceeded", `Maximum seats allowed for ${cat?.label || form.vehicleType} is ${maxSeats}.`);
+      return;
+    }
     setSaving(true);
     try {
       await apiRequest("POST", "/api/vehicles", {
         ...form,
         vehicleYear: Number.parseInt(form.vehicleYear, 10),
-        passengerCapacity: Number.parseInt(form.passengerCapacity, 10) || 4,
+        passengerCapacity: requestedSeats,
         luggageCapacity: Number.parseInt(form.luggageCapacity, 10) || 2,
       });
       setForm(emptyForm);
@@ -518,7 +525,10 @@ export default function VehiclesScreen() {
                     key={item.id}
                     style={[styles.categoryOption, form.vehicleType === item.id && styles.categoryOptionActive]}
                     onPress={() => {
-                      update("vehicleType", item.id);
+                      const maxSeats = item.maxSeats || 4;
+                      const currentSeats = Number.parseInt(form.passengerCapacity, 10) || maxSeats;
+                      const nextSeats = currentSeats > maxSeats ? String(maxSeats) : form.passengerCapacity;
+                      setForm((prev) => ({ ...prev, vehicleType: item.id, passengerCapacity: nextSeats }));
                       setCategoryOpen(false);
                     }}
                   >

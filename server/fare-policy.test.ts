@@ -9,6 +9,7 @@ import {
   getDriverNetFare,
   getPlatformCommission,
   getVehicleCategoryCommissionRate,
+  getCategoryMaxSeats,
 } from "../shared/fare-policy";
 import { calculatePrice } from "./luxuryPricingEngine";
 
@@ -51,7 +52,16 @@ test("uses the requested kilometre rates for rider categories", () => {
   assert.equal(VEHICLE_CATEGORY_PRICING.a2b_lite.maxPassengers, 2);
   assert.equal(VEHICLE_CATEGORY_PRICING.budget.maxPassengers, 4);
   assert.equal(VEHICLE_CATEGORY_PRICING.luxury_van.maxPassengers, 6);
-  assert.equal(VEHICLE_CATEGORY_PRICING.van.maxPassengers, 8);
+  assert.equal(VEHICLE_CATEGORY_PRICING.van.maxPassengers, 7);
+  assert.equal(getCategoryMaxSeats("a2b_lite"), 2);
+  assert.equal(getCategoryMaxSeats("budget"), 4);
+  assert.equal(getCategoryMaxSeats("luxury"), 4);
+  assert.equal(getCategoryMaxSeats("business"), 4);
+  assert.equal(getCategoryMaxSeats("vip"), 4);
+  assert.equal(getCategoryMaxSeats("v-class"), 6);
+  assert.equal(getCategoryMaxSeats("v_class"), 6);
+  assert.equal(getCategoryMaxSeats("luxury_van"), 6);
+  assert.equal(getCategoryMaxSeats("van"), 7);
   assert.equal(calculatePrice(1, "a2b_lite").totalPrice, 54);
   assert.equal(calculatePrice(2, "a2b_lite").totalPrice, 57);
   assert.equal(calculatePrice(3, "a2b_lite").baseFare, 50);

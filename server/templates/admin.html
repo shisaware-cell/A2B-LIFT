@@ -1344,11 +1344,14 @@ function editChauf(id) {
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
         <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Vehicle Type</label>
           <select id="edit-vehicleType" class="f-input">
-            <option value="budget" ${c.vehicleType==='budget'?'selected':''}>budget</option>
-            <option value="luxury" ${c.vehicleType==='luxury'?'selected':''}>luxury</option>
-            <option value="business" ${c.vehicleType==='business'?'selected':''}>business</option>
-            <option value="van" ${c.vehicleType==='van'?'selected':''}>van</option>
-            <option value="luxury_van" ${c.vehicleType==='luxury_van'?'selected':''}>luxury_van</option>
+            <option value="a2b_lite" ${c.vehicleType==='a2b_lite'?'selected':''}>a2b_lite (Max 2 seats)</option>
+            <option value="budget" ${c.vehicleType==='budget'?'selected':''}>budget (Max 4 seats)</option>
+            <option value="luxury" ${c.vehicleType==='luxury'?'selected':''}>luxury (Max 4 seats)</option>
+            <option value="business" ${c.vehicleType==='business'?'selected':''}>business (Max 4 seats)</option>
+            <option value="vip" ${c.vehicleType==='vip'?'selected':''}>vip (Max 4 seats)</option>
+            <option value="v_class" ${c.vehicleType==='v_class'?'selected':''}>v_class (Max 6 seats)</option>
+            <option value="luxury_van" ${c.vehicleType==='luxury_van'?'selected':''}>luxury_van (Max 6 seats)</option>
+            <option value="van" ${c.vehicleType==='van'?'selected':''}>van (Max 7 seats)</option>
             <option value="executive" ${c.vehicleType==='executive'?'selected':''}>executive (business + luxury + V-Class)</option>
           </select></div>
         <div><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;font-weight:600">Passengers</label>
@@ -2071,14 +2074,15 @@ function editVehicle(id) {
 
 function vehicleCategoryOptions(selected) {
   return [
-    ['budget','A2B Lite / Budget'],
-    ['sedan','Sedan / Standard'],
-    ['business','Business Class'],
-    ['luxury','Luxury / VIP'],
-    ['vip','VIP Exclusive'],
-    ['van','Van / 7-Seater'],
-    ['v_class','V-Class / Luxury Van'],
-    ['luxury_van','Luxury Van'],
+    ['a2b_lite','A2B Lite (Max 2 seats)'],
+    ['budget','Budget (Max 4 seats)'],
+    ['sedan','Sedan / Standard (Max 4 seats)'],
+    ['business','Business Class (Max 4 seats)'],
+    ['luxury','Luxury (Max 4 seats)'],
+    ['vip','VIP Exclusive (Max 4 seats)'],
+    ['v_class','V-Class (Max 6 seats)'],
+    ['luxury_van','Luxury Van (Max 6 seats)'],
+    ['van','Van (Max 7 seats)'],
   ].map(([value,label]) => `<option value="${value}" ${selected===value?'selected':''}>${label}</option>`).join('');
 }
 

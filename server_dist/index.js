@@ -1748,7 +1748,7 @@ var VEHICLE_CATEGORY_PRICING = {
   budget: { pricePerKm: 8.5, baseFare: 50, includedKm: 0, maxPassengers: 4 },
   luxury: { pricePerKm: 14.5, baseFare: 60, includedKm: 0, maxPassengers: 4 },
   business: { pricePerKm: 35, baseFare: 150, includedKm: 0, maxPassengers: 4 },
-  van: { pricePerKm: 15, baseFare: 120, includedKm: 0, maxPassengers: 8 },
+  van: { pricePerKm: 15, baseFare: 120, includedKm: 0, maxPassengers: 7 },
   luxury_van: { pricePerKm: 35, baseFare: 200, includedKm: 0, maxPassengers: 6 }
 };
 function getBillableDistanceKm(distanceKm, includedKm = 0) {
@@ -1806,6 +1806,29 @@ function normalizeVehicleType(vehicleType) {
 function getVehicleCategoryTitle(vehicleType) {
   const key = normalizeVehicleType(vehicleType);
   return VEHICLE_CATEGORY_TITLES[key] || key.replace(/_/g, " ");
+}
+var CATEGORY_MAX_SEATS = {
+  a2b_lite: 2,
+  budget: 4,
+  luxury: 4,
+  business: 4,
+  vip: 4,
+  van: 7,
+  luxury_van: 6,
+  v_class: 6,
+  "v-class": 6,
+  vclass: 6
+};
+function getCategoryMaxSeats(vehicleType) {
+  const normalized = normalizeVehicleType(vehicleType);
+  if (normalized in CATEGORY_MAX_SEATS) {
+    return CATEGORY_MAX_SEATS[normalized];
+  }
+  const rawKey = String(vehicleType || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (rawKey in CATEGORY_MAX_SEATS) {
+    return CATEGORY_MAX_SEATS[rawKey];
+  }
+  return 4;
 }
 function getVehicleCategoryCommissionRate(vehicleType) {
   const normalized = normalizeVehicleType(vehicleType);
@@ -6573,6 +6596,19 @@ If you did not request this, you can ignore this email.`,
         if (normalizedVehicleYear < 2015 || normalizedVehicleYear > currentYear + 1) {
           return res.status(400).json({ message: `Please enter a vehicle model year between 2015 and ${currentYear + 1}.` });
         }
+        const targetVehicleType = req.body.vehicleType || existingChauffeur?.vehicleType;
+        let requestedCapacity = req.body.passengerCapacity !== void 0 ? Number.parseInt(String(req.body.passengerCapacity), 10) || 4 : existingChauffeur?.passengerCapacity;
+        if (targetVehicleType) {
+          const normalizedType = normalizeVehicleType2(targetVehicleType);
+          const maxAllowedSeats = getCategoryMaxSeats(normalizedType);
+          if (requestedCapacity !== void 0 && requestedCapacity !== null) {
+            if (requestedCapacity > maxAllowedSeats) {
+              return res.status(400).json({
+                message: `Maximum seats allowed for ${getVehicleCategoryTitle(normalizedType)} is ${maxAllowedSeats}.`
+              });
+            }
+          }
+        }
         if (existingChauffeur) {
           chauffeur2 = await storage.updateChauffeur(existingChauffeur.id, {
             carMake: req.body.carMake || existingChauffeur.carMake,
@@ -6582,14 +6618,15 @@ If you did not request this, you can ignore this email.`,
             vehicleType: req.body.vehicleType || existingChauffeur.vehicleType,
             carColor: req.body.carColor || existingChauffeur.carColor,
             phone: req.body.phone || existingChauffeur.phone,
-            passengerCapacity: req.body.passengerCapacity || existingChauffeur.passengerCapacity,
+            passengerCapacity: requestedCapacity ?? existingChauffeur.passengerCapacity,
             luggageCapacity: req.body.luggageCapacity || existingChauffeur.luggageCapacity,
             profilePhoto: req.body.profilePhoto || existingChauffeur.profilePhoto
           });
         } else {
           chauffeur2 = await storage.createChauffeur({
             ...req.body,
-            vehicleYear: normalizedVehicleYear
+            vehicleYear: normalizedVehicleYear,
+            passengerCapacity: requestedCapacity || 4
           });
         }
         const existingTargetUser = await storage.getUser(req.body.userId);
@@ -7002,6 +7039,16 @@ If you did not request this, you can ignore this email.`,
       if (!getVehicleCategories()[vehicleType]) {
         return res.status(400).json({ message: "Select a valid vehicle category." });
       }
+      const maxAllowedSeats = getCategoryMaxSeats(vehicleType);
+      const requestedCapacity = Number.parseInt(String(req.body.passengerCapacity || maxAllowedSeats), 10) || maxAllowedSeats;
+      if (requestedCapacity > maxAllowedSeats) {
+        return res.status(400).json({
+          message: `Maximum seats allowed for ${getVehicleCategoryTitle(vehicleType)} is ${maxAllowedSeats}.`
+        });
+      }
+      if (requestedCapacity < 1) {
+        return res.status(400).json({ message: "Passenger capacity must be at least 1." });
+      }
       const vehicle = await storage.createVehicle({
         ownerOperatorProfileId: profile.id,
         status: req.body.submit ? "pending" : "draft",
@@ -7012,7 +7059,7 @@ If you did not request this, you can ignore this email.`,
         plateNumber: requireStringField(req.body, "plateNumber").toUpperCase(),
         vehicleType,
         carColor: requireStringField(req.body, "carColor"),
-        passengerCapacity: Number.parseInt(String(req.body.passengerCapacity || "4"), 10) || 4,
+        passengerCapacity: requestedCapacity,
         luggageCapacity: Number.parseInt(String(req.body.luggageCapacity || "2"), 10) || 2
       });
       return res.status(201).json(vehicle);
@@ -7069,7 +7116,19 @@ If you did not request this, you can ignore this email.`,
         update.vehicleType = vehicleType;
       }
       if (req.body.vehicleYear !== void 0) update.vehicleYear = Number.parseInt(String(req.body.vehicleYear), 10);
-      if (req.body.passengerCapacity !== void 0) update.passengerCapacity = Number.parseInt(String(req.body.passengerCapacity), 10) || 4;
+      if (req.body.passengerCapacity !== void 0 || req.body.vehicleType !== void 0) {
+        const targetType = update.vehicleType || vehicle.vehicleType;
+        const maxAllowedSeats = getCategoryMaxSeats(targetType);
+        const requestedCap = req.body.passengerCapacity !== void 0 ? Number.parseInt(String(req.body.passengerCapacity), 10) || 4 : vehicle.passengerCapacity;
+        if (req.auth.role !== "admin" && requestedCap > maxAllowedSeats) {
+          return res.status(400).json({
+            message: `Maximum seats allowed for ${getVehicleCategoryTitle(targetType)} is ${maxAllowedSeats}.`
+          });
+        }
+        if (req.body.passengerCapacity !== void 0) {
+          update.passengerCapacity = requestedCap;
+        }
+      }
       if (req.body.luggageCapacity !== void 0) update.luggageCapacity = Number.parseInt(String(req.body.luggageCapacity), 10) || 2;
       const updated = await storage.updateVehicle(vehicle.id, update);
       return res.json(updated);
@@ -8611,6 +8670,39 @@ If you did not request this, you can ignore this email.`,
         });
       }
       return res.json(updated);
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+  app2.get("/api/chauffeurs/nearby", async (req, res) => {
+    try {
+      const lat = Number(req.query.lat);
+      const lng = Number(req.query.lng);
+      const radiusKm = Math.min(20, Math.max(0.5, Number(req.query.radius || 4)));
+      const category = req.query.category ? normalizeVehicleType2(String(req.query.category)) : null;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return res.status(400).json({ message: "Valid lat and lng query parameters are required" });
+      }
+      const allChauffeurs = await storage.getAllChauffeurs();
+      const onlineChauffeurs = allChauffeurs.filter((c) => {
+        if (!c.isOnline || !c.isApproved) return false;
+        if (c.lat == null || c.lng == null || isNaN(Number(c.lat)) || isNaN(Number(c.lng))) return false;
+        if (category && normalizeVehicleType2(c.vehicleType) !== category) return false;
+        const dist = calculateHaversineDistanceKm(lat, lng, Number(c.lat), Number(c.lng));
+        return dist <= radiusKm;
+      });
+      return res.json(
+        onlineChauffeurs.map((c) => ({
+          id: String(c.id),
+          lat: Number(c.lat),
+          lng: Number(c.lng),
+          heading: typeof c.heading === "number" ? c.heading : typeof c.bearing === "number" ? c.bearing : 0,
+          vehicleType: c.vehicleType,
+          carMake: c.carMake,
+          vehicleModel: c.vehicleModel,
+          carColor: c.carColor
+        }))
+      );
     } catch (error) {
       return res.status(500).json({ message: error.message });
     }
@@ -10310,8 +10402,14 @@ If you did not request this, you can ignore this email.`,
       }
       const lat = Number(req.body?.lat);
       const lng = Number(req.body?.lng);
-      if (!isValidLocationSample(lat, lng)) return res.status(400).json({ message: "A valid latitude and longitude are required" });
-      const updated = await storage.updateChauffeur(chauffeur2.id, { lat, lng, locationUpdatedAt: /* @__PURE__ */ new Date() });
+      const rawHeading = req.body?.heading ?? req.body?.bearing;
+      const heading = typeof rawHeading === "number" && !isNaN(rawHeading) ? rawHeading : void 0;
+      const updated = await storage.updateChauffeur(chauffeur2.id, {
+        lat,
+        lng,
+        locationUpdatedAt: /* @__PURE__ */ new Date(),
+        ...heading !== void 0 ? { heading } : {}
+      });
       const activeRide = (await storage.getRidesByChauffeur(chauffeur2.id)).find(
         (ride) => ["chauffeur_assigned", "chauffeur_arriving", "chauffeur_arrived", "trip_started"].includes(ride.status)
       );

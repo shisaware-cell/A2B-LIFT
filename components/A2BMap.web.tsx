@@ -65,6 +65,7 @@ interface NearbyDriver {
   id: string | number;
   lat: number;
   lng: number;
+  heading?: number;
 }
 
 interface A2BMapProps {
@@ -308,19 +309,73 @@ export default function A2BMap({
 
     if (!showDriver && nearbyDrivers.length > 0) {
       nearbyDrivers.forEach((driver) => {
-        const m = new google.maps.Marker({
-          position: { lat: driver.lat, lng: driver.lng },
-          map: mapInstanceRef.current,
-          icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 7,
-            fillColor: "#FFD700",
-            fillOpacity: 1,
-            strokeColor: "#000000",
-            strokeWeight: 1.5,
-          },
-        });
-        markersRef.current.push(m);
+        if (google.maps.OverlayView) {
+          class CarOverlay extends google.maps.OverlayView {
+            div: HTMLDivElement | null = null;
+            pos: any;
+            hdg: number;
+
+            constructor(p: { lat: number; lng: number }, h: number) {
+              super();
+              this.pos = new google.maps.LatLng(p.lat, p.lng);
+              this.hdg = h;
+            }
+
+            onAdd() {
+              const div = document.createElement("div");
+              div.style.position = "absolute";
+              div.style.width = "28px";
+              div.style.height = "58px";
+              div.style.transform = `translate(-50%, -50%) rotate(${this.hdg}deg)`;
+              div.style.pointerEvents = "none";
+              div.style.userSelect = "none";
+              div.innerHTML = `<img src="/assets/images/nearby-car-marker.png" style="width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.35));" alt="Car" />`;
+              this.div = div;
+              const panes = this.getPanes();
+              if (panes?.overlayMouseTarget) {
+                panes.overlayMouseTarget.appendChild(div);
+              }
+            }
+
+            draw() {
+              if (!this.div) return;
+              const projection = this.getProjection();
+              if (!projection) return;
+              const point = projection.fromLatLngToDivPixel(this.pos);
+              if (point) {
+                this.div.style.left = `${point.x}px`;
+                this.div.style.top = `${point.y}px`;
+                this.div.style.transform = `translate(-50%, -50%) rotate(${this.hdg}deg)`;
+              }
+            }
+
+            onRemove() {
+              if (this.div?.parentNode) {
+                this.div.parentNode.removeChild(this.div);
+                this.div = null;
+              }
+            }
+          }
+
+          const overlay = new CarOverlay({ lat: driver.lat, lng: driver.lng }, driver.heading || 0);
+          overlay.setMap(mapInstanceRef.current);
+          markersRef.current.push(overlay);
+        } else {
+          const m = new google.maps.Marker({
+            position: { lat: driver.lat, lng: driver.lng },
+            map: mapInstanceRef.current,
+            icon: {
+              path: "M 0,-14 C 2,-14 5,-10 5,-4 L 5,9 C 5,14 2,16 0,16 C -2,16 -5,14 -5,9 L -5,-4 C -5,-10 -2,-14 0,-14 Z",
+              scale: 1.5,
+              rotation: driver.heading || 0,
+              fillColor: "#FFFFFF",
+              fillOpacity: 1,
+              strokeColor: "#000000",
+              strokeWeight: 1.5,
+            },
+          });
+          markersRef.current.push(m);
+        }
       });
     }
 

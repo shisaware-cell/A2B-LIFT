@@ -834,17 +834,19 @@
               <div><label>Year</label><input type="number" id="vehYear" placeholder="e.g. 2020" /></div>
               <div><label>Number plate</label><input type="text" id="vehPlate" placeholder="e.g. ABC123GP" /></div>
               <div><label>Class</label>
-                <select id="vehType">
-                  <option value="budget">Budget</option>
-                  <option value="luxury">Luxury</option>
-                  <option value="business">Business Class</option>
-                  <option value="van">Van</option>
-                  <option value="luxury_van">Luxury Van (V-Class)</option>
+                <select id="vehType" onchange="onVehTypeChange()">
+                  <option value="a2b_lite">A2B Lite (Max 2 seats)</option>
+                  <option value="budget" selected>Budget (Max 4 seats)</option>
+                  <option value="luxury">Luxury (Max 4 seats)</option>
+                  <option value="business">Business Class (Max 4 seats)</option>
+                  <option value="vip">VIP (Max 4 seats)</option>
+                  <option value="luxury_van">V-Class / Luxury Van (Max 6 seats)</option>
+                  <option value="van">Van (Max 7 seats)</option>
                 </select>
               </div>
               <div><label>Colour</label><input type="text" id="vehColor" placeholder="e.g. White" /></div>
-              <div><label>Passenger capacity</label><input type="number" id="vehPax" placeholder="4" /></div>
-              <div><label>Luggage capacity</label><input type="number" id="vehLuggage" placeholder="2" /></div>
+              <div><label id="vehPaxLabel">Passenger capacity (Max 4)</label><input type="number" id="vehPax" min="1" max="4" placeholder="4" /></div>
+              <div><label>Luggage capacity</label><input type="number" id="vehLuggage" min="1" max="10" placeholder="2" /></div>
             </div>
             <button class="btn btn-primary" id="addVehicleBtn" style="margin-top:14px;" onclick="addFleetVehicle()">Add vehicle for review</button>
           </div>
@@ -2593,20 +2595,54 @@
       }).join('');
     }
 
+    const CATEGORY_MAX_SEATS = {
+      a2b_lite: 2,
+      budget: 4,
+      luxury: 4,
+      business: 4,
+      vip: 4,
+      luxury_van: 6,
+      van: 7,
+    };
+
+    function onVehTypeChange() {
+      const type = document.getElementById('vehType')?.value || 'budget';
+      const maxSeats = CATEGORY_MAX_SEATS[type] || 4;
+      const paxInput = document.getElementById('vehPax');
+      const paxLabel = document.getElementById('vehPaxLabel');
+      if (paxInput) {
+        paxInput.max = maxSeats;
+        paxInput.placeholder = String(maxSeats);
+        if (parseInt(paxInput.value, 10) > maxSeats) {
+          paxInput.value = maxSeats;
+        }
+      }
+      if (paxLabel) {
+        paxLabel.textContent = `Passenger capacity (Max ${maxSeats})`;
+      }
+    }
+
     async function addFleetVehicle() {
+      const type = document.getElementById('vehType').value;
+      const maxSeats = CATEGORY_MAX_SEATS[type] || 4;
       const payload = {
         carMake: document.getElementById('vehMake').value.trim(),
         vehicleModel: document.getElementById('vehModel').value.trim(),
         vehicleYear: document.getElementById('vehYear').value.trim(),
         plateNumber: document.getElementById('vehPlate').value.trim(),
-        vehicleType: document.getElementById('vehType').value,
+        vehicleType: type,
         carColor: document.getElementById('vehColor').value.trim(),
-        passengerCapacity: document.getElementById('vehPax').value.trim() || '4',
+        passengerCapacity: document.getElementById('vehPax').value.trim() || String(maxSeats),
         luggageCapacity: document.getElementById('vehLuggage').value.trim() || '2',
         submit: true,
       };
       const missing = ['carMake','vehicleModel','vehicleYear','plateNumber','carColor'].filter(k => !payload[k]);
       if (missing.length) { showNotification('Please fill in make, model, year, plate and colour.', 'error'); return; }
+      const paxNum = parseInt(payload.passengerCapacity, 10) || maxSeats;
+      if (paxNum > maxSeats) {
+        showNotification(`Maximum seats allowed for this category is ${maxSeats}.`, 'error');
+        return;
+      }
       const btn = document.getElementById('addVehicleBtn');
       btn.disabled = true; btn.textContent = 'Adding…';
       try {

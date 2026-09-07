@@ -875,10 +875,13 @@ function filterAddressPredictions(
 
 function generateNearbyFleetCars(center: { lat: number; lng: number }): NearbyDriverState[] {
   const offsets = [
-    { dLat: 0.0052, dLng: 0.0045, heading: 42 },
-    { dLat: -0.0061, dLng: 0.0039, heading: 138 },
-    { dLat: 0.0046, dLng: -0.0058, heading: 224 },
-    { dLat: -0.0038, dLng: -0.0042, heading: 312 },
+    { dLat: 0.0025, dLng: -0.0018, heading: 18 },
+    { dLat: -0.0022, dLng: 0.0015, heading: 96 },
+    { dLat: 0.0042, dLng: 0.0035, heading: 145 },
+    { dLat: -0.0055, dLng: 0.0065, heading: 215 },
+    { dLat: 0.0078, dLng: -0.0048, heading: 335 },
+    { dLat: -0.0092, dLng: -0.0072, heading: 72 },
+    { dLat: 0.0125, dLng: 0.0030, heading: 188 },
   ];
 
   return offsets.map((off, index) => ({
@@ -1170,34 +1173,46 @@ export default function ClientHomeScreen() {
     async function fetchOnlineDrivers() {
       const center = location || mapPickupLocation || JHB_FALLBACK;
       try {
-        const res = await apiRequest("GET", "/api/chauffeurs");
-        const all = await res.json();
-        const realOnline = (all as any[])
-          .filter(
-            (c: any) =>
-              c.isOnline &&
-              c.isApproved &&
-              c.lat != null &&
-              c.lng != null &&
-              !isNaN(Number(c.lat)) &&
-              !isNaN(Number(c.lng)),
-          )
-          .map((c: any) => ({
+        let realOnline: NearbyDriverState[] = [];
+        const nearbyRes = await apiRequest("GET", `/api/chauffeurs/nearby?lat=${center.lat}&lng=${center.lng}&radius=4`).catch(() => null);
+        if (nearbyRes && nearbyRes.ok) {
+          const list = await nearbyRes.json();
+          realOnline = (list as any[]).map((c: any) => ({
             id: String(c.id),
             lat: Number(c.lat),
             lng: Number(c.lng),
             heading: typeof c.heading === "number" ? c.heading : (typeof c.bearing === "number" ? c.bearing : 0),
           }));
+        } else {
+          const res = await apiRequest("GET", "/api/chauffeurs");
+          const all = await res.json();
+          realOnline = (all as any[])
+            .filter(
+              (c: any) =>
+                c.isOnline &&
+                c.isApproved &&
+                c.lat != null &&
+                c.lng != null &&
+                !isNaN(Number(c.lat)) &&
+                !isNaN(Number(c.lng)) &&
+                haversineDistance(center.lat, center.lng, Number(c.lat), Number(c.lng)) <= 4,
+            )
+            .map((c: any) => ({
+              id: String(c.id),
+              lat: Number(c.lat),
+              lng: Number(c.lng),
+              heading: typeof c.heading === "number" ? c.heading : (typeof c.bearing === "number" ? c.bearing : 0),
+            }));
+        }
 
-        const nearbyReal = center
-          ? realOnline.filter((d) => haversineDistance(center.lat, center.lng, d.lat, d.lng) <= 4)
-          : realOnline;
-
-        if (nearbyReal.length > 0) {
-          setOnlineDrivers((prev) => mergeNearbyDrivers(prev, nearbyReal));
+        if (realOnline.length >= 4) {
+          setOnlineDrivers((prev) => mergeNearbyDrivers(prev, realOnline));
         } else if (center) {
           const fleetCars = generateNearbyFleetCars(center);
-          setOnlineDrivers((prev) => mergeNearbyDrivers(prev, fleetCars));
+          const combined = realOnline.length > 0
+            ? [...realOnline, ...fleetCars.slice(0, Math.max(0, 7 - realOnline.length))]
+            : fleetCars;
+          setOnlineDrivers((prev) => mergeNearbyDrivers(prev, combined));
         }
       } catch {
         if (center) {

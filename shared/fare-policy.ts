@@ -13,7 +13,7 @@ export const VEHICLE_CATEGORY_PRICING = {
   budget: { pricePerKm: 8.5, baseFare: 50, includedKm: 0, maxPassengers: 4 },
   luxury: { pricePerKm: 14.5, baseFare: 60, includedKm: 0, maxPassengers: 4 },
   business: { pricePerKm: 35, baseFare: 150, includedKm: 0, maxPassengers: 4 },
-  van: { pricePerKm: 15, baseFare: 120, includedKm: 0, maxPassengers: 8 },
+  van: { pricePerKm: 15, baseFare: 120, includedKm: 0, maxPassengers: 7 },
   luxury_van: { pricePerKm: 35, baseFare: 200, includedKm: 0, maxPassengers: 6 },
 } as const;
 
@@ -79,6 +79,34 @@ export function normalizeVehicleType(vehicleType?: string | null): string {
 export function getVehicleCategoryTitle(vehicleType?: string | null): string {
   const key = normalizeVehicleType(vehicleType);
   return VEHICLE_CATEGORY_TITLES[key] || key.replace(/_/g, " ");
+}
+
+export const CATEGORY_MAX_SEATS: Record<string, number> = {
+  a2b_lite: 2,
+  budget: 4,
+  luxury: 4,
+  business: 4,
+  vip: 4,
+  van: 7,
+  luxury_van: 6,
+  v_class: 6,
+  "v-class": 6,
+  vclass: 6,
+};
+
+export function getCategoryMaxSeats(vehicleType?: string | null): number {
+  const normalized = normalizeVehicleType(vehicleType);
+  if (normalized in CATEGORY_MAX_SEATS) {
+    return CATEGORY_MAX_SEATS[normalized];
+  }
+  const rawKey = String(vehicleType || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  if (rawKey in CATEGORY_MAX_SEATS) {
+    return CATEGORY_MAX_SEATS[rawKey];
+  }
+  return 4;
 }
 
 export function getVehicleCategoryCommissionRate(vehicleType: unknown) {

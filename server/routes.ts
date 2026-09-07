@@ -59,6 +59,9 @@ import {
   REFERRAL_REWARD_RATE,
   getBillableDistanceKm,
   getVehicleCategoryCommissionRate,
+  getCategoryMaxSeats,
+  getVehicleCategoryTitle,
+  CATEGORY_MAX_SEATS,
 } from "../shared/fare-policy";
 import {
   buildPasswordResetUrl,
@@ -4575,6 +4578,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: `Please enter a vehicle model year between 2015 and ${currentYear + 1}.` });
       }
 
+      const targetVehicleType = req.body.vehicleType || existingChauffeur?.vehicleType;
+      let requestedCapacity = req.body.passengerCapacity !== undefined
+        ? Number.parseInt(String(req.body.passengerCapacity), 10) || 4
+        : existingChauffeur?.passengerCapacity;
+
+      if (targetVehicleType) {
+        const normalizedType = normalizeVehicleType(targetVehicleType);
+        const maxAllowedSeats = getCategoryMaxSeats(normalizedType);
+        if (requestedCapacity !== undefined && requestedCapacity !== null) {
+          if (requestedCapacity > maxAllowedSeats) {
+            return res.status(400).json({
+              message: `Maximum seats allowed for ${getVehicleCategoryTitle(normalizedType)} is ${maxAllowedSeats}.`,
+            });
+          }
+        }
+      }
+
       if (existingChauffeur) {
         chauffeur = await storage.updateChauffeur(existingChauffeur.id, {
           carMake: req.body.carMake || existingChauffeur.carMake,
@@ -4584,7 +4604,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           vehicleType: req.body.vehicleType || existingChauffeur.vehicleType,
           carColor: req.body.carColor || existingChauffeur.carColor,
           phone: req.body.phone || existingChauffeur.phone,
-          passengerCapacity: req.body.passengerCapacity || existingChauffeur.passengerCapacity,
+          passengerCapacity: requestedCapacity ?? existingChauffeur.passengerCapacity,
           luggageCapacity: req.body.luggageCapacity || existingChauffeur.luggageCapacity,
           profilePhoto: req.body.profilePhoto || existingChauffeur.profilePhoto,
         });
@@ -4592,6 +4612,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         chauffeur = await storage.createChauffeur({
           ...req.body,
           vehicleYear: normalizedVehicleYear,
+          passengerCapacity: requestedCapacity || 4,
         });
       }
       const existingTargetUser = await storage.getUser(req.body.userId);
@@ -5046,6 +5067,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!getVehicleCategories()[vehicleType]) {
         return res.status(400).json({ message: "Select a valid vehicle category." });
       }
+      const maxAllowedSeats = getCategoryMaxSeats(vehicleType);
+      const requestedCapacity = Number.parseInt(String(req.body.passengerCapacity || maxAllowedSeats), 10) || maxAllowedSeats;
+      if (requestedCapacity > maxAllowedSeats) {
+        return res.status(400).json({
+          message: `Maximum seats allowed for ${getVehicleCategoryTitle(vehicleType)} is ${maxAllowedSeats}.`,
+        });
+      }
+      if (requestedCapacity < 1) {
+        return res.status(400).json({ message: "Passenger capacity must be at least 1." });
+      }
       const vehicle = await storage.createVehicle({
         ownerOperatorProfileId: profile.id,
         status: req.body.submit ? "pending" : "draft",
@@ -5056,7 +5087,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         plateNumber: requireStringField(req.body, "plateNumber").toUpperCase(),
         vehicleType,
         carColor: requireStringField(req.body, "carColor"),
-        passengerCapacity: Number.parseInt(String(req.body.passengerCapacity || "4"), 10) || 4,
+        passengerCapacity: requestedCapacity,
         luggageCapacity: Number.parseInt(String(req.body.luggageCapacity || "2"), 10) || 2,
       });
       return res.status(201).json(vehicle);
@@ -5119,7 +5150,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         update.vehicleType = vehicleType;
       }
       if (req.body.vehicleYear !== undefined) update.vehicleYear = Number.parseInt(String(req.body.vehicleYear), 10);
-      if (req.body.passengerCapacity !== undefined) update.passengerCapacity = Number.parseInt(String(req.body.passengerCapacity), 10) || 4;
+      if (req.body.passengerCapacity !== undefined || req.body.vehicleType !== undefined) {
+        const targetType = update.vehicleType || vehicle.vehicleType;
+        const maxAllowedSeats = getCategoryMaxSeats(targetType);
+        const requestedCap = req.body.passengerCapacity !== undefined
+          ? (Number.parseInt(String(req.body.passengerCapacity), 10) || 4)
+          : vehicle.passengerCapacity;
+        if (req.auth!.role !== "admin" && requestedCap > maxAllowedSeats) {
+          return res.status(400).json({
+            message: `Maximum seats allowed for ${getVehicleCategoryTitle(targetType)} is ${maxAllowedSeats}.`,
+          });
+        }
+        if (req.body.passengerCapacity !== undefined) {
+          update.passengerCapacity = requestedCap;
+        }
+      }
       if (req.body.luggageCapacity !== undefined) update.luggageCapacity = Number.parseInt(String(req.body.luggageCapacity), 10) || 2;
       const updated = await storage.updateVehicle(vehicle.id, update);
       return res.json(updated);
@@ -6889,6 +6934,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pumpUnassignedSearchingRides().catch(() => {});
       }
       return res.json(updated);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/chauffeurs/nearby", async (req: Request, res: Response) => {
+    try {
+      const lat = Number(req.query.lat);
+      const lng = Number(req.query.lng);
+      const radiusKm = Math.min(20, Math.max(0.5, Number(req.query.radius || 4)));
+      const category = req.query.category ? normalizeVehicleType(String(req.query.category)) : null;
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return res.status(400).json({ message: "Valid lat and lng query parameters are required" });
+      }
+
+      const allChauffeurs = await storage.getAllChauffeurs();
+      const onlineChauffeurs = allChauffeurs.filter((c: any) => {
+        if (!c.isOnline || !c.isApproved) return false;
+        if (c.lat == null || c.lng == null || isNaN(Number(c.lat)) || isNaN(Number(c.lng))) return false;
+        if (category && normalizeVehicleType(c.vehicleType) !== category) return false;
+        const dist = calculateHaversineDistanceKm(lat, lng, Number(c.lat), Number(c.lng));
+        return dist <= radiusKm;
+      });
+
+      return res.json(
+        onlineChauffeurs.map((c: any) => ({
+          id: String(c.id),
+          lat: Number(c.lat),
+          lng: Number(c.lng),
+          heading: typeof c.heading === "number" ? c.heading : (typeof c.bearing === "number" ? c.bearing : 0),
+          vehicleType: c.vehicleType,
+          carMake: c.carMake,
+          vehicleModel: c.vehicleModel,
+          carColor: c.carColor,
+        }))
+      );
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -8856,8 +8938,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const lat = Number(req.body?.lat);
       const lng = Number(req.body?.lng);
-      if (!isValidLocationSample(lat, lng)) return res.status(400).json({ message: "A valid latitude and longitude are required" });
-      const updated = await storage.updateChauffeur(chauffeur.id, { lat, lng, locationUpdatedAt: new Date() });
+      const rawHeading = req.body?.heading ?? req.body?.bearing;
+      const heading = typeof rawHeading === "number" && !isNaN(rawHeading) ? rawHeading : undefined;
+      const updated = await storage.updateChauffeur(chauffeur.id, {
+        lat,
+        lng,
+        locationUpdatedAt: new Date(),
+        ...(heading !== undefined ? { heading } : {}),
+      });
       const activeRide = (await storage.getRidesByChauffeur(chauffeur.id)).find((ride) =>
         ["chauffeur_assigned", "chauffeur_arriving", "chauffeur_arrived", "trip_started"].includes(ride.status),
       );
