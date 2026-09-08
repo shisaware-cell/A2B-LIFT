@@ -67,6 +67,14 @@ function getRideVehicle(vehicleType: unknown) {
 
 type RideStatus = "idle" | "selecting" | "confirming" | "requested" | "assigned" | "arriving" | "in_trip" | "completed" | "no_drivers";
 
+function isCompletedRideStatus(status?: string | null): boolean {
+  return status === "trip_completed" || status === "completed";
+}
+
+function isTerminalRideStatus(status?: string | null): boolean {
+  return isCompletedRideStatus(status) || status === "cancelled";
+}
+
 type NearbyDriverState = { id: string; lat: number; lng: number; heading?: number };
 type LocationPickerTarget = "pickup" | "dropoff" | "active_dropoff" | number;
 
@@ -1024,6 +1032,7 @@ export default function ClientHomeScreen() {
 
   // Keep a ref so socket callbacks always see the latest ride without stale closure
   const currentRideRef = useRef<any>(null);
+  const applyRideUpdateRef = useRef<(ride: any) => void>(() => {});
   const clientCancellationRideIdRef = useRef<string | null>(null);
   const selectedRouteChoice = routeChoices.find((choice) => choice.id === selectedRouteId) || routeChoices[0] || null;
 
@@ -1134,10 +1143,16 @@ export default function ClientHomeScreen() {
       }),
     });
 
-    const sub = Notifications.addNotificationResponseReceivedListener((response: any) => {
+    const sub = Notifications.addNotificationResponseReceivedListener(async (response: any) => {
       const data = response?.notification?.request?.content?.data as any;
-      if (data?.type?.startsWith("ride:")) {
-        setRideStatus((prev) => (prev === "idle" ? "requested" : prev));
+      if (!data?.type?.startsWith("ride:") || !data?.rideId) return;
+
+      try {
+        const res = await apiRequest("GET", `/api/rides/${data.rideId}`);
+        if (!res.ok) return;
+        applyRideUpdateRef.current(await res.json());
+      } catch (error: any) {
+        console.log("[push] Could not refresh ride:", error?.message || error);
       }
     });
 
@@ -1883,13 +1898,21 @@ export default function ClientHomeScreen() {
 
   // Apply a ride status update received from socket or polling
   const applyRideUpdate = useCallback((ride: any) => {
-    if (ride.status === "cancelled") {
-      const wasCancelledHere = clientCancellationRideIdRef.current === ride.id;
+    if (!ride?.id || !ride?.status) return;
+
+    const nextRide = isCompletedRideStatus(ride.status)
+      ? { ...ride, status: "trip_completed" }
+      : ride;
+
+    currentRideRef.current = nextRide;
+
+    if (nextRide.status === "cancelled") {
+      const wasCancelledHere = clientCancellationRideIdRef.current === nextRide.id;
       if (wasCancelledHere) clientCancellationRideIdRef.current = null;
       AsyncStorage.removeItem("a2b_client_active_ride").catch(() => {});
 
-      const cancelledBy = String(ride.cancelledBy || "driver");
-      const isDriverCancellation = !wasCancelledHere && (cancelledBy === "driver" || !ride.cancelledBy);
+      const cancelledBy = String(nextRide.cancelledBy || "driver");
+      const isDriverCancellation = !wasCancelledHere && (cancelledBy === "driver" || !nextRide.cancelledBy);
 
       if (isDriverCancellation) {
         setRoutePolyline(null);
@@ -1908,10 +1931,11 @@ export default function ClientHomeScreen() {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         }
 
-        reRequestCancelledRide(ride);
+        reRequestCancelledRide(nextRide);
         return;
       }
 
+      currentRideRef.current = null;
       setCurrentRide(null);
       setRideStatus("idle");
       setRoutePolyline(null);
@@ -1929,36 +1953,36 @@ export default function ClientHomeScreen() {
       }
       return;
     }
-    const rideVehicle = getRideVehicle(ride.vehicleType);
+    const rideVehicle = getRideVehicle(nextRide.vehicleType);
     if (rideVehicle) setSelectedVehicle(rideVehicle);
-    setCurrentRide(ride);
-    if (ride.chauffeurDetails) {
-      setChauffeurDetails(ride.chauffeurDetails);
-      if (ride.chauffeurDetails.lat && ride.chauffeurDetails.lng) {
+    setCurrentRide(nextRide);
+    if (nextRide.chauffeurDetails) {
+      setChauffeurDetails(nextRide.chauffeurDetails);
+      if (nextRide.chauffeurDetails.lat && nextRide.chauffeurDetails.lng) {
         setDriverLocation({
-          lat: Number(ride.chauffeurDetails.lat),
-          lng: Number(ride.chauffeurDetails.lng),
-          heading: ride.chauffeurDetails.heading,
+          lat: Number(nextRide.chauffeurDetails.lat),
+          lng: Number(nextRide.chauffeurDetails.lng),
+          heading: nextRide.chauffeurDetails.heading,
         });
       }
     }
-    if (!["trip_completed", "cancelled"].includes(ride.status)) {
-      AsyncStorage.setItem("a2b_client_active_ride", JSON.stringify(ride)).catch(() => {});
+    if (!isTerminalRideStatus(nextRide.status)) {
+      AsyncStorage.setItem("a2b_client_active_ride", JSON.stringify(nextRide)).catch(() => {});
     }
-    if (ride.status === "chauffeur_assigned") {
+    if (nextRide.status === "chauffeur_assigned") {
       setRideStatus("assigned");
       setLiveEtaMin(null);
       setInitialEtaMin(null);
-      if (ride.chauffeurId) {
-        fetchChauffeurDetails(ride.chauffeurId);
+      if (nextRide.chauffeurId) {
+        fetchChauffeurDetails(nextRide.chauffeurId);
         // Fetch driver's current location to show route from driver → pickup
-        apiRequest("GET", `/api/chauffeurs/${ride.chauffeurId}`).then(r => r.json()).then((c: any) => {
-          if (c.lat && c.lng && ride.pickupLat && ride.pickupLng) {
+        apiRequest("GET", `/api/chauffeurs/${nextRide.chauffeurId}`).then(r => r.json()).then((c: any) => {
+          if (c.lat && c.lng && nextRide.pickupLat && nextRide.pickupLng) {
             const driverLoc = { lat: c.lat, lng: c.lng, heading: c.heading };
             setDriverLocation(driverLoc);
-            fetchRoute(driverLoc, { lat: ride.pickupLat, lng: ride.pickupLng });
+            fetchRoute(driverLoc, { lat: nextRide.pickupLat, lng: nextRide.pickupLng });
             // Set initial ETA from haversine distance (will be refined by route API)
-            const dist = haversineDistance(c.lat, c.lng, parseFloat(ride.pickupLat), parseFloat(ride.pickupLng));
+            const dist = haversineDistance(c.lat, c.lng, parseFloat(nextRide.pickupLat), parseFloat(nextRide.pickupLng));
             const eta = Math.max(1, Math.round((dist / 30) * 60));
             setInitialEtaMin(eta);
             setLiveEtaMin(eta);
@@ -1966,11 +1990,11 @@ export default function ClientHomeScreen() {
         }).catch(() => {});
       }
       if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else if (ride.status === "chauffeur_arriving") {
+    } else if (nextRide.status === "chauffeur_arriving" || nextRide.status === "chauffeur_arrived") {
       setRideStatus("arriving");
-    } else if (ride.status === "trip_started") {
+    } else if (nextRide.status === "trip_started") {
       setRideStatus("in_trip");
-      const activeTarget = getActiveRideTarget(ride);
+      const activeTarget = getActiveRideTarget(nextRide);
       // Keep both rider and driver focused on the same next stop or destination.
       if (activeTarget.lat && activeTarget.lng) {
         setDriverLocation((prev) => {
@@ -1978,9 +2002,13 @@ export default function ClientHomeScreen() {
           return prev;
         });
       }
-    } else if (ride.status === "trip_completed") {
+    } else if (nextRide.status === "trip_completed") {
       setRideStatus("completed");
+      setIsTripSheetMinimized(false);
+      setShowTripOptionsMenu(false);
+      setShowActiveStopsEditor(false);
       setDriverLocation(null);
+      setRoutePolyline(null);
       setEtaText(null);
       setLiveEtaMin(null);
       setInitialEtaMin(null);
@@ -1990,15 +2018,21 @@ export default function ClientHomeScreen() {
     }
   }, []);
 
+  useEffect(() => {
+    applyRideUpdateRef.current = applyRideUpdate;
+  }, [applyRideUpdate]);
+
   const restoreClientActiveRide = useCallback(async () => {
     if (!user?.id) return;
     try {
+      let rememberedRide = currentRideRef.current;
       // 1. Try local storage first for instant restore
       const localRideJson = await AsyncStorage.getItem("a2b_client_active_ride");
       if (localRideJson) {
         try {
           const localRide = JSON.parse(localRideJson);
-          if (localRide?.id && !["trip_completed", "cancelled"].includes(localRide.status)) {
+          rememberedRide = localRide;
+          if (localRide?.id && !isTerminalRideStatus(localRide.status)) {
             setCurrentRide(localRide);
             currentRideRef.current = localRide;
             applyRideUpdate(localRide);
@@ -2010,7 +2044,7 @@ export default function ClientHomeScreen() {
       const activeRes = await apiRequest("GET", `/api/rides/client-active/${user.id}`);
       if (activeRes.status === 200) {
         const activeRide = await activeRes.json();
-        if (activeRide?.id && !["trip_completed", "cancelled"].includes(activeRide.status)) {
+        if (activeRide?.id && !isTerminalRideStatus(activeRide.status)) {
           setCurrentRide(activeRide);
           currentRideRef.current = activeRide;
           await AsyncStorage.setItem("a2b_client_active_ride", JSON.stringify(activeRide));
@@ -2036,6 +2070,27 @@ export default function ClientHomeScreen() {
         }
       } else if (activeRes.status === 204) {
         await AsyncStorage.removeItem("a2b_client_active_ride");
+
+        // The realtime completion event may have been missed while the app was
+        // backgrounded. Resolve the remembered ride so we can show its final
+        // payment summary instead of leaving the active-trip UI on screen.
+        if (rememberedRide?.id) {
+          const rideRes = await apiRequest("GET", `/api/rides/${rememberedRide.id}`);
+          if (rideRes.ok) {
+            const latestRide = await rideRes.json();
+            if (isTerminalRideStatus(latestRide?.status)) {
+              applyRideUpdate(latestRide);
+              return;
+            }
+          }
+        }
+
+        currentRideRef.current = null;
+        setCurrentRide(null);
+        setRideStatus("idle");
+        setDriverLocation(null);
+        setRoutePolyline(null);
+        setEtaText(null);
       }
     } catch (e: any) {
       console.log("[client-restore] active ride check:", e?.message || e);
@@ -2068,11 +2123,13 @@ export default function ClientHomeScreen() {
     on("ride:statusUpdate", handleStatusUpdate);
     on("ride:accepted", handleStatusUpdate);
     on("ride:cancelled", handleStatusUpdate);
+    on("ride:completed", handleStatusUpdate);
 
     return () => {
       off("ride:statusUpdate", handleStatusUpdate);
       off("ride:accepted", handleStatusUpdate);
       off("ride:cancelled", handleStatusUpdate);
+      off("ride:completed", handleStatusUpdate);
     };
   }, []); // register once — uses ref internally
 
@@ -2105,7 +2162,7 @@ export default function ClientHomeScreen() {
         if (!res.ok) return;
         const ride = await res.json();
         // Only act on terminal or unexpected status changes
-        if (ride.status === "cancelled" || ride.status === "trip_completed") {
+        if (isTerminalRideStatus(ride.status)) {
           applyRideUpdate(ride);
         }
       } catch {}

@@ -159,7 +159,28 @@ test("acknowledges trip completion before background settlement work", () => {
 
   assert.ok(immediateResponse >= 0);
   assert.ok(settlementWork > immediateResponse);
+  assert.match(routesSource, /io\.emit\("ride:completed", immediateRide\)/);
   assert.match(routesSource, /if \(!res\.headersSent\)/);
+});
+
+test("client always closes the active trip and shows the correct completion payment summary", () => {
+  const clientSource = readProjectFile("app/client/index.tsx");
+  const notificationStart = clientSource.indexOf("addNotificationResponseReceivedListener");
+  const notificationEnd = clientSource.indexOf("addNotificationReceivedListener", notificationStart);
+  const notificationHandler = clientSource.slice(notificationStart, notificationEnd);
+  const completedSummaryStart = clientSource.indexOf('rideStatus === "completed" && !showRating');
+  const completedSummaryEnd = clientSource.indexOf("{showRating &&", completedSummaryStart);
+  const completedSummary = clientSource.slice(completedSummaryStart, completedSummaryEnd);
+
+  assert.match(clientSource, /function isTerminalRideStatus/);
+  assert.match(clientSource, /on\("ride:completed", handleStatusUpdate\)/);
+  assert.match(clientSource, /activeRes\.status === 204[\s\S]*?\/api\/rides\/\$\{rememberedRide\.id\}[\s\S]*?applyRideUpdate\(latestRide\)/);
+  assert.match(notificationHandler, /\/api\/rides\/\$\{data\.rideId\}/);
+  assert.doesNotMatch(notificationHandler, /setRideStatus\(\(prev\).*requested/);
+  assert.match(completedSummary, /Please Pay Cash/);
+  assert.match(completedSummary, /Please hand R/);
+  assert.match(completedSummary, /Trip Completed/);
+  assert.match(completedSummary, /Paid via/);
 });
 
 test("reprices rider stop updates and notifies the assigned driver", () => {

@@ -11548,6 +11548,7 @@ If you did not request this, you can ignore this email.`,
       if (status === "trip_completed") {
         const immediateRide = { ...ride, clientFirstName: "Client" };
         io.emit("ride:statusUpdate", immediateRide);
+        io.emit("ride:completed", immediateRide);
         res.json(immediateRide);
         void (async () => {
           try {
@@ -12322,7 +12323,7 @@ If you did not request this, you can ignore this email.`,
       if (!chauffeur2) return res.status(204).end();
       const allRides = await storage.getAllRides();
       const activeRide = allRides.find(
-        (r) => r.chauffeurId === chauffeur2.id && !["trip_completed", "cancelled"].includes(r.status)
+        (r) => r.chauffeurId === chauffeur2.id && !["trip_completed", "completed", "cancelled"].includes(r.status)
       );
       if (!activeRide) return res.status(204).end();
       const client = await storage.getUser(activeRide.clientId).catch(() => null);
@@ -12343,7 +12344,7 @@ If you did not request this, you can ignore this email.`,
       if (!chauffeur2) return res.status(204).end();
       const allRides = await storage.getAllRides();
       const activeRide = allRides.find(
-        (r) => r.chauffeurId === chauffeur2.id && !["trip_completed", "cancelled"].includes(r.status)
+        (r) => r.chauffeurId === chauffeur2.id && !["trip_completed", "completed", "cancelled"].includes(r.status)
       );
       if (!activeRide) return res.status(204).end();
       const client = await storage.getUser(activeRide.clientId).catch(() => null);
@@ -12364,7 +12365,7 @@ If you did not request this, you can ignore this email.`,
       if (!chauffeur2) return res.status(204).end();
       const allRides = await storage.getAllRides();
       const activeRide = allRides.find(
-        (r) => r.chauffeurId === chauffeur2.id && !["trip_completed", "cancelled"].includes(r.status)
+        (r) => r.chauffeurId === chauffeur2.id && !["trip_completed", "completed", "cancelled"].includes(r.status)
       );
       if (!activeRide) return res.status(204).end();
       const client = await storage.getUser(activeRide.clientId).catch(() => null);
@@ -12383,7 +12384,7 @@ If you did not request this, you can ignore this email.`,
     try {
       const allRides = await storage.getAllRides();
       const activeRide = allRides.find(
-        (r) => r.clientId === req.params.clientId && !["trip_completed", "cancelled"].includes(r.status)
+        (r) => r.clientId === req.params.clientId && !["trip_completed", "completed", "cancelled"].includes(r.status)
       );
       if (!activeRide) return res.status(204).end();
       const chauffeurDetails = activeRide.chauffeurId ? await getResolvedChauffeurDetails(activeRide.chauffeurId, activeRide.vehicleId) : null;
@@ -12400,13 +12401,13 @@ If you did not request this, you can ignore this email.`,
       const userId = req.params.userId;
       const allRides = await storage.getAllRides();
       let activeRide = allRides.find(
-        (r) => r.clientId === userId && !["trip_completed", "cancelled"].includes(r.status)
+        (r) => r.clientId === userId && !["trip_completed", "completed", "cancelled"].includes(r.status)
       );
       if (!activeRide) {
         const chauffeur2 = await storage.getChauffeurByUserId(userId);
         if (chauffeur2) {
           activeRide = allRides.find(
-            (r) => r.chauffeurId === chauffeur2.id && !["trip_completed", "cancelled"].includes(r.status)
+            (r) => r.chauffeurId === chauffeur2.id && !["trip_completed", "completed", "cancelled"].includes(r.status)
           );
         }
       }

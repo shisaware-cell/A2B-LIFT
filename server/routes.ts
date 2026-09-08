@@ -10117,6 +10117,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (status === "trip_completed") {
         const immediateRide = { ...ride, clientFirstName: "Client" };
         io.emit("ride:statusUpdate", immediateRide);
+        io.emit("ride:completed", immediateRide);
         res.json(immediateRide);
 
         // Send trip invoice email to the rider asynchronously
@@ -11002,7 +11003,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allRides = await storage.getAllRides();
       const activeRide = allRides.find((r) =>
         r.chauffeurId === chauffeur.id &&
-        !["trip_completed", "cancelled"].includes(r.status as string)
+        !["trip_completed", "completed", "cancelled"].includes(r.status as string)
       );
       if (!activeRide) return res.status(204).end();
       const client = await storage.getUser(activeRide.clientId).catch(() => null);
@@ -11025,7 +11026,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allRides = await storage.getAllRides();
       const activeRide = allRides.find((r) =>
         r.chauffeurId === chauffeur.id &&
-        !["trip_completed", "cancelled"].includes(r.status as string)
+        !["trip_completed", "completed", "cancelled"].includes(r.status as string)
       );
       if (!activeRide) return res.status(204).end();
       const client = await storage.getUser(activeRide.clientId).catch(() => null);
@@ -11048,7 +11049,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allRides = await storage.getAllRides();
       const activeRide = allRides.find((r) =>
         r.chauffeurId === chauffeur.id &&
-        !["trip_completed", "cancelled"].includes(r.status as string)
+        !["trip_completed", "completed", "cancelled"].includes(r.status as string)
       );
       if (!activeRide) return res.status(204).end();
       const client = await storage.getUser(activeRide.clientId).catch(() => null);
@@ -11069,7 +11070,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allRides = await storage.getAllRides();
       const activeRide = allRides.find((r) =>
         r.clientId === req.params.clientId &&
-        !["trip_completed", "cancelled"].includes(r.status as string)
+        !["trip_completed", "completed", "cancelled"].includes(r.status as string)
       );
       if (!activeRide) return res.status(204).end();
       const chauffeurDetails = activeRide.chauffeurId
@@ -11090,14 +11091,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allRides = await storage.getAllRides();
       let activeRide = allRides.find((r) =>
         r.clientId === userId &&
-        !["trip_completed", "cancelled"].includes(r.status as string)
+        !["trip_completed", "completed", "cancelled"].includes(r.status as string)
       );
       if (!activeRide) {
         const chauffeur = await storage.getChauffeurByUserId(userId);
         if (chauffeur) {
           activeRide = allRides.find((r) =>
             r.chauffeurId === chauffeur.id &&
-            !["trip_completed", "cancelled"].includes(r.status as string)
+            !["trip_completed", "completed", "cancelled"].includes(r.status as string)
           );
         }
       }
