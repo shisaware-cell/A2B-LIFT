@@ -5,7 +5,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest, getApiUrl } from "@/lib/query-client";
 import Colors from "@/constants/colors";
@@ -76,6 +76,8 @@ export default function ClientWalletScreen() {
   const [paystackVerifying, setPaystackVerifying] = useState(false);
   const paystackRef = useRef<string | null>(null);
   const paystackPopup = useRef<Window | null>(null);
+  const params = useLocalSearchParams<{ reference?: string; trxref?: string; status?: string }>();
+  const processedRefs = useRef<Set<string>>(new Set());
 
   const loadData = useCallback(async () => {
     try {
@@ -116,6 +118,15 @@ export default function ClientWalletScreen() {
     }, [loadData, refreshUser]),
   );
 
+  // Auto-verify when app is opened via deep link with payment callback reference
+  useEffect(() => {
+    const callbackRef = params.reference || params.trxref;
+    if (callbackRef && !processedRefs.current.has(callbackRef)) {
+      processedRefs.current.add(callbackRef);
+      void verifyPaystackPayment(callbackRef, "Payment verified and card saved!", false);
+    }
+  }, [params.reference, params.trxref]);
+
   // Listen for postMessage from the Paystack popup callback (web only)
   useEffect(() => {
     if (Platform.OS !== "web") return;
@@ -127,23 +138,44 @@ export default function ClientWalletScreen() {
         paystackPopup.current?.close();
       } catch {}
       paystackPopup.current = null;
-      await verifyPaystackPayment(ref);
+      await verifyPaystackPayment(ref, "Payment verified and card saved!", false);
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
   async function verifyPaystackPayment(reference: string, successMsg?: string, silentOnFail = false) {
+    if (!reference) return;
     setPaystackVerifying(true);
     try {
-      await apiRequest("POST", "/api/payments/verify", { reference });
-      await refreshUser();
-      await loadData();
-      Alert.alert("Success", successMsg || "Payment verified and card saved!");
+      let lastErr: any = null;
+      let resData: any = null;
+
+      // Try up to 2 times with a short pause if Paystack status is still settling
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const res = await apiRequest("POST", "/api/payments/verify", { reference });
+          resData = await res.json();
+          if (resData?.success) break;
+        } catch (err: any) {
+          lastErr = err;
+          if (attempt === 0) {
+            await new Promise((r) => setTimeout(r, 1500));
+          }
+        }
+      }
+
+      if (resData?.success) {
+        await refreshUser();
+        await loadData();
+        Alert.alert("Success", successMsg || "Payment verified and card saved!");
+      } else if (lastErr) {
+        throw lastErr;
+      }
     } catch (e: any) {
       if (!silentOnFail) {
         const msg = e?.message || "";
-        Alert.alert("Verification Failed", msg || "Could not verify payment. Contact support if you were charged.");
+        Alert.alert("Notice", msg || "Could not verify payment. Contact support if you were charged.");
       }
     } finally {
       setPaystackVerifying(false);
@@ -174,7 +206,7 @@ export default function ClientWalletScreen() {
           if (popup.closed) {
             clearInterval(poll);
             if (paystackRef.current) {
-              verifyPaystackPayment(reference, successMsg, true);
+              verifyPaystackPayment(reference, successMsg, false);
             }
           }
         } catch {}
@@ -190,14 +222,19 @@ export default function ClientWalletScreen() {
         let resolvedRef = reference;
         if ((result as any).url) {
           try {
-            const urlRef = new URL((result as any).url).searchParams.get("reference");
+            const parsed = Linking.parse((result as any).url);
+            const urlRef = (parsed.queryParams?.reference || parsed.queryParams?.trxref) as string;
             if (urlRef) resolvedRef = urlRef;
-          } catch {}
+          } catch {
+            try {
+              const urlRef = new URL((result as any).url).searchParams.get("reference");
+              if (urlRef) resolvedRef = urlRef;
+            } catch {}
+          }
         }
-        // Auto-verify silently — works whether user paid or dismissed
-        await verifyPaystackPayment(resolvedRef, successMsg, true);
+        await verifyPaystackPayment(resolvedRef, successMsg, false);
       } catch {
-        await verifyPaystackPayment(reference, successMsg, true);
+        await verifyPaystackPayment(reference, successMsg, false);
       }
     }
   }

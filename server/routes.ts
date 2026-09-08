@@ -63,6 +63,7 @@ import {
   getVehicleCategoryTitle,
   CATEGORY_MAX_SEATS,
 } from "../shared/fare-policy";
+import { processPaystackChargeSuccess } from "./payment-cards";
 import {
   buildPasswordResetUrl,
   createPasswordResetToken,
@@ -12491,56 +12492,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { reference } = req.body;
       const userId = req.auth!.sub;
 
-      const response = await paystackAPI.get(`/transaction/verify/${reference}`);
-      const txData = response.data.data;
-
-      if (txData.status !== "success") {
-        return res.status(400).json({ message: "Payment not successful", status: txData.status });
+      if (!reference) {
+        return res.status(400).json({ message: "Payment reference is required" });
       }
 
-      const amount = txData.amount / 100;
-      const metadata = txData.metadata || {};
-
-      if (metadata.saveCard && txData.authorization?.reusable) {
-        const auth = txData.authorization;
-        const existingCards = await storage.getSavedCardsByUser(userId);
-        const alreadySaved = existingCards.find((c: any) => c.last4 === auth.last4 && c.expYear === auth.exp_year);
-        if (!alreadySaved) {
-          await storage.createSavedCard({
-            userId,
-            paystackAuthCode: auth.authorization_code,
-            cardType: auth.card_type,
-            last4: auth.last4,
-            expMonth: auth.exp_month,
-            expYear: auth.exp_year,
-            bank: auth.bank,
-            isDefault: existingCards.length === 0,
-          });
+      // Retry up to 2 times if Paystack transaction is still pending/processing
+      let txData: any = null;
+      let lastStatus = "";
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const response = await paystackAPI.get(`/transaction/verify/${encodeURIComponent(reference)}`);
+        txData = response.data?.data;
+        lastStatus = txData?.status || "";
+        if (lastStatus === "success") {
+          break;
         }
-      }
-
-      if (metadata.rideId) {
-        const payments = await storage.getPaymentsByRide(metadata.rideId);
-        const pending = payments.find((p: any) => p.paystackReference === reference);
-        if (pending) {
-          await storage.updatePayment(pending.id, {
-            status: "paid",
-            paidAt: new Date(),
-            paystackAuthCode: txData.authorization?.authorization_code,
-          });
+        if (lastStatus === "pending" || lastStatus === "processing") {
+          if (attempt < 2) {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            continue;
+          }
         }
-        await storage.updateRide(metadata.rideId, { paymentStatus: "paid" });
+        break;
       }
 
-      if (!metadata.rideId && !metadata.saveCardOnly) {
-        const user = await storage.getUser(userId);
-        const balanceBefore = user?.walletBalance || 0;
-        const newBalance = balanceBefore + amount;
-        await storage.updateUser(userId, { walletBalance: newBalance });
-        await recordWalletTx(userId, "topup", amount, balanceBefore, "Wallet top-up via card", reference);
+      if (!txData || txData.status !== "success") {
+        return res.status(400).json({ message: "Payment not successful", status: lastStatus || "unknown" });
       }
 
-      return res.json({ success: true, amount, status: "paid" });
+      const result = await processPaystackChargeSuccess(
+        storage,
+        txData,
+        userId,
+        recordWalletTx
+      );
+
+      return res.json({
+        success: true,
+        amount: result.amount,
+        status: "paid",
+        cardSaved: result.cardResult?.saved ?? false,
+      });
     } catch (error: any) {
       console.error("[Paystack Verify]", error.response?.data || error.message);
       const psMsg = error.response?.data?.message;
@@ -12842,7 +12833,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { event, data } = req.body;
 
       if (event === "charge.success") {
-        console.log("[Webhook] Payment successful:", data.reference);
+        console.log("[Webhook] Payment successful:", data?.reference);
+        try {
+          await processPaystackChargeSuccess(
+            storage,
+            data,
+            data?.metadata?.userId,
+            recordWalletTx
+          );
+        } catch (procErr: any) {
+          console.error("[Webhook processPaystackChargeSuccess error]", procErr?.message || procErr);
+        }
       }
 
       if (event === "transfer.success") {

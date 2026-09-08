@@ -2864,6 +2864,184 @@ function combineDirectionSegments(segments) {
   };
 }
 
+// server/payment-cards.ts
+function parsePaystackMetadata(rawMetadata) {
+  let meta = {};
+  if (typeof rawMetadata === "string") {
+    try {
+      meta = JSON.parse(rawMetadata);
+    } catch {
+      meta = {};
+    }
+  } else if (rawMetadata && typeof rawMetadata === "object") {
+    meta = rawMetadata;
+  }
+  const saveCardRaw = meta.saveCard ?? meta.save_card ?? meta.savecard;
+  const saveCardOnlyRaw = meta.saveCardOnly ?? meta.save_card_only ?? meta.savecardonly;
+  const saveCard = saveCardRaw === true || saveCardRaw === "true" || saveCardRaw === 1 || saveCardRaw === "1";
+  const saveCardOnly = saveCardOnlyRaw === true || saveCardOnlyRaw === "true" || saveCardOnlyRaw === 1 || saveCardOnlyRaw === "1";
+  return {
+    ...meta,
+    userId: meta.userId || meta.user_id || void 0,
+    rideId: meta.rideId || meta.ride_id || null,
+    saveCard: saveCard || saveCardOnly,
+    saveCardOnly
+  };
+}
+function normalizePaystackCardAuth(auth) {
+  if (!auth || typeof auth !== "object") {
+    return {
+      paystackAuthCode: "",
+      cardType: "card",
+      last4: "",
+      expMonth: "",
+      expYear: "",
+      bank: "Bank Card",
+      isValid: false
+    };
+  }
+  const paystackAuthCode = String(auth.authorization_code || "").trim();
+  const last4 = String(auth.last4 || "").replace(/\D/g, "").slice(-4);
+  const rawMonth = String(auth.exp_month || "").replace(/\D/g, "");
+  const expMonth = rawMonth ? rawMonth.padStart(2, "0").slice(-2) : "";
+  const rawYear = String(auth.exp_year || "").replace(/\D/g, "");
+  const expYear = rawYear ? rawYear.length === 2 ? `20${rawYear}` : rawYear.slice(-4) : "";
+  const cardType = String(auth.card_type || auth.brand || "card").trim().toLowerCase();
+  const bank = String(auth.bank || "").trim() || "Bank Card";
+  const isValid = Boolean(
+    paystackAuthCode && last4.length === 4 && expMonth.length === 2 && expYear.length === 4
+  );
+  return {
+    paystackAuthCode,
+    cardType,
+    last4,
+    expMonth,
+    expYear,
+    bank,
+    reusable: typeof auth.reusable === "boolean" ? auth.reusable : void 0,
+    isValid
+  };
+}
+async function savePaystackCardFromTransaction(storage2, txData, fallbackUserId) {
+  const metadata = parsePaystackMetadata(txData?.metadata);
+  const userId = metadata.userId || fallbackUserId;
+  if (!userId) {
+    return { saved: false, reason: "No userId found in metadata or fallback" };
+  }
+  const shouldSave = Boolean(metadata.saveCard || metadata.saveCardOnly);
+  if (!shouldSave) {
+    return { saved: false, reason: "Card saving not requested in transaction metadata" };
+  }
+  const auth = normalizePaystackCardAuth(txData?.authorization);
+  if (!auth.isValid) {
+    return { saved: false, reason: "Invalid card authorization data" };
+  }
+  try {
+    const existingCards = await storage2.getSavedCardsByUser(userId) || [];
+    const matched = existingCards.find(
+      (c) => String(c.last4) === auth.last4 && String(c.expYear) === auth.expYear
+    );
+    if (matched) {
+      const updated = await storage2.updateSavedCard(matched.id, {
+        paystackAuthCode: auth.paystackAuthCode,
+        cardType: auth.cardType || matched.cardType,
+        bank: auth.bank || matched.bank
+      });
+      return { saved: true, updated: true, card: updated || matched };
+    }
+    const newCard = await storage2.createSavedCard({
+      userId,
+      paystackAuthCode: auth.paystackAuthCode,
+      cardType: auth.cardType,
+      last4: auth.last4,
+      expMonth: auth.expMonth,
+      expYear: auth.expYear,
+      bank: auth.bank,
+      isDefault: existingCards.length === 0
+    });
+    return { saved: true, updated: false, card: newCard };
+  } catch (error) {
+    console.error("[savePaystackCardFromTransaction error]", error?.message || error);
+    return { saved: false, reason: error?.message || "Storage error saving card" };
+  }
+}
+async function processPaystackChargeSuccess(storage2, txData, fallbackUserId, recordWalletTx) {
+  const metadata = parsePaystackMetadata(txData?.metadata);
+  const userId = metadata.userId || fallbackUserId;
+  const amount = Number(txData?.amount || 0) / 100;
+  const reference = String(txData?.reference || "");
+  const cardResult = await savePaystackCardFromTransaction(storage2, txData, userId);
+  if (metadata.rideId) {
+    try {
+      const payments2 = await storage2.getPaymentsByRide(metadata.rideId) || [];
+      const pending = payments2.find((p) => p.paystackReference === reference || p.status === "pending");
+      if (pending) {
+        await storage2.updatePayment(pending.id, {
+          status: "paid",
+          paidAt: /* @__PURE__ */ new Date(),
+          paystackAuthCode: txData.authorization?.authorization_code
+        });
+      }
+      await storage2.updateRide(metadata.rideId, { paymentStatus: "paid" });
+    } catch (err) {
+      console.error("[processPaystackChargeSuccess ride error]", err?.message || err);
+    }
+  }
+  if (!metadata.rideId && userId && amount > 0) {
+    try {
+      const existingTxs = await storage2.getWalletTransactions(userId) || [];
+      const alreadyProcessed = existingTxs.some((tx) => tx.reference === reference);
+      if (!alreadyProcessed) {
+        const user = await storage2.getUser(userId);
+        const balanceBefore = Number(user?.walletBalance || 0);
+        if (metadata.saveCardOnly) {
+          const newBalance = balanceBefore + amount;
+          await storage2.updateUser(userId, { walletBalance: newBalance });
+          if (recordWalletTx) {
+            await recordWalletTx(userId, "refund", amount, balanceBefore, "Card verification refund", reference);
+          } else {
+            await storage2.createWalletTransaction({
+              userId,
+              type: "refund",
+              amount,
+              balanceBefore,
+              balanceAfter: newBalance,
+              reference,
+              description: "Card verification refund",
+              status: "completed"
+            });
+          }
+        } else {
+          const newBalance = balanceBefore + amount;
+          await storage2.updateUser(userId, { walletBalance: newBalance });
+          if (recordWalletTx) {
+            await recordWalletTx(userId, "topup", amount, balanceBefore, "Wallet top-up via card", reference);
+          } else {
+            await storage2.createWalletTransaction({
+              userId,
+              type: "topup",
+              amount,
+              balanceBefore,
+              balanceAfter: newBalance,
+              reference,
+              description: "Wallet top-up via card",
+              status: "completed"
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[processPaystackChargeSuccess wallet error]", err?.message || err);
+    }
+  }
+  return {
+    success: true,
+    cardResult,
+    amount,
+    userId
+  };
+}
+
 // server/password-reset.ts
 var import_node_crypto2 = __toESM(require("node:crypto"));
 var PASSWORD_RESET_TOKEN_TTL_MS = 30 * 60 * 1e3;
@@ -13443,50 +13621,41 @@ If you did not request this, you can ignore this email.`,
     try {
       const { reference } = req.body;
       const userId = req.auth.sub;
-      const response = await paystackAPI.get(`/transaction/verify/${reference}`);
-      const txData = response.data.data;
-      if (txData.status !== "success") {
-        return res.status(400).json({ message: "Payment not successful", status: txData.status });
+      if (!reference) {
+        return res.status(400).json({ message: "Payment reference is required" });
       }
-      const amount = txData.amount / 100;
-      const metadata = txData.metadata || {};
-      if (metadata.saveCard && txData.authorization?.reusable) {
-        const auth = txData.authorization;
-        const existingCards = await storage.getSavedCardsByUser(userId);
-        const alreadySaved = existingCards.find((c) => c.last4 === auth.last4 && c.expYear === auth.exp_year);
-        if (!alreadySaved) {
-          await storage.createSavedCard({
-            userId,
-            paystackAuthCode: auth.authorization_code,
-            cardType: auth.card_type,
-            last4: auth.last4,
-            expMonth: auth.exp_month,
-            expYear: auth.exp_year,
-            bank: auth.bank,
-            isDefault: existingCards.length === 0
-          });
+      let txData = null;
+      let lastStatus = "";
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const response = await paystackAPI.get(`/transaction/verify/${encodeURIComponent(reference)}`);
+        txData = response.data?.data;
+        lastStatus = txData?.status || "";
+        if (lastStatus === "success") {
+          break;
         }
-      }
-      if (metadata.rideId) {
-        const payments2 = await storage.getPaymentsByRide(metadata.rideId);
-        const pending = payments2.find((p) => p.paystackReference === reference);
-        if (pending) {
-          await storage.updatePayment(pending.id, {
-            status: "paid",
-            paidAt: /* @__PURE__ */ new Date(),
-            paystackAuthCode: txData.authorization?.authorization_code
-          });
+        if (lastStatus === "pending" || lastStatus === "processing") {
+          if (attempt < 2) {
+            await new Promise((resolve2) => setTimeout(resolve2, 1500));
+            continue;
+          }
         }
-        await storage.updateRide(metadata.rideId, { paymentStatus: "paid" });
+        break;
       }
-      if (!metadata.rideId && !metadata.saveCardOnly) {
-        const user = await storage.getUser(userId);
-        const balanceBefore = user?.walletBalance || 0;
-        const newBalance = balanceBefore + amount;
-        await storage.updateUser(userId, { walletBalance: newBalance });
-        await recordWalletTx(userId, "topup", amount, balanceBefore, "Wallet top-up via card", reference);
+      if (!txData || txData.status !== "success") {
+        return res.status(400).json({ message: "Payment not successful", status: lastStatus || "unknown" });
       }
-      return res.json({ success: true, amount, status: "paid" });
+      const result = await processPaystackChargeSuccess(
+        storage,
+        txData,
+        userId,
+        recordWalletTx
+      );
+      return res.json({
+        success: true,
+        amount: result.amount,
+        status: "paid",
+        cardSaved: result.cardResult?.saved ?? false
+      });
     } catch (error) {
       console.error("[Paystack Verify]", error.response?.data || error.message);
       const psMsg = error.response?.data?.message;
@@ -13763,7 +13932,17 @@ If you did not request this, you can ignore this email.`,
       }
       const { event, data } = req.body;
       if (event === "charge.success") {
-        console.log("[Webhook] Payment successful:", data.reference);
+        console.log("[Webhook] Payment successful:", data?.reference);
+        try {
+          await processPaystackChargeSuccess(
+            storage,
+            data,
+            data?.metadata?.userId,
+            recordWalletTx
+          );
+        } catch (procErr) {
+          console.error("[Webhook processPaystackChargeSuccess error]", procErr?.message || procErr);
+        }
       }
       if (event === "transfer.success") {
         await storage.updateWithdrawalByTransferCode(data.transfer_code, {

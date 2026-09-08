@@ -315,6 +315,17 @@ export default function ProfileScreen() {
           <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
         </Pressable>
 
+        <Pressable style={({ pressed }) => [styles.menuItem, pressed && { opacity: 0.7 }]} onPress={() => router.push("/client/wallet")}>
+          <View style={styles.menuIconCircle}>
+            <Ionicons name="card-outline" size={20} color={Colors.white} />
+          </View>
+          <View style={styles.menuTextBlock}>
+            <Text style={styles.menuText}>Payment Methods & Cards</Text>
+            <Text style={styles.menuSubText}>Manage saved cards & wallet balance</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+        </Pressable>
+
         <Pressable style={({ pressed }) => [styles.menuItem, pressed && { opacity: 0.7 }]} onPress={() => router.push("/client/settings")}>
           <View style={[styles.menuIconCircle, { borderBottomWidth: 0 }]}>
             <Ionicons name="settings-outline" size={20} color={Colors.white} />
