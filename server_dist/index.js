@@ -8010,14 +8010,9 @@ If you did not request this, you can ignore this email.`,
           const vehicleCategory = v.vehicleType || v.category || "Standard";
           let lat = assignedDriver?.lat != null ? assignedDriver.lat : v.lat != null ? parseFloat(String(v.lat)) : null;
           let lng = assignedDriver?.lng != null ? assignedDriver.lng : v.lng != null ? parseFloat(String(v.lng)) : null;
-          if (lat == null && partnerChauffeur?.lat != null) {
+          if (lat == null && profile.type === "driver" && partnerChauffeur?.lat != null) {
             lat = parseFloat(String(partnerChauffeur.lat));
             lng = parseFloat(String(partnerChauffeur.lng));
-          }
-          if (lat == null) {
-            const offset = (v.id.charCodeAt(v.id.length - 1) % 10 - 5) * 3e-3;
-            lat = -26.2041 + offset;
-            lng = 28.0473 + offset;
           }
           const carStatus = assignedDriver ? assignedDriver.status : v.status === "approved" ? "parked" : v.status;
           return {
@@ -10132,6 +10127,7 @@ If you did not request this, you can ignore this email.`,
       const activeStatuses = /* @__PURE__ */ new Set(["chauffeur_assigned", "chauffeur_arriving", "chauffeur_arrived", "trip_started"]);
       const now = Date.now();
       const cars = [];
+      let onlineWithoutLocation = 0;
       for (const chauffeur2 of allChauffeurs) {
         if (!chauffeur2.isApproved) continue;
         const currentRide = allRides.find(
@@ -10145,8 +10141,8 @@ If you did not request this, you can ignore this email.`,
         let lat = chauffeur2.lat != null ? parseFloat(String(chauffeur2.lat)) : null;
         let lng = chauffeur2.lng != null ? parseFloat(String(chauffeur2.lng)) : null;
         if (lat == null || isNaN(lat) || lng == null || isNaN(lng)) {
-          lat = -26.2041;
-          lng = 28.0473;
+          onlineWithoutLocation++;
+          continue;
         }
         const vehicle = chauffeur2.activeVehicleId ? vehicleMap.get(chauffeur2.activeVehicleId) : null;
         const carMake = vehicle?.carMake || vehicle?.make || chauffeur2.carMake || "Vehicle";
@@ -10248,6 +10244,7 @@ If you did not request this, you can ignore this email.`,
       return res.json({
         cars: filteredCars,
         allCarsCount: cars.length,
+        onlineWithoutLocation,
         cities: citiesMetadata,
         selectedCity: selectedCityMeta ? selectedCityMeta.name : "All Cities",
         selectedCityKey: selectedCityMeta ? selectedCityMeta.key : "all",
@@ -10256,7 +10253,7 @@ If you did not request this, you can ignore this email.`,
           totalOnline: filteredCars.length,
           available: filteredCars.filter((c) => c.status === "available").length,
           inTrip: filteredCars.filter((c) => c.status === "in_trip").length,
-          totalCountrywideOnline: cars.length
+          totalCountrywideOnline: cars.length + onlineWithoutLocation
         }
       });
     } catch (error) {
@@ -14377,8 +14374,8 @@ function setupSecurity(app2) {
           scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://unpkg.com", "https://cdn.jsdelivr.net", "https://maps.googleapis.com", "https://maps.gstatic.com", "https://js.paystack.co", "https://checkout.paystack.com"],
           scriptSrcElem: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://unpkg.com", "https://cdn.jsdelivr.net", "https://maps.googleapis.com", "https://maps.gstatic.com", "https://js.paystack.co", "https://checkout.paystack.com"],
           scriptSrcAttr: ["'unsafe-inline'"],
-          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-          styleSrcElem: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://unpkg.com"],
+          styleSrcElem: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://unpkg.com"],
           fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
           imgSrc: ["'self'", "data:", "https:"],
           connectSrc: ["'self'", "https:", "wss:"],

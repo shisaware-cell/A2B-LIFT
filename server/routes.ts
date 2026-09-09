@@ -5982,14 +5982,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           let lat = assignedDriver?.lat != null ? assignedDriver.lat : (v.lat != null ? parseFloat(String(v.lat)) : null);
           let lng = assignedDriver?.lng != null ? assignedDriver.lng : (v.lng != null ? parseFloat(String(v.lng)) : null);
-          if (lat == null && partnerChauffeur?.lat != null) {
+          if (lat == null && profile.type === "driver" && partnerChauffeur?.lat != null) {
             lat = parseFloat(String(partnerChauffeur.lat));
             lng = parseFloat(String(partnerChauffeur.lng));
-          }
-          if (lat == null) {
-            const offset = (v.id.charCodeAt(v.id.length - 1) % 10 - 5) * 0.003;
-            lat = -26.2041 + offset;
-            lng = 28.0473 + offset;
           }
 
           const carStatus = assignedDriver ? assignedDriver.status : (v.status === "approved" ? "parked" : v.status);
@@ -8425,6 +8420,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const now = Date.now();
       const cars: any[] = [];
+      let onlineWithoutLocation = 0;
 
       for (const chauffeur of allChauffeurs) {
         if (!chauffeur.isApproved) continue;
@@ -8446,8 +8442,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let lng = chauffeur.lng != null ? parseFloat(String(chauffeur.lng)) : null;
 
         if (lat == null || isNaN(lat) || lng == null || isNaN(lng)) {
-          lat = -26.2041;
-          lng = 28.0473;
+          onlineWithoutLocation++;
+          continue;
         }
 
         const vehicle = chauffeur.activeVehicleId ? vehicleMap.get(chauffeur.activeVehicleId) : null;
@@ -8569,6 +8565,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({
         cars: filteredCars,
         allCarsCount: cars.length,
+        onlineWithoutLocation,
         cities: citiesMetadata,
         selectedCity: selectedCityMeta ? selectedCityMeta.name : "All Cities",
         selectedCityKey: selectedCityMeta ? selectedCityMeta.key : "all",
@@ -8579,7 +8576,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalOnline: filteredCars.length,
           available: filteredCars.filter((c) => c.status === "available").length,
           inTrip: filteredCars.filter((c) => c.status === "in_trip").length,
-          totalCountrywideOnline: cars.length,
+          totalCountrywideOnline: cars.length + onlineWithoutLocation,
         },
       });
     } catch (error: any) {

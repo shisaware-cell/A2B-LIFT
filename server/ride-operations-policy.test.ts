@@ -668,8 +668,9 @@ test("partner dashboard fleet live map stability, complete vehicle visibility, a
   const dashboardHtml = readFileSync(resolve(process.cwd(), "website/dashboard.html"), "utf-8");
   const serverRoutes = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
 
-  // 1. High-stability retina CartoDB Voyager tile layer
-  assert.match(dashboardHtml, /basemaps\.cartocdn\.com\/rastertiles\/voyager/);
+  // 1. Public OpenStreetMap tiles do not depend on a CARTO API key
+  assert.match(dashboardHtml, /tile\.openstreetmap\.org\/\{z\}\/\{x\}\/\{y\}\.png/);
+  assert.doesNotMatch(dashboardHtml, /basemaps\.cartocdn\.com/);
 
   // 2. Multi-stage invalidateSize calls to guarantee crisp layout on tab switches and window resize
   assert.match(dashboardHtml, /\[50,\s*150,\s*300,\s*600\]\.forEach/);
@@ -690,17 +691,23 @@ test("partner dashboard fleet live map stability, complete vehicle visibility, a
   // 6. Backend /api/fleet/live-locations supports assigned vehicles for driver operators
   assert.match(serverRoutes, /driverAssignments\s*=\s*await storage\.getVehicleAssignments\(\{\s*driverOperatorProfileId:\s*profile\.id\s*\}\)/);
   assert.match(serverRoutes, /approvalStatus:\s*v\.status/);
+  assert.match(serverRoutes, /profile\.type === "driver" && partnerChauffeur\?\.lat != null/);
+  assert.doesNotMatch(serverRoutes, /const offset = \(v\.id\.charCodeAt/);
 });
 
 test("admin dashboard live fleet map with South African city filtering and auto-refresh are verified", () => {
   const adminHtml = readFileSync(resolve(process.cwd(), "server/templates/admin.html"), "utf-8");
   const a2bAdminHtml = readFileSync(resolve(process.cwd(), "a2b-admin.html"), "utf-8");
   const serverRoutes = readFileSync(resolve(process.cwd(), "server/routes.ts"), "utf-8");
+  const serverIndex = readFileSync(resolve(process.cwd(), "server/index.ts"), "utf-8");
 
   // 1. Leaflet CDN in admin head
   assert.match(adminHtml, /leaflet@1\.9\.4\/dist\/leaflet\.css/);
   assert.match(adminHtml, /leaflet@1\.9\.4\/dist\/leaflet\.js/);
+  assert.match(adminHtml, /tile\.openstreetmap\.org\/\{z\}\/\{x\}\/\{y\}\.png/);
+  assert.match(adminHtml, /const res = await apiFetch\(url\)/);
   assert.strictEqual(adminHtml, a2bAdminHtml, "server/templates/admin.html and a2b-admin.html must be identical");
+  assert.match(serverIndex, /styleSrcElem:[^\n]+https:\/\/unpkg\.com/);
 
   // 2. Nav item in sidebar
   assert.match(adminHtml, /onclick="go\('liveMap',this\);closeSidebar\(\)"/);
@@ -725,6 +732,7 @@ test("admin dashboard live fleet map with South African city filtering and auto-
   assert.match(serverRoutes, /getHaversineDistanceKm/);
   assert.match(serverRoutes, /resolveSouthAfricanCity/);
   assert.match(serverRoutes, /totalCountrywideOnline/);
+  assert.match(serverRoutes, /onlineWithoutLocation/);
 });
 
 test("category max seats policy enforces user specifications and admin editing across all platforms", () => {
@@ -819,5 +827,4 @@ test("client app map renders realistic top-down car markers within 4km radius ma
   assert.match(nativeMap, /rotation=\{heading \|\| 0\}/);
   assert.match(nativeMap, /point\.heading === other\?\.heading/);
 });
-
 
