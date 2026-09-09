@@ -3042,6 +3042,24 @@ async function processPaystackChargeSuccess(storage2, txData, fallbackUserId, re
   };
 }
 
+// shared/paystack-reference.ts
+var PAYSTACK_REFERENCE_PATTERN = /^[A-Za-z0-9._=-]+$/;
+function collectReferenceValues(value) {
+  if (Array.isArray(value)) {
+    return value.flatMap(collectReferenceValues);
+  }
+  if (typeof value !== "string") return [];
+  return value.split(",").map((part) => part.trim()).filter(Boolean);
+}
+function normalizePaystackReference(value) {
+  const values = collectReferenceValues(value);
+  if (values.length === 0) return null;
+  const [reference] = values;
+  if (!values.every((candidate) => candidate === reference)) return null;
+  if (!PAYSTACK_REFERENCE_PATTERN.test(reference)) return null;
+  return reference;
+}
+
 // server/password-reset.ts
 var import_node_crypto2 = __toESM(require("node:crypto"));
 var PASSWORD_RESET_TOKEN_TTL_MS = 30 * 60 * 1e3;
@@ -13470,7 +13488,7 @@ If you did not request this, you can ignore this email.`,
     }
   }
   app2.get("/api/payments/webview-callback", (req, res) => {
-    const reference = req.query.reference || req.query.trxref || "";
+    const reference = normalizePaystackReference(req.query.reference) || normalizePaystackReference(req.query.trxref) || "";
     const status = String(req.query.status || "");
     const appVariant = String(req.query.app || "").toLowerCase();
     const defaultNativeReturnUrl = appVariant === "driver" ? "a2blift://payments/paystack-callback" : appVariant === "client" ? "a2bliftclient://payments/paystack-callback" : "";
@@ -13617,10 +13635,10 @@ If you did not request this, you can ignore this email.`,
   });
   app2.post("/api/payments/verify", requireAuth, async (req, res) => {
     try {
-      const { reference } = req.body;
+      const reference = normalizePaystackReference(req.body?.reference);
       const userId = req.auth.sub;
       if (!reference) {
-        return res.status(400).json({ message: "Payment reference is required" });
+        return res.status(400).json({ message: "A valid payment reference is required" });
       }
       let txData = null;
       let lastStatus = "";
@@ -13652,7 +13670,8 @@ If you did not request this, you can ignore this email.`,
         success: true,
         amount: result.amount,
         status: "paid",
-        cardSaved: result.cardResult?.saved ?? false
+        cardSaved: result.cardResult?.saved ?? false,
+        cardSaveReason: result.cardResult?.reason
       });
     } catch (error) {
       console.error("[Paystack Verify]", error.response?.data || error.message);
