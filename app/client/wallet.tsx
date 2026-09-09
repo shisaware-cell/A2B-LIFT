@@ -11,6 +11,7 @@ import { apiRequest, getApiUrl } from "@/lib/query-client";
 import Colors from "@/constants/colors";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
+import { normalizePaystackReference } from "@shared/paystack-reference";
 
 interface SavedCard {
   id: string;
@@ -76,7 +77,11 @@ export default function ClientWalletScreen() {
   const [paystackVerifying, setPaystackVerifying] = useState(false);
   const paystackRef = useRef<string | null>(null);
   const paystackPopup = useRef<Window | null>(null);
-  const params = useLocalSearchParams<{ reference?: string; trxref?: string; status?: string }>();
+  const params = useLocalSearchParams<{
+    reference?: string | string[];
+    trxref?: string | string[];
+    status?: string | string[];
+  }>();
   const processedRefs = useRef<Set<string>>(new Set());
 
   const loadData = useCallback(async () => {
@@ -120,7 +125,8 @@ export default function ClientWalletScreen() {
 
   // Auto-verify when app is opened via deep link with payment callback reference
   useEffect(() => {
-    const callbackRef = params.reference || params.trxref;
+    const callbackRef = normalizePaystackReference(params.reference)
+      || normalizePaystackReference(params.trxref);
     if (callbackRef && !processedRefs.current.has(callbackRef)) {
       processedRefs.current.add(callbackRef);
       void verifyPaystackPayment(callbackRef, "Payment verified and card saved!", false);
@@ -145,7 +151,11 @@ export default function ClientWalletScreen() {
   }, []);
 
   async function verifyPaystackPayment(reference: string, successMsg?: string, silentOnFail = false) {
-    if (!reference) return;
+    const normalizedReference = normalizePaystackReference(reference);
+    if (!normalizedReference) {
+      if (!silentOnFail) Alert.alert("Notice", "The payment callback contained an invalid reference.");
+      return;
+    }
     setPaystackVerifying(true);
     try {
       let lastErr: any = null;
@@ -154,7 +164,7 @@ export default function ClientWalletScreen() {
       // Try up to 2 times with a short pause if Paystack status is still settling
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
-          const res = await apiRequest("POST", "/api/payments/verify", { reference });
+          const res = await apiRequest("POST", "/api/payments/verify", { reference: normalizedReference });
           resData = await res.json();
           if (resData?.success) break;
         } catch (err: any) {
@@ -168,7 +178,15 @@ export default function ClientWalletScreen() {
       if (resData?.success) {
         await refreshUser();
         await loadData();
-        Alert.alert("Success", successMsg || "Payment verified and card saved!");
+        if (resData.cardSaved === false) {
+          Alert.alert(
+            "Card not saved",
+            resData.cardSaveReason
+              || "The payment succeeded, but Paystack did not return reusable card details. Please add the card again.",
+          );
+        } else {
+          Alert.alert("Success", successMsg || "Payment verified and card saved!");
+        }
       } else if (lastErr) {
         throw lastErr;
       }
@@ -223,7 +241,8 @@ export default function ClientWalletScreen() {
         if ((result as any).url) {
           try {
             const parsed = Linking.parse((result as any).url);
-            const urlRef = (parsed.queryParams?.reference || parsed.queryParams?.trxref) as string;
+            const urlRef = normalizePaystackReference(parsed.queryParams?.reference)
+              || normalizePaystackReference(parsed.queryParams?.trxref);
             if (urlRef) resolvedRef = urlRef;
           } catch {
             try {

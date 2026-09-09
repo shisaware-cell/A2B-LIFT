@@ -7,6 +7,17 @@ import {
   processPaystackChargeSuccess,
 } from "./payment-cards";
 import { redirectSystemPath } from "../app/+native-intent";
+import { normalizePaystackReference } from "../shared/paystack-reference";
+
+test("normalizePaystackReference collapses duplicate callback values", () => {
+  const reference = "A2B-1788895755000-3346d2";
+
+  assert.equal(normalizePaystackReference(reference), reference);
+  assert.equal(normalizePaystackReference([reference, reference]), reference);
+  assert.equal(normalizePaystackReference(`${reference},${reference}`), reference);
+  assert.equal(normalizePaystackReference([reference, "A2B-DIFFERENT"]), null);
+  assert.equal(normalizePaystackReference(`${reference}?status=success`), null);
+});
 
 test("parsePaystackMetadata handles objects and JSON strings gracefully", () => {
   // Direct object

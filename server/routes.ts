@@ -64,6 +64,7 @@ import {
   CATEGORY_MAX_SEATS,
 } from "../shared/fare-policy";
 import { processPaystackChargeSuccess } from "./payment-cards";
+import { normalizePaystackReference } from "../shared/paystack-reference";
 import {
   buildPasswordResetUrl,
   createPasswordResetToken,
@@ -12323,7 +12324,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // GET /api/payments/webview-callback  — Paystack redirects here after payment; sends postMessage back to opener/parent
   app.get("/api/payments/webview-callback", (req: Request, res: Response) => {
-    const reference = (req.query.reference || req.query.trxref || "") as string;
+    const reference = normalizePaystackReference(req.query.reference)
+      || normalizePaystackReference(req.query.trxref)
+      || "";
     const status = String(req.query.status || "");
     const appVariant = String(req.query.app || "").toLowerCase();
     const defaultNativeReturnUrl = appVariant === "driver"
@@ -12487,11 +12490,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST /api/payments/verify
   app.post("/api/payments/verify", requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
-      const { reference } = req.body;
+      const reference = normalizePaystackReference(req.body?.reference);
       const userId = req.auth!.sub;
 
       if (!reference) {
-        return res.status(400).json({ message: "Payment reference is required" });
+        return res.status(400).json({ message: "A valid payment reference is required" });
       }
 
       // Retry up to 2 times if Paystack transaction is still pending/processing
@@ -12529,6 +12532,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         amount: result.amount,
         status: "paid",
         cardSaved: result.cardResult?.saved ?? false,
+        cardSaveReason: result.cardResult?.reason,
       });
     } catch (error: any) {
       console.error("[Paystack Verify]", error.response?.data || error.message);
