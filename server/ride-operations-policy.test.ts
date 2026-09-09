@@ -684,6 +684,7 @@ test("partner dashboard fleet live map stability, complete vehicle visibility, a
   // 4. Single-point zoom clamping prevents excessive zoom disorientation
   assert.match(dashboardHtml, /fleetState\.mapInstance\.setView\(bounds\[0\],\s*14\)/);
   assert.match(dashboardHtml, /rawLat == null \|\| rawLng == null/);
+  assert.match(dashboardHtml, /rawLat == null \|\| rawLat === '' \? NaN : Number\(rawLat\)/);
 
   // 5. Driver partner assigned vehicle inclusion and parity
   assert.match(dashboardHtml, /const assignedVehicles\s*=\s*\(assignmentData\.assignments\s*\|\|\s*\[\]\)/);

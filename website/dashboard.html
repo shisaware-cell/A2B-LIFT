@@ -2304,8 +2304,10 @@
       if (vehicles.length > 0) {
         html += `<div style="font-size:11px;font-weight:800;text-transform:uppercase;color:var(--grey-500);margin:4px 0 10px;letter-spacing:0.05em;">Fleet Cars (${vehicles.length})</div>`;
         html += vehicles.map(v => {
-          const lat = Number(v.lat ?? v.latitude);
-          const lng = Number(v.lng ?? v.longitude);
+          const rawLat = v.lat ?? v.latitude;
+          const rawLng = v.lng ?? v.longitude;
+          const lat = rawLat == null || rawLat === '' ? NaN : Number(rawLat);
+          const lng = rawLng == null || rawLng === '' ? NaN : Number(rawLng);
           const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
           const assigned = v.assignedDriver;
           const isTrip = v.status === 'in_trip' || assigned?.status === 'in_trip';
