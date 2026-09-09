@@ -2183,8 +2183,11 @@
 
       // 1. Plot all fleet vehicles
       vehicles.forEach(v => {
-        const lat = Number(v.lat ?? v.latitude);
-        const lng = Number(v.lng ?? v.longitude);
+        const rawLat = v.lat ?? v.latitude;
+        const rawLng = v.lng ?? v.longitude;
+        if (rawLat == null || rawLng == null || rawLat === '' || rawLng === '') return;
+        const lat = Number(rawLat);
+        const lng = Number(rawLng);
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
 
         plottedVehicleIds.add(v.id);
@@ -2235,8 +2238,11 @@
         if (d.activeVehicleId && plottedVehicleIds.has(d.activeVehicleId)) return;
         if (d.vehicle?.id && plottedVehicleIds.has(d.vehicle.id)) return;
 
-        const lat = Number(d.lat ?? d.latitude ?? d.location?.latitude ?? d.location?.lat);
-        const lng = Number(d.lng ?? d.longitude ?? d.location?.longitude ?? d.location?.lng);
+        const rawLat = d.lat ?? d.latitude ?? d.location?.latitude ?? d.location?.lat;
+        const rawLng = d.lng ?? d.longitude ?? d.location?.longitude ?? d.location?.lng;
+        if (rawLat == null || rawLng == null || rawLat === '' || rawLng === '') return;
+        const lat = Number(rawLat);
+        const lng = Number(rawLng);
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
 
         bounds.push([lat, lng]);

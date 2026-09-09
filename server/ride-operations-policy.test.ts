@@ -683,6 +683,7 @@ test("partner dashboard fleet live map stability, complete vehicle visibility, a
 
   // 4. Single-point zoom clamping prevents excessive zoom disorientation
   assert.match(dashboardHtml, /fleetState\.mapInstance\.setView\(bounds\[0\],\s*14\)/);
+  assert.match(dashboardHtml, /rawLat == null \|\| rawLng == null/);
 
   // 5. Driver partner assigned vehicle inclusion and parity
   assert.match(dashboardHtml, /const assignedVehicles\s*=\s*\(assignmentData\.assignments\s*\|\|\s*\[\]\)/);
@@ -827,4 +828,3 @@ test("client app map renders realistic top-down car markers within 4km radius ma
   assert.match(nativeMap, /rotation=\{heading \|\| 0\}/);
   assert.match(nativeMap, /point\.heading === other\?\.heading/);
 });
-
