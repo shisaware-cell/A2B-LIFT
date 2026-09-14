@@ -65,6 +65,9 @@ function getVariantConfig(variant) {
       iosBuildNumber: getIosBuildNumber("client", "28"),
       runtimeVersion: "1.0.0-client",
       notificationChannel: "client-alerts",
+      icon: "assets/images/icon.png",
+      splash: "assets/images/splash-client.png",
+      androidAdaptiveForeground: "assets/images/android-icon-foreground-car.png",
     };
   }
 
@@ -84,6 +87,7 @@ function getVariantConfig(variant) {
     runtimeVersion: "1.0.44",
     notificationChannel: "ride-alerts-v3",
     icon: "assets/images/driver-icon.png",
+    splash: "assets/images/splash-driver.png",
     androidAdaptiveForeground: "assets/images/driver-android-icon-foreground.png",
   };
 }
@@ -98,6 +102,11 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
       }
     : {};
 
+  const splashImage = assetPath(
+    assetPrefix,
+    config.splash || config.icon || "assets/images/icon.png"
+  );
+
   return withReactNativeMapsAndroidKey({
     name: config.name,
     slug: config.slug,
@@ -109,7 +118,7 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
     userInterfaceStyle: "dark",
     newArchEnabled: true,
     splash: {
-      image: assetPath(assetPrefix, "assets/images/splash-icon.png"),
+      image: splashImage,
       resizeMode: "contain",
       backgroundColor: "#000000",
     },
@@ -144,6 +153,11 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
       softwareKeyboardLayoutMode: "resize",
       adaptiveIcon: {
         foregroundImage: assetPath(assetPrefix, config.androidAdaptiveForeground || "assets/images/android-icon-foreground-car.png"),
+        backgroundColor: "#000000",
+      },
+      splash: {
+        image: splashImage,
+        resizeMode: "contain",
         backgroundColor: "#000000",
       },
       permissions: [
