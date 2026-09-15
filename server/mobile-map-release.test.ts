@@ -128,6 +128,25 @@ test("uses the iOS Google Maps key for iOS builds even when Android key is prese
   assert.equal(appConfig.extra.googleMapsApiKey, "ios-key");
 });
 
+test("uses app-specific native splash artwork for both mobile variants", () => {
+  const config = loadAppConfigWithEnv({});
+  const expectedSplashImages = {
+    driver: "./assets/images/splash-driver.png",
+    client: "./assets/images/android-icon-foreground-car.png",
+  } as const;
+
+  for (const [variant, expectedImage] of Object.entries(expectedSplashImages)) {
+    const appConfig = config.createMobileAppConfig({ variant });
+    const splashPlugin = appConfig.plugins.find(
+      (plugin: unknown) => Array.isArray(plugin) && plugin[0] === "expo-splash-screen",
+    );
+
+    assert.ok(splashPlugin, `${variant} must configure the native splash plugin`);
+    assert.equal(splashPlugin[1].image, expectedImage);
+    assert.equal(splashPlugin[1].backgroundColor, "#000000");
+  }
+});
+
 test("keeps mobile API traffic on Railway and referral links on a2blift.com", () => {
   const easConfig = JSON.parse(readProjectFile("eas.json"));
   for (const [profileName, profile] of Object.entries<any>(easConfig.build)) {

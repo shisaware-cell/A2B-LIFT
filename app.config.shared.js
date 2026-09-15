@@ -66,7 +66,7 @@ function getVariantConfig(variant) {
       runtimeVersion: "1.0.0-client",
       notificationChannel: "client-alerts",
       icon: "assets/images/icon.png",
-      splash: "assets/images/splash-client.png",
+      splash: "assets/images/android-icon-foreground-car.png",
       androidAdaptiveForeground: "assets/images/android-icon-foreground-car.png",
     };
   }
@@ -191,6 +191,19 @@ function createMobileAppConfig({ variant = "driver", assetPrefix = "." } = {}) {
       "expo-router",
       "expo-font",
       "expo-web-browser",
+      [
+        "expo-splash-screen",
+        {
+          image: splashImage,
+          imageWidth: 120,
+          resizeMode: "contain",
+          backgroundColor: "#000000",
+          dark: {
+            image: splashImage,
+            backgroundColor: "#000000",
+          },
+        },
+      ],
       ...(config.variant === "client" ? ["./plugins/without-driver-overlay"] : []),
       [
         "expo-build-properties",
