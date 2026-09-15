@@ -199,12 +199,16 @@ test("detects driver concurrent device session conflicts correctly", () => {
 test("android build configuration includes required foreground and background location permissions", () => {
   const { createMobileAppConfig } = require("../app.config.shared");
   const driverConfig = createMobileAppConfig({ variant: "driver" });
+  const clientConfig = createMobileAppConfig({ variant: "client" });
   const permissions = driverConfig.android.permissions;
 
   assert.ok(permissions.includes("android.permission.ACCESS_FINE_LOCATION"));
   assert.ok(permissions.includes("android.permission.ACCESS_BACKGROUND_LOCATION"));
   assert.ok(permissions.includes("android.permission.FOREGROUND_SERVICE"));
   assert.ok(permissions.includes("android.permission.FOREGROUND_SERVICE_LOCATION"));
+  assert.ok(clientConfig.android.permissions.includes("android.permission.ACCESS_FINE_LOCATION"));
+  assert.ok(!clientConfig.android.permissions.includes("android.permission.ACCESS_BACKGROUND_LOCATION"));
+  assert.ok(!clientConfig.android.permissions.includes("android.permission.FOREGROUND_SERVICE_LOCATION"));
 });
 
 test("calculates accurate bearing rotation angle between GPS coordinates", () => {

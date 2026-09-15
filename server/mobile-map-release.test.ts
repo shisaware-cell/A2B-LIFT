@@ -147,6 +147,17 @@ test("uses app-specific native splash artwork for both mobile variants", () => {
   }
 });
 
+test("discloses driver background location use before Android requests permission", () => {
+  const driverSource = readProjectFile("app/chauffeur/index.tsx");
+  const disclosureIndex = driverSource.indexOf("A2B DRIVER collects precise location data");
+  const permissionIndex = driverSource.indexOf("Location.requestBackgroundPermissionsAsync()");
+
+  assert.ok(disclosureIndex >= 0, "driver must show the prominent background-location disclosure");
+  assert.ok(permissionIndex > disclosureIndex, "disclosure must appear before the background permission request");
+  assert.match(driverSource, /even when the app is closed or not in use/);
+  assert.match(driverSource, /if \(!activeChauffeur\.isOnline\) \{[\s\S]*?ensureDriverLocationPermissions\(\)/);
+});
+
 test("keeps mobile API traffic on Railway and referral links on a2blift.com", () => {
   const easConfig = JSON.parse(readProjectFile("eas.json"));
   for (const [profileName, profile] of Object.entries<any>(easConfig.build)) {

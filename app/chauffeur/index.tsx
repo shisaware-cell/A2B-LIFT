@@ -1169,7 +1169,7 @@ export default function ChauffeurDashboard() {
       const fallback = lastKnown || JHB_FALLBACK;
 
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
+        const { status } = await Location.getForegroundPermissionsAsync();
         if (cancelled) return;
 
         if (status !== "granted") {
@@ -1779,6 +1779,60 @@ export default function ChauffeurDashboard() {
   }, []);
 
   // ─── Actions ──────────────────────────────────────────────────────────────
+  function showBackgroundLocationDisclosure() {
+    return new Promise<boolean>((resolve) => {
+      Alert.alert(
+        "Background location",
+        "A2B DRIVER collects precise location data to provide continuous driver tracking for ride dispatch and active trips, even when the app is closed or not in use. While you are online, this location is shared with riders and A2B LIFT to show your approach and trip progress.",
+        [
+          { text: "Not now", style: "cancel", onPress: () => resolve(false) },
+          { text: "Continue", onPress: () => resolve(true) },
+        ],
+        { cancelable: false },
+      );
+    });
+  }
+
+  async function ensureDriverLocationPermissions() {
+    if (Platform.OS === "web" || isExpoGoAndroid) return true;
+
+    let foreground = await Location.getForegroundPermissionsAsync();
+    if (Platform.OS !== "android") {
+      if (foreground.status !== "granted") {
+        foreground = await Location.requestForegroundPermissionsAsync();
+      }
+      return foreground.status === "granted";
+    }
+
+    let background = await Location.getBackgroundPermissionsAsync();
+    if (foreground.status === "granted" && background.status === "granted") return true;
+
+    const shouldContinue = await showBackgroundLocationDisclosure();
+    if (!shouldContinue) return false;
+
+    if (foreground.status !== "granted") {
+      foreground = await Location.requestForegroundPermissionsAsync();
+    }
+    if (foreground.status !== "granted") {
+      Alert.alert("Location required", "Allow location access to go online and receive ride requests.");
+      return false;
+    }
+
+    background = await Location.getBackgroundPermissionsAsync();
+    if (background.status !== "granted") {
+      background = await Location.requestBackgroundPermissionsAsync();
+    }
+    if (background.status !== "granted") {
+      Alert.alert(
+        "Background location required",
+        "Choose Allow all the time so A2B DRIVER can share your location while you are online and the app is not visible.",
+      );
+      return false;
+    }
+
+    return true;
+  }
+
   async function toggleOnline() {
     let activeChauffeur = chauffeur;
     if (!activeChauffeur?.id && user?.id) {
@@ -1794,6 +1848,13 @@ export default function ChauffeurDashboard() {
       router.push("/chauffeur/vehicles" as never);
       closeMenu();
       return;
+    }
+    if (!activeChauffeur.isOnline) {
+      const locationGranted = await ensureDriverLocationPermissions();
+      if (!locationGranted) {
+        closeMenu();
+        return;
+      }
     }
     try {
       const res = await apiRequest("PUT", `/api/chauffeurs/${activeChauffeur.id}/toggle-online`);
@@ -1872,16 +1933,12 @@ export default function ChauffeurDashboard() {
   async function startBackgroundLocationTask(activeChauffeurId: string, session: number) {
     if (Platform.OS === "web" || isExpoGoAndroid) return;
     try {
-      const foreground = await Location.requestForegroundPermissionsAsync();
+      const foreground = await Location.getForegroundPermissionsAsync();
       if (session !== locationSessionRef.current || !isOnlineRef.current) return;
       if (foreground.status !== "granted") return;
 
       if (Platform.OS === "android") {
-        let background = await Location.getBackgroundPermissionsAsync();
-        if (session !== locationSessionRef.current || !isOnlineRef.current) return;
-        if (background.status !== "granted" && AppState.currentState === "active") {
-          background = await Location.requestBackgroundPermissionsAsync();
-        }
+        const background = await Location.getBackgroundPermissionsAsync();
         if (session !== locationSessionRef.current || !isOnlineRef.current) return;
         if (background.status !== "granted") return;
       }
@@ -1936,9 +1993,9 @@ export default function ChauffeurDashboard() {
     const session = ++locationSessionRef.current;
     locationStartInFlightRef.current = session;
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const hasLocationPermission = await ensureDriverLocationPermissions();
       if (session !== locationSessionRef.current) return;
-      if (status !== "granted") { setMyLocation(JHB_FALLBACK); return; }
+      if (!hasLocationPermission) { setMyLocation(JHB_FALLBACK); return; }
       void startBackgroundLocationTask(activeChauffeurId, session);
 
       try {
