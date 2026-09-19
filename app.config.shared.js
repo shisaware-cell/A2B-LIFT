@@ -23,6 +23,7 @@ function getBuildGoogleMapsApiKey() {
 
 const defaultPamolProjectId = "f282a582-7512-48d6-b563-13aa571d9115";
 const defaultPascalProjectId = "eb3b8747-40b2-4aad-b118-e64339bfeea0";
+const defaultA2bDriverProjectId = "8ccd04f4-997e-44f6-9a40-bac2550cb75f";
 const defaultClientProjectId = "9932543b-f023-4dec-8213-5d0fe99ad749";
 const defaultClientSlug = "a2b-lift-client-eas-mFdHJz";
 const appVersion = process.env.EXPO_APP_VERSION || "1.0.17";
@@ -44,7 +45,9 @@ function assetPath(assetPrefix, relativePath) {
 function getDriverProjectId(owner) {
   const explicitProjectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
   if (explicitProjectId) return explicitProjectId;
-  return owner === "pascal225" ? defaultPascalProjectId : defaultPamolProjectId;
+  if (owner === "pascal225") return defaultPascalProjectId;
+  if (owner === "pamol-digital") return defaultPamolProjectId;
+  return defaultA2bDriverProjectId;
 }
 
 function getVariantConfig(variant) {
@@ -71,7 +74,7 @@ function getVariantConfig(variant) {
     };
   }
 
-  const owner = process.env.EXPO_PUBLIC_EAS_OWNER || "pascal225";
+  const owner = process.env.EXPO_PUBLIC_EAS_OWNER || "a2bliftclub";
   return {
     variant: "driver",
     owner,
