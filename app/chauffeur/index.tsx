@@ -224,6 +224,7 @@ export default function ChauffeurDashboard() {
   const [partnerRefreshing, setPartnerRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(false);
+  const [isTogglingOnline, setIsTogglingOnline] = useState(false);
   const [incomingRide, setIncomingRide] = useState<any>(null);
   const [incomingOfferSeconds, setIncomingOfferSeconds] = useState<number>(45);
   const [currentRide, setCurrentRide] = useState<any>(null);
@@ -1801,7 +1802,18 @@ export default function ChauffeurDashboard() {
       if (foreground.status !== "granted") {
         foreground = await Location.requestForegroundPermissionsAsync();
       }
-      return foreground.status === "granted";
+      if (foreground.status !== "granted") {
+        Alert.alert(
+          "Location required",
+          "Allow location access to go online and receive ride requests.",
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Open Settings", onPress: () => Linking.openSettings() },
+          ],
+        );
+        return false;
+      }
+      return true;
     }
 
     let background = await Location.getBackgroundPermissionsAsync();
@@ -1814,76 +1826,94 @@ export default function ChauffeurDashboard() {
       foreground = await Location.requestForegroundPermissionsAsync();
     }
     if (foreground.status !== "granted") {
-      Alert.alert("Location required", "Allow location access to go online and receive ride requests.");
+      Alert.alert(
+        "Location required",
+        "Allow location access to go online and receive ride requests.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Open Settings", onPress: () => Linking.openSettings() },
+        ],
+      );
       return false;
     }
 
     background = await Location.getBackgroundPermissionsAsync();
     if (background.status !== "granted") {
-      background = await Location.requestBackgroundPermissionsAsync();
+      try {
+        background = await Location.requestBackgroundPermissionsAsync();
+      } catch {}
     }
     if (background.status !== "granted") {
       Alert.alert(
-        "Background location required",
-        "Choose Allow all the time so A2B DRIVER can share your location while you are online and the app is not visible.",
+        "Background location",
+        "To receive trip alerts while A2B DRIVER is minimized, choose 'Allow all the time' in Settings. You can still drive while the app remains open.",
+        [
+          { text: "Continue", style: "default" },
+          { text: "Open Settings", onPress: () => Linking.openSettings() },
+        ],
       );
-      return false;
     }
 
     return true;
   }
 
   async function toggleOnline() {
-    let activeChauffeur = chauffeur;
-    if (!activeChauffeur?.id && user?.id) {
-      activeChauffeur = await fetchChauffeurForUser(user.id);
-    }
-    if (!activeChauffeur?.id) {
-      Alert.alert("Error", "Unable to load driver profile");
-      closeMenu();
-      return;
-    }
-    if (!activeChauffeur.isOnline && !activeChauffeur.activeVehicleId) {
-      Alert.alert("Select vehicle", "Choose an approved assigned vehicle before going online.");
-      router.push("/chauffeur/vehicles" as never);
-      closeMenu();
-      return;
-    }
-    if (!activeChauffeur.isOnline) {
-      const locationGranted = await ensureDriverLocationPermissions();
-      if (!locationGranted) {
+    if (isTogglingOnline) return;
+    setIsTogglingOnline(true);
+    try {
+      let activeChauffeur = chauffeur;
+      if (!activeChauffeur?.id && user?.id) {
+        activeChauffeur = await fetchChauffeurForUser(user.id);
+      }
+      if (!activeChauffeur?.id) {
+        Alert.alert("Error", "Unable to load driver profile");
         closeMenu();
         return;
       }
-    }
-    try {
-      const res = await apiRequest("PUT", `/api/chauffeurs/${activeChauffeur.id}/toggle-online`);
-      const updated = await res.json();
-      setChauffeur(updated);
-      setIsOnline(updated.isOnline);
-      await AsyncStorage.setItem("a2b_chauffeur", JSON.stringify(updated));
-      if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    } catch (e: any) {
-      const recovered = user?.id ? await fetchChauffeurForUser(user.id) : null;
-      if (recovered?.id) {
-        try {
-          const retryRes = await apiRequest("PUT", `/api/chauffeurs/${recovered.id}/toggle-online`);
-          const updated = await retryRes.json();
-          setChauffeur(updated);
-          setIsOnline(updated.isOnline);
-          await AsyncStorage.setItem("a2b_chauffeur", JSON.stringify(updated));
-          if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          closeMenu();
-          return;
-        } catch (retryError: any) {
-          Alert.alert("Error", retryError.message || e.message || "Failed to update status");
+      if (!activeChauffeur.isOnline && !activeChauffeur.activeVehicleId) {
+        Alert.alert("Select vehicle", "Choose an approved assigned vehicle before going online.");
+        router.push("/chauffeur/vehicles" as never);
+        closeMenu();
+        return;
+      }
+      if (!activeChauffeur.isOnline) {
+        const locationGranted = await ensureDriverLocationPermissions();
+        if (!locationGranted) {
           closeMenu();
           return;
         }
       }
-      Alert.alert("Error", e.message || "Failed to update status");
+      try {
+        const res = await apiRequest("PUT", `/api/chauffeurs/${activeChauffeur.id}/toggle-online`);
+        const updated = await res.json();
+        setChauffeur(updated);
+        setIsOnline(updated.isOnline);
+        await AsyncStorage.setItem("a2b_chauffeur", JSON.stringify(updated));
+        if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      } catch (e: any) {
+        const recovered = user?.id ? await fetchChauffeurForUser(user.id) : null;
+        if (recovered?.id) {
+          try {
+            const retryRes = await apiRequest("PUT", `/api/chauffeurs/${recovered.id}/toggle-online`);
+            const updated = await retryRes.json();
+            setChauffeur(updated);
+            setIsOnline(updated.isOnline);
+            await AsyncStorage.setItem("a2b_chauffeur", JSON.stringify(updated));
+            if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            closeMenu();
+            return;
+          } catch (retryError: any) {
+            Alert.alert("Error", retryError.message || e.message || "Failed to update status");
+            closeMenu();
+            return;
+          }
+        }
+        Alert.alert("Error", e.message || "Failed to update status");
+      }
+    } finally {
+      setIsTogglingOnline(false);
+      closeMenu();
     }
-    closeMenu();
   }
 
   const JHB_FALLBACK = { lat: -26.2041, lng: 28.0473 };
@@ -3048,11 +3078,16 @@ export default function ChauffeurDashboard() {
         </Pressable>
       )}
       <Pressable
-        style={[styles.onlinePill, { top: insets.top + 16 }, isOnline ? styles.onlinePillOn : styles.onlinePillOff]}
+        style={[styles.onlinePill, { top: insets.top + 16 }, isOnline ? styles.onlinePillOn : styles.onlinePillOff, isTogglingOnline && { opacity: 0.7 }]}
         onPress={toggleOnline}
+        disabled={isTogglingOnline}
       >
-        <View style={[styles.pillDot, { backgroundColor: isOnline ? Colors.success : "#555" }]} />
-        <Text style={styles.pillText}>{isOnline ? "Online" : "Offline"}</Text>
+        {isTogglingOnline ? (
+          <ActivityIndicator size="small" color={isOnline ? Colors.success : Colors.white} style={{ width: 10, height: 10 }} />
+        ) : (
+          <View style={[styles.pillDot, { backgroundColor: isOnline ? Colors.success : "#555" }]} />
+        )}
+        <Text style={styles.pillText}>{isTogglingOnline ? "Updating..." : isOnline ? "Online" : "Offline"}</Text>
       </Pressable>
 
       {/* ─── Partner Fleet Dashboard Button (Top-Center for partner/chauffeur in driver mode) ─── */}
