@@ -10,6 +10,15 @@ export function resolveRequestedOnlineState(
   return typeof requestedOnline === "boolean" ? requestedOnline : !Boolean(currentOnline);
 }
 
+export function shouldClearDriverSessionOnLogout(
+  activeDeviceId: string | null | undefined,
+  requestDeviceId: string | null | undefined,
+): boolean {
+  const active = String(activeDeviceId || "").trim();
+  const requesting = String(requestDeviceId || "").trim();
+  return !active || !requesting || active === requesting;
+}
+
 export function calculateWaitingFee(minutesSinceArrival: number): number {
   const chargeableMinutes = Math.max(0, Math.ceil(minutesSinceArrival - WAITING_GRACE_MINUTES));
   return Math.min(chargeableMinutes * WAITING_RATE_CENTS_PER_MINUTE, WAITING_CAP_CENTS);

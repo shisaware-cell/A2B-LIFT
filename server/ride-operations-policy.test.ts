@@ -10,6 +10,7 @@ import {
   resolveOperatorSubmissionStatus,
   resolveCancellation,
   resolveRequestedOnlineState,
+  shouldClearDriverSessionOnLogout,
   isValidLocationSample,
   isDriverNearLocation,
 } from "./ride-operations-policy";
@@ -35,6 +36,13 @@ test("sets driver online state idempotently while preserving legacy toggle reque
   assert.equal(resolveRequestedOnlineState(false, false), false);
   assert.equal(resolveRequestedOnlineState(false, undefined), true);
   assert.equal(resolveRequestedOnlineState(true, undefined), false);
+});
+
+test("prevents a stale device logout from taking the active driver device offline", () => {
+  assert.equal(shouldClearDriverSessionOnLogout("new-phone", "old-phone"), false);
+  assert.equal(shouldClearDriverSessionOnLogout("new-phone", "new-phone"), true);
+  assert.equal(shouldClearDriverSessionOnLogout(null, "new-phone"), true);
+  assert.equal(shouldClearDriverSessionOnLogout("new-phone", null), true);
 });
 
 test("includes the locked demand multiplier in a server-side quote", () => {

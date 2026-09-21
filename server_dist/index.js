@@ -2716,6 +2716,11 @@ var RIDER_CANCELLATION_TRAVEL_MINUTES = 3;
 function resolveRequestedOnlineState(currentOnline, requestedOnline) {
   return typeof requestedOnline === "boolean" ? requestedOnline : !Boolean(currentOnline);
 }
+function shouldClearDriverSessionOnLogout(activeDeviceId, requestDeviceId) {
+  const active = String(activeDeviceId || "").trim();
+  const requesting = String(requestDeviceId || "").trim();
+  return !active || !requesting || active === requesting;
+}
 function calculateWaitingFee(minutesSinceArrival) {
   const chargeableMinutes = Math.max(0, Math.ceil(minutesSinceArrival - WAITING_GRACE_MINUTES));
   return Math.min(chargeableMinutes * WAITING_RATE_CENTS_PER_MINUTE, WAITING_CAP_CENTS);
@@ -4602,11 +4607,14 @@ async function registerRoutes(app2) {
           const payload = (init_auth(), __toCommonJS(auth_exports)).verifyAccessToken(token);
           if (payload?.sub) {
             const chauffeur2 = await storage.getChauffeurByUserId(payload.sub);
-            if (chauffeur2) {
+            const requestDeviceId = String(req.headers["x-device-id"] || req.body?.deviceId || "").trim();
+            if (chauffeur2 && shouldClearDriverSessionOnLogout(chauffeur2.activeDeviceId, requestDeviceId)) {
               await storage.updateChauffeur(chauffeur2.id, {
                 activeDeviceId: null,
                 isOnline: false
               });
+            } else if (chauffeur2) {
+              console.log(`[auth/logout] ignored stale driver device for chauffeur ${chauffeur2.id}`);
             }
           }
         } catch {

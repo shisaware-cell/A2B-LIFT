@@ -49,6 +49,7 @@ import {
   isValidLocationSample,
   resolveCancellation,
   resolveRequestedOnlineState,
+  shouldClearDriverSessionOnLogout,
 } from "./ride-operations-policy";
 import {
   buildOsrmRouteUrl,
@@ -1885,17 +1886,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const authHeader = req.headers.authorization;
       if (authHeader && authHeader.startsWith("Bearer ")) {
-        // Attempt to clear driver device lock if token provided
+        // A stale device receives forceLogout after a new device takes over. It may
+        // clear only its own session, never the new device's online state.
         try {
           const token = authHeader.slice(7);
           const payload = require("./auth").verifyAccessToken(token);
           if (payload?.sub) {
             const chauffeur = await storage.getChauffeurByUserId(payload.sub);
-            if (chauffeur) {
+            const requestDeviceId = String(req.headers["x-device-id"] || req.body?.deviceId || "").trim();
+            if (chauffeur && shouldClearDriverSessionOnLogout(chauffeur.activeDeviceId, requestDeviceId)) {
               await storage.updateChauffeur(chauffeur.id, {
                 activeDeviceId: null,
                 isOnline: false,
               });
+            } else if (chauffeur) {
+              console.log(`[auth/logout] ignored stale driver device for chauffeur ${chauffeur.id}`);
             }
           }
         } catch {}
