@@ -2713,6 +2713,9 @@ var WAITING_GRACE_MINUTES = 5;
 var WAITING_RATE_CENTS_PER_MINUTE = 100;
 var WAITING_CAP_CENTS = 3e3;
 var RIDER_CANCELLATION_TRAVEL_MINUTES = 3;
+function resolveRequestedOnlineState(currentOnline, requestedOnline) {
+  return typeof requestedOnline === "boolean" ? requestedOnline : !Boolean(currentOnline);
+}
 function calculateWaitingFee(minutesSinceArrival) {
   const chargeableMinutes = Math.max(0, Math.ceil(minutesSinceArrival - WAITING_GRACE_MINUTES));
   return Math.min(chargeableMinutes * WAITING_RATE_CENTS_PER_MINUTE, WAITING_CAP_CENTS);
@@ -8831,7 +8834,7 @@ If you did not request this, you can ignore this email.`,
           message: "You have been logged out because your account was signed in on another device."
         });
       }
-      const nextOnline = !chauffeur2.isOnline;
+      const nextOnline = resolveRequestedOnlineState(chauffeur2.isOnline, req.body?.isOnline);
       if (nextOnline) {
         const application = await storage.getDriverApplicationByUserId(chauffeur2.userId).catch(() => void 0);
         if (application?.status === "waitlisted") {

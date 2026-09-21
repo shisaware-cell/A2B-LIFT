@@ -9,6 +9,7 @@ import {
   reconcileDriverProfileStatus,
   resolveOperatorSubmissionStatus,
   resolveCancellation,
+  resolveRequestedOnlineState,
   isValidLocationSample,
   isDriverNearLocation,
 } from "./ride-operations-policy";
@@ -25,6 +26,15 @@ test("charges R1 per started minute after a five minute arrival grace period and
 test("caps automatic high-demand pricing at the configured 1.5x maximum", () => {
   assert.equal(calculateDemandMultiplier({ searchingRides: 3, onlineDrivers: 1, maximum: 1.5 }), 1.5);
   assert.equal(calculateDemandMultiplier({ searchingRides: 1, onlineDrivers: 3, maximum: 1.5 }), 1);
+});
+
+test("sets driver online state idempotently while preserving legacy toggle requests", () => {
+  assert.equal(resolveRequestedOnlineState(false, true), true);
+  assert.equal(resolveRequestedOnlineState(true, true), true);
+  assert.equal(resolveRequestedOnlineState(true, false), false);
+  assert.equal(resolveRequestedOnlineState(false, false), false);
+  assert.equal(resolveRequestedOnlineState(false, undefined), true);
+  assert.equal(resolveRequestedOnlineState(true, undefined), false);
 });
 
 test("includes the locked demand multiplier in a server-side quote", () => {

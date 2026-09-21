@@ -48,6 +48,7 @@ import {
   calculateUnfinishedTripFare,
   isValidLocationSample,
   resolveCancellation,
+  resolveRequestedOnlineState,
 } from "./ride-operations-policy";
 import {
   buildOsrmRouteUrl,
@@ -6901,7 +6902,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: "You have been logged out because your account was signed in on another device.",
         });
       }
-      const nextOnline = !chauffeur.isOnline;
+      // New clients explicitly request the desired state so network retries are idempotent.
+      // Requests without a state retain the legacy toggle behavior for older builds.
+      const nextOnline = resolveRequestedOnlineState(chauffeur.isOnline, req.body?.isOnline);
       if (nextOnline) {
         const application = await storage.getDriverApplicationByUserId(chauffeur.userId).catch(() => undefined);
         if (application?.status === "waitlisted") {

@@ -155,7 +155,8 @@ test("discloses driver background location use before Android requests permissio
   assert.ok(disclosureIndex >= 0, "driver must show the prominent background-location disclosure");
   assert.ok(permissionIndex > disclosureIndex, "disclosure must appear before the background permission request");
   assert.match(driverSource, /even when the app is closed or not in use/);
-  assert.match(driverSource, /if \(!activeChauffeur\.isOnline\) \{[\s\S]*?ensureDriverLocationPermissions\(\)/);
+  assert.match(driverSource, /if \(desiredOnline\) \{[\s\S]*?ensureDriverLocationPermissions\(\)/);
+  assert.match(driverSource, /\{ isOnline: desiredOnline \}/);
 });
 
 test("keeps mobile API traffic on Railway and referral links on a2blift.com", () => {

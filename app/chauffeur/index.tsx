@@ -1859,6 +1859,7 @@ export default function ChauffeurDashboard() {
 
   async function toggleOnline() {
     if (isTogglingOnline) return;
+    const desiredOnline = !isOnline;
     setIsTogglingOnline(true);
     try {
       let activeChauffeur = chauffeur;
@@ -1870,13 +1871,13 @@ export default function ChauffeurDashboard() {
         closeMenu();
         return;
       }
-      if (!activeChauffeur.isOnline && !activeChauffeur.activeVehicleId) {
+      if (desiredOnline && !activeChauffeur.activeVehicleId) {
         Alert.alert("Select vehicle", "Choose an approved assigned vehicle before going online.");
         router.push("/chauffeur/vehicles" as never);
         closeMenu();
         return;
       }
-      if (!activeChauffeur.isOnline) {
+      if (desiredOnline) {
         const locationGranted = await ensureDriverLocationPermissions();
         if (!locationGranted) {
           closeMenu();
@@ -1884,22 +1885,35 @@ export default function ChauffeurDashboard() {
         }
       }
       try {
-        const res = await apiRequest("PUT", `/api/chauffeurs/${activeChauffeur.id}/toggle-online`);
+        const res = await apiRequest(
+          "PUT",
+          `/api/chauffeurs/${activeChauffeur.id}/toggle-online`,
+          { isOnline: desiredOnline },
+        );
         const updated = await res.json();
         setChauffeur(updated);
-        setIsOnline(updated.isOnline);
-        await AsyncStorage.setItem("a2b_chauffeur", JSON.stringify(updated));
-        if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        setIsOnline(Boolean(updated.isOnline));
+        AsyncStorage.setItem("a2b_chauffeur", JSON.stringify(updated)).catch(() => {});
+        if (Platform.OS !== "web") {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        }
       } catch (e: any) {
         const recovered = user?.id ? await fetchChauffeurForUser(user.id) : null;
         if (recovered?.id) {
+          if (Boolean(recovered.isOnline) === desiredOnline) return;
           try {
-            const retryRes = await apiRequest("PUT", `/api/chauffeurs/${recovered.id}/toggle-online`);
+            const retryRes = await apiRequest(
+              "PUT",
+              `/api/chauffeurs/${recovered.id}/toggle-online`,
+              { isOnline: desiredOnline },
+            );
             const updated = await retryRes.json();
             setChauffeur(updated);
-            setIsOnline(updated.isOnline);
-            await AsyncStorage.setItem("a2b_chauffeur", JSON.stringify(updated));
-            if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            setIsOnline(Boolean(updated.isOnline));
+            AsyncStorage.setItem("a2b_chauffeur", JSON.stringify(updated)).catch(() => {});
+            if (Platform.OS !== "web") {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+            }
             closeMenu();
             return;
           } catch (retryError: any) {

@@ -3,6 +3,13 @@ export const WAITING_RATE_CENTS_PER_MINUTE = 100;
 export const WAITING_CAP_CENTS = 3000;
 export const RIDER_CANCELLATION_TRAVEL_MINUTES = 3;
 
+export function resolveRequestedOnlineState(
+  currentOnline: boolean | null | undefined,
+  requestedOnline: unknown,
+): boolean {
+  return typeof requestedOnline === "boolean" ? requestedOnline : !Boolean(currentOnline);
+}
+
 export function calculateWaitingFee(minutesSinceArrival: number): number {
   const chargeableMinutes = Math.max(0, Math.ceil(minutesSinceArrival - WAITING_GRACE_MINUTES));
   return Math.min(chargeableMinutes * WAITING_RATE_CENTS_PER_MINUTE, WAITING_CAP_CENTS);
