@@ -1794,34 +1794,10 @@ export default function ChauffeurDashboard() {
     });
   }
 
-  async function ensureDriverLocationPermissions() {
+  async function ensureDriverForegroundLocationPermission() {
     if (Platform.OS === "web" || isExpoGoAndroid) return true;
 
     let foreground = await Location.getForegroundPermissionsAsync();
-    if (Platform.OS !== "android") {
-      if (foreground.status !== "granted") {
-        foreground = await Location.requestForegroundPermissionsAsync();
-      }
-      if (foreground.status !== "granted") {
-        Alert.alert(
-          "Location required",
-          "Allow location access to go online and receive ride requests.",
-          [
-            { text: "Cancel", style: "cancel" },
-            { text: "Open Settings", onPress: () => Linking.openSettings() },
-          ],
-        );
-        return false;
-      }
-      return true;
-    }
-
-    let background = await Location.getBackgroundPermissionsAsync();
-    if (foreground.status === "granted" && background.status === "granted") return true;
-
-    const shouldContinue = await showBackgroundLocationDisclosure();
-    if (!shouldContinue) return false;
-
     if (foreground.status !== "granted") {
       foreground = await Location.requestForegroundPermissionsAsync();
     }
@@ -1837,7 +1813,21 @@ export default function ChauffeurDashboard() {
       return false;
     }
 
-    background = await Location.getBackgroundPermissionsAsync();
+    return true;
+  }
+
+  async function requestDriverBackgroundLocationPermission() {
+    if (Platform.OS !== "android" || isExpoGoAndroid) return true;
+
+    const foreground = await Location.getForegroundPermissionsAsync();
+    if (foreground.status !== "granted") return false;
+
+    let background = await Location.getBackgroundPermissionsAsync();
+    if (background.status === "granted") return true;
+
+    const shouldContinue = await showBackgroundLocationDisclosure();
+    if (!shouldContinue) return false;
+
     if (background.status !== "granted") {
       try {
         background = await Location.requestBackgroundPermissionsAsync();
@@ -1854,7 +1844,7 @@ export default function ChauffeurDashboard() {
       );
     }
 
-    return true;
+    return background.status === "granted";
   }
 
   async function toggleOnline() {
@@ -1878,7 +1868,7 @@ export default function ChauffeurDashboard() {
         return;
       }
       if (desiredOnline) {
-        const locationGranted = await ensureDriverLocationPermissions();
+        const locationGranted = await ensureDriverForegroundLocationPermission();
         if (!locationGranted) {
           closeMenu();
           return;
@@ -2037,10 +2027,19 @@ export default function ChauffeurDashboard() {
     const session = ++locationSessionRef.current;
     locationStartInFlightRef.current = session;
     try {
-      const hasLocationPermission = await ensureDriverLocationPermissions();
+      const hasLocationPermission = await ensureDriverForegroundLocationPermission();
       if (session !== locationSessionRef.current) return;
       if (!hasLocationPermission) { setMyLocation(JHB_FALLBACK); return; }
-      void startBackgroundLocationTask(activeChauffeurId, session);
+
+      if (Platform.OS === "android") {
+        void requestDriverBackgroundLocationPermission().then((granted) => {
+          if (granted && session === locationSessionRef.current && isOnlineRef.current) {
+            void startBackgroundLocationTask(activeChauffeurId, session);
+          }
+        });
+      } else {
+        void startBackgroundLocationTask(activeChauffeurId, session);
+      }
 
       try {
         const loc = await getBestAvailablePosition();
@@ -4094,7 +4093,7 @@ const styles = StyleSheet.create({
   overviewLabel: { fontSize: 11, fontFamily: "Inter_500Medium", color: Colors.textMuted, marginTop: 2, textTransform: "uppercase" },
 
   // Floating overlays
-  onlinePill: { position: "absolute", left: 16, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 24, borderWidth: 1, zIndex: 5 },
+  onlinePill: { position: "absolute", left: 16, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 24, borderWidth: 1, zIndex: 30, elevation: 12 },
   onlinePillOn: { backgroundColor: "rgba(76,175,80,0.18)", borderColor: "rgba(76,175,80,0.4)" },
   onlinePillOff: { backgroundColor: GLASS, borderColor: GLASS_BORDER },
   pillDot: { width: 8, height: 8, borderRadius: 4 },

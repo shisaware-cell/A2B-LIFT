@@ -151,11 +151,18 @@ test("discloses driver background location use before Android requests permissio
   const driverSource = readProjectFile("app/chauffeur/index.tsx");
   const disclosureIndex = driverSource.indexOf("A2B DRIVER collects precise location data");
   const permissionIndex = driverSource.indexOf("Location.requestBackgroundPermissionsAsync()");
+  const toggleIndex = driverSource.indexOf('`/api/chauffeurs/${activeChauffeur.id}/toggle-online`');
+  const backgroundTrackingIndex = driverSource.indexOf("requestDriverBackgroundLocationPermission().then");
 
   assert.ok(disclosureIndex >= 0, "driver must show the prominent background-location disclosure");
   assert.ok(permissionIndex > disclosureIndex, "disclosure must appear before the background permission request");
   assert.match(driverSource, /even when the app is closed or not in use/);
-  assert.match(driverSource, /if \(desiredOnline\) \{[\s\S]*?ensureDriverLocationPermissions\(\)/);
+  assert.match(driverSource, /if \(desiredOnline\) \{[\s\S]*?ensureDriverForegroundLocationPermission\(\)/);
+  assert.ok(toggleIndex >= 0, "driver must send the online status request");
+  assert.ok(
+    backgroundTrackingIndex > toggleIndex,
+    "background permission must be requested by post-online location tracking instead of blocking the online request",
+  );
   assert.match(driverSource, /\{ isOnline: desiredOnline \}/);
 });
 
