@@ -22,6 +22,7 @@ import { getAppVariant, getAuthenticatedHomeRoute, usesRoleSelect } from "@mobil
 import { queryClient } from "@mobile-core/query";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AuthProvider, useAuth } from "@mobile-core/auth";
+import { TEMPORARY_SERVICE_BLOCK } from "@mobile-core/maintenance";
 import { SocketProvider } from "@mobile-core/socket";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 
@@ -111,7 +112,7 @@ function extractReferralCodeFromUrl(url: string): string | null {
 }
 
 function useAuthGate() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, clearSession } = useAuth();
   const pathname = usePathname();
   const navState = useRootNavigationState();
   const appVariant = getAppVariant();
@@ -130,6 +131,16 @@ function useAuthGate() {
       pathname === "/partner-register" ||
       pathname === "/role-select" ||
       pathname === "/chauffeur-register";
+
+    if (TEMPORARY_SERVICE_BLOCK) {
+      if (user) {
+        clearSession().catch(() => {});
+      }
+      if (isProtected) {
+        router.replace("/");
+      }
+      return;
+    }
 
     if (user && !shouldShowRoleSelect && pathname === "/role-select") {
       router.replace(authenticatedHomeRoute);

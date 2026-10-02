@@ -4,3 +4,4 @@ export * from "./location";
 export * from "./query";
 export * from "./socket";
 export * from "./storage";
+export * from "./maintenance";

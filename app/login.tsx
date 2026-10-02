@@ -14,6 +14,7 @@ import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@mobile-core/auth";
+import { TEMPORARY_SERVICE_BLOCK, TEMPORARY_SERVICE_BLOCK_MESSAGE } from "@mobile-core/maintenance";
 import { getAppVariant } from "@mobile-core/app-variant";
 import { apiRequest } from "@mobile-core/query";
 import { Colors } from "@mobile-ui/colors";
@@ -60,6 +61,12 @@ export default function LoginScreen() {
   }, []);
 
   async function handleDeepLinkCallback(url: string) {
+    if (TEMPORARY_SERVICE_BLOCK) {
+      setError(TEMPORARY_SERVICE_BLOCK_MESSAGE);
+      Alert.alert("Notice", TEMPORARY_SERVICE_BLOCK_MESSAGE);
+      setGoogleLoading(false);
+      return;
+    }
     try {
       const parsed = new URL(url);
       const err = parsed.searchParams.get("error");
@@ -90,6 +97,11 @@ export default function LoginScreen() {
   }
 
   async function handleLogin() {
+    if (TEMPORARY_SERVICE_BLOCK) {
+      setError(TEMPORARY_SERVICE_BLOCK_MESSAGE);
+      Alert.alert("Notice", TEMPORARY_SERVICE_BLOCK_MESSAGE);
+      return;
+    }
     if (!username.trim() || !password.trim()) { setError("Please fill in all fields"); return; }
     setLoading(true); setError(""); setResetMessage("");
     try {
@@ -105,6 +117,11 @@ export default function LoginScreen() {
       }
       // AuthGate handles navigation when user state changes
     } catch (e: any) {
+      if (e?.message === TEMPORARY_SERVICE_BLOCK_MESSAGE) {
+        setError(TEMPORARY_SERVICE_BLOCK_MESSAGE);
+        Alert.alert("Notice", TEMPORARY_SERVICE_BLOCK_MESSAGE);
+        return;
+      }
       const raw = (e?.message || "").toLowerCase();
       if (raw.includes("alert")) {
         // Fall back to device transfer prompt if active session conflict or clean message
@@ -126,6 +143,11 @@ export default function LoginScreen() {
   }
 
   async function handlePasswordResetRequest() {
+    if (TEMPORARY_SERVICE_BLOCK) {
+      setError(TEMPORARY_SERVICE_BLOCK_MESSAGE);
+      Alert.alert("Notice", TEMPORARY_SERVICE_BLOCK_MESSAGE);
+      return;
+    }
     const email = username.trim().toLowerCase();
     if (!email) {
       setError("Enter your email address first, then tap Forgot password.");
@@ -146,6 +168,11 @@ export default function LoginScreen() {
   }
 
   async function handleGoogleSignIn() {
+    if (TEMPORARY_SERVICE_BLOCK) {
+      setError(TEMPORARY_SERVICE_BLOCK_MESSAGE);
+      Alert.alert("Notice", TEMPORARY_SERVICE_BLOCK_MESSAGE);
+      return;
+    }
     setGoogleLoading(true);
     setError("");
     try {

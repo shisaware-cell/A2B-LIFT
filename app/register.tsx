@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator, Platform, Image } from "react-native";
+import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator, Platform, Image, Alert } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { getAppVariant, getAuthenticatedHomeRoute, usesRoleSelect } from "@mobile-core/app-variant";
 import { useAuth } from "@mobile-core/auth";
+import { TEMPORARY_SERVICE_BLOCK, TEMPORARY_SERVICE_BLOCK_MESSAGE } from "@mobile-core/maintenance";
 import { apiRequest } from "@mobile-core/query";
 import { Colors } from "@mobile-ui/colors";
 import * as WebBrowser from "expo-web-browser";
@@ -81,6 +82,12 @@ export default function RegisterScreen() {
   }, []);
 
   async function handleDeepLinkCallback(url: string) {
+    if (TEMPORARY_SERVICE_BLOCK) {
+      setError(TEMPORARY_SERVICE_BLOCK_MESSAGE);
+      Alert.alert("Notice", TEMPORARY_SERVICE_BLOCK_MESSAGE);
+      setGoogleLoading(false);
+      return;
+    }
     try {
       const parsed = new URL(url);
       const err = parsed.searchParams.get("error");
@@ -122,6 +129,11 @@ export default function RegisterScreen() {
   }
 
   async function handleRegister() {
+    if (TEMPORARY_SERVICE_BLOCK) {
+      setError(TEMPORARY_SERVICE_BLOCK_MESSAGE);
+      Alert.alert("Notice", TEMPORARY_SERVICE_BLOCK_MESSAGE);
+      return;
+    }
     if (!firstName.trim()) { setError("Name is required"); return; }
     if (!lastName.trim()) { setError("Surname is required"); return; }
     if (!email.trim()) { setError("Email is required"); return; }
@@ -311,6 +323,11 @@ export default function RegisterScreen() {
           {/* ── Google Sign Up ── */}
           <Pressable style={({ pressed }) => [styles.googleBtn, pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] }, googleLoading && { opacity: 0.7 }]}
             onPress={async () => {
+              if (TEMPORARY_SERVICE_BLOCK) {
+                setError(TEMPORARY_SERVICE_BLOCK_MESSAGE);
+                Alert.alert("Notice", TEMPORARY_SERVICE_BLOCK_MESSAGE);
+                return;
+              }
               setError("");
               setGoogleLoading(true);
               try {

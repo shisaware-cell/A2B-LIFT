@@ -11,6 +11,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Application from "expo-application";
 import * as Linking from "expo-linking";
 import { apiRequest, isUnauthorizedError, cleanErrorMessage } from "@/lib/query-client";
+import { TEMPORARY_SERVICE_BLOCK, TEMPORARY_SERVICE_BLOCK_MESSAGE } from "./maintenance-config";
 
 interface AuthUser {
   id: string;
@@ -166,7 +167,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [setPendingReferralCode, user]);
 
+  useEffect(() => {
+    if (TEMPORARY_SERVICE_BLOCK && user) {
+      void clearLocalSession();
+    }
+  }, [user]);
+
   async function loadUser() {
+    if (TEMPORARY_SERVICE_BLOCK) {
+      try {
+        await clearLocalSession();
+      } catch (e) {
+        console.error("Failed to clear user during maintenance block:", e);
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
     try {
       const stored = await AsyncStorage.getItem("a2b_user");
       const token = await AsyncStorage.getItem("a2b_token");
@@ -238,6 +255,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function login(username: string, password: string, forceSwitchDevice = false): Promise<{ requiresDeviceTransferConfirmation?: boolean; message?: string } | void> {
+    if (TEMPORARY_SERVICE_BLOCK) {
+      throw new Error(TEMPORARY_SERVICE_BLOCK_MESSAGE);
+    }
     const deviceId = await getOrCreateDeviceId();
     const appVariant = process.env.EXPO_PUBLIC_APP_VARIANT || (Platform.OS === "web" ? "web" : "driver");
     const res = await apiRequest("POST", "/api/auth/login", {
@@ -273,6 +293,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     phone: string;
     referralCode?: string;
   }): Promise<AuthUser> {
+    if (TEMPORARY_SERVICE_BLOCK) {
+      throw new Error(TEMPORARY_SERVICE_BLOCK_MESSAGE);
+    }
     const res = await apiRequest("POST", "/api/auth/register", data);
     const payload = (await res.json()) as LoginResponse;
     if (!res.ok) {
@@ -357,3 +380,5 @@ export function useAuth() {
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 }
+
+export { TEMPORARY_SERVICE_BLOCK, TEMPORARY_SERVICE_BLOCK_MESSAGE };
