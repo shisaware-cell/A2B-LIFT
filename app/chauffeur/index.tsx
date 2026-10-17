@@ -3433,8 +3433,8 @@ export default function ChauffeurDashboard() {
               <View style={styles.addrRow}>
                 <Ionicons name="time-outline" size={13} color={Colors.textMuted} />
                 <Text style={styles.addrText} numberOfLines={1}>
-                  {incomingRide.hourlyDurationHours || 2} hours with the guest
-                  {incomingRide.distanceKm ? ` · ${Math.round(incomingRide.distanceKm)} km included` : ""}
+                  {incomingRide.hourlyDurationHours || 2} hours
+                  {incomingRide.distanceKm ? ` · ${Math.round(incomingRide.distanceKm)} km` : ""}
                 </Text>
               </View>
             ) : (
@@ -3447,7 +3447,7 @@ export default function ChauffeurDashboard() {
               <View style={styles.boostRow}>
                 <Ionicons name="trending-up" size={12} color={Colors.success} />
                 <Text style={styles.boostText}>
-                  Fare increased {Math.round(Number(incomingRide.offerEscalationSteps) * 5)}% — still unclaimed
+                  +{Math.round(Number(incomingRide.offerEscalationSteps) * 5)}% boosted
                 </Text>
               </View>
             ) : null}

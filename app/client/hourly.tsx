@@ -1,9 +1,9 @@
 /**
- * Chauffeur-by-the-hour booking (V-Class only).
+ * Chauffeur-by-the-hour (V-Class only).
  *
- * The rider picks a pickup point and a block of hours rather than a
- * destination. Each hour includes a distance allowance; anything beyond it is
- * billed afterwards at the V-Class per-km rate.
+ * Pick a pickup point and a block of hours instead of a destination.
+ * Supporting detail lives behind a single info row rather than on the surface,
+ * so the booking flow stays short and readable.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -12,7 +12,6 @@ import {
   Alert,
   Image,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -24,7 +23,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
-import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/query-client";
 import Colors from "@/constants/colors";
 import {
@@ -41,48 +39,43 @@ type PlaceSuggestion = { placeId: string; description: string };
 type PickupPoint = { lat: number; lng: number; address: string };
 
 const DURATION_OPTIONS = getHourlyDurationOptions();
-/** Reservations need at least 30 minutes of lead time (server-enforced). */
 const MIN_LEAD_MINUTES = 35;
 
-function formatMoney(amount: number) {
-  return `R ${amount.toFixed(2)}`;
-}
+const money = (amount: number) =>
+  `R ${amount.toLocaleString("en-ZA", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
-function formatWhen(date: Date) {
-  return date.toLocaleString("en-ZA", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
+const timeLabel = (date: Date) =>
+  date.toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", hour12: false });
+
+const dayLabel = (date: Date) => {
+  const today = new Date();
+  const tomorrow = new Date(today.getTime() + 86400000);
+  if (date.toDateString() === today.toDateString()) return "Today";
+  if (date.toDateString() === tomorrow.toDateString()) return "Tomorrow";
+  return date.toLocaleDateString("en-ZA", { weekday: "short", day: "2-digit", month: "short" });
+};
 
 export default function HourlyHireScreen() {
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
 
   const [pickup, setPickup] = useState<PickupPoint | null>(null);
   const [hours, setHours] = useState<number>(HOURLY_HIRE_CONFIG.minHours);
   const [startMode, setStartMode] = useState<"now" | "later">("now");
   const [scheduledAt, setScheduledAt] = useState<Date | null>(null);
-  /** Hourly hire is card-only, both for instant and scheduled bookings. */
-  const paymentMethod = "card" as const;
   const [submitting, setSubmitting] = useState(false);
 
-  // Pickup search
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [durationOpen, setDurationOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
   const [searching, setSearching] = useState(false);
-  const [durationOpen, setDurationOpen] = useState(false);
   const sessionTokenRef = useRef(`${Date.now()}`);
 
   const quote = useMemo(() => getHourlyQuote(hours), [hours]);
   const maxPrice = useMemo(() => getMaxEscalatedPrice(quote.price), [quote.price]);
 
-  /* ── Prefill pickup with the rider's current location ── */
+  /* Prefill pickup from the rider's location */
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -95,29 +88,23 @@ export default function HourlyHireScreen() {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         }).catch(() => [] as any[]);
-        const label = place
-          ? [place.name, place.street, place.city].filter(Boolean).join(", ")
-          : "Current location";
         setPickup({
           lat: position.coords.latitude,
           lng: position.coords.longitude,
-          address: label || "Current location",
+          address: place
+            ? [place.name, place.street, place.city].filter(Boolean).join(", ") || "Current location"
+            : "Current location",
         });
-      } catch {
-        /* rider can still search for a pickup manually */
-      }
+      } catch { /* rider can search instead */ }
     })();
     return () => { cancelled = true; };
   }, []);
 
-  /* ── Pickup autocomplete ── */
+  /* Pickup autocomplete */
   useEffect(() => {
     if (!pickerOpen) return;
     const text = query.trim();
-    if (text.length < 3) {
-      setSuggestions([]);
-      return;
-    }
+    if (text.length < 3) { setSuggestions([]); return; }
     let cancelled = false;
     setSearching(true);
     const timer = setTimeout(async () => {
@@ -128,12 +115,10 @@ export default function HourlyHireScreen() {
         );
         const data = await res.json();
         if (cancelled) return;
-        setSuggestions(
-          (data?.predictions || []).map((p: any) => ({
-            placeId: p.place_id,
-            description: p.description,
-          })),
-        );
+        setSuggestions((data?.predictions || []).map((p: any) => ({
+          placeId: p.place_id,
+          description: p.description,
+        })));
       } catch {
         if (!cancelled) setSuggestions([]);
       } finally {
@@ -159,24 +144,18 @@ export default function HourlyHireScreen() {
       setSuggestions([]);
       sessionTokenRef.current = `${Date.now()}`;
     } catch {
-      Alert.alert("Could not use that address", "Please pick another pickup location.");
+      Alert.alert("Could not use that address", "Please choose another pickup point.");
     }
   }, []);
 
-  /* ── Scheduling ── */
-  function buildSlots(): Date[] {
-    const slots: Date[] = [];
-    const now = new Date();
-    const first = new Date(now.getTime() + MIN_LEAD_MINUTES * 60 * 1000);
+  const slots = useMemo(() => {
+    const out: Date[] = [];
+    const first = new Date(Date.now() + MIN_LEAD_MINUTES * 60 * 1000);
     first.setMinutes(first.getMinutes() > 30 ? 60 : 30, 0, 0);
-    for (let i = 0; i < 48; i += 1) {
-      slots.push(new Date(first.getTime() + i * 30 * 60 * 1000));
-    }
-    return slots;
-  }
-  const slots = useMemo(buildSlots, [startMode]);
+    for (let i = 0; i < 48; i += 1) out.push(new Date(first.getTime() + i * 30 * 60 * 1000));
+    return out;
+  }, []);
 
-  /* ── Submit ── */
   async function handleBook() {
     if (!pickup) {
       Alert.alert("Pickup needed", "Choose where your chauffeur should meet you.");
@@ -186,7 +165,6 @@ export default function HourlyHireScreen() {
       Alert.alert("Choose a time", "Select when your chauffeur should arrive.");
       return;
     }
-
     setSubmitting(true);
     try {
       const res = await apiRequest("POST", "/api/rides", {
@@ -196,22 +174,12 @@ export default function HourlyHireScreen() {
         pickupLat: pickup.lat,
         pickupLng: pickup.lng,
         pickupAddress: pickup.address,
-        paymentMethod,
-        ...(startMode === "later" && scheduledAt
-          ? { scheduledFor: scheduledAt.toISOString() }
-          : {}),
+        paymentMethod: "card",
+        ...(startMode === "later" && scheduledAt ? { scheduledFor: scheduledAt.toISOString() } : {}),
       });
       const data = await res.json();
-      if (!res.ok || data?.success === false) {
-        throw new Error(data?.message || "Could not create your booking.");
-      }
-      Alert.alert(
-        startMode === "later" ? "Chauffeur reserved" : "Finding your chauffeur",
-        startMode === "later"
-          ? `Your V-Class is booked for ${quote.hours} hours on ${scheduledAt ? formatWhen(scheduledAt) : ""}.`
-          : `We're matching you with a V-Class chauffeur for ${quote.hours} hours.`,
-        [{ text: "OK", onPress: () => router.replace("/client") }],
-      );
+      if (!res.ok || data?.success === false) throw new Error(data?.message || "Could not create your booking.");
+      router.replace("/client");
     } catch (error: any) {
       Alert.alert("Booking failed", error?.message || "Please try again.");
     } finally {
@@ -219,103 +187,54 @@ export default function HourlyHireScreen() {
     }
   }
 
-  const canBook =
-    !!pickup && !submitting && (startMode === "now" || !!scheduledAt);
+  const canBook = !!pickup && !submitting && (startMode === "now" || !!scheduledAt);
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top + 10 }]}>
+    <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color={Colors.white} />
+        <Pressable onPress={() => router.back()} hitSlop={14} style={styles.iconBtn}>
+          <Ionicons name="chevron-back" size={24} color={Colors.white} />
         </Pressable>
         <Text style={styles.headerTitle}>Hourly hire</Text>
-        <View style={{ width: 38 }} />
+        <View style={styles.iconBtn} />
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 140 }]}
+        contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 150 }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Vehicle */}
-        <View style={styles.vehicleCard}>
-          <Image source={CATEGORY_VAN_ART} style={styles.vehicleArt} resizeMode="contain" />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.vehicleName}>V-Class</Text>
-            <Text style={styles.vehicleDesc}>Mercedes-Benz V-Class with a professional chauffeur</Text>
-            <View style={styles.capacityRow}>
-              <Ionicons name="people-outline" size={13} color={Colors.textMuted} />
-              <Text style={styles.capacityText}>Up to 6 guests</Text>
+        <View style={styles.hero}>
+          <Image source={CATEGORY_VAN_ART} style={styles.heroArt} resizeMode="contain" />
+          <Text style={styles.heroTitle}>V-Class</Text>
+          <Text style={styles.heroMeta}>Up to 6 guests · professional chauffeur</Text>
+        </View>
+
+        <View style={styles.group}>
+          <Pressable style={styles.row} onPress={() => setPickerOpen(true)}>
+            <Ionicons name="location" size={18} color={Colors.textSecondary} />
+            <View style={styles.rowBody}>
+              <Text style={styles.rowLabel}>Pickup</Text>
+              <Text style={[styles.rowValue, !pickup && styles.rowValueEmpty]} numberOfLines={1}>
+                {pickup?.address || "Choose a location"}
+              </Text>
             </View>
-          </View>
+            <Ionicons name="chevron-forward" size={18} color={Colors.textSecondary} />
+          </Pressable>
+
+          <View style={styles.divider} />
+
+          <Pressable style={styles.row} onPress={() => setDurationOpen(true)}>
+            <Ionicons name="time" size={18} color={Colors.textSecondary} />
+            <View style={styles.rowBody}>
+              <Text style={styles.rowLabel}>Duration</Text>
+              <Text style={styles.rowValue}>
+                {quote.hours} hours · {quote.includedKm} km
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={Colors.textSecondary} />
+          </Pressable>
         </View>
 
-        {/* Pickup */}
-        <Text style={styles.sectionLabel}>Pickup location</Text>
-        <Pressable style={styles.field} onPress={() => setPickerOpen(true)}>
-          <Ionicons name="location-outline" size={18} color={Colors.textMuted} />
-          <Text style={[styles.fieldText, !pickup && styles.fieldPlaceholder]} numberOfLines={1}>
-            {pickup?.address || "Where should we meet you?"}
-          </Text>
-          <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-        </Pressable>
-
-        {/* Duration */}
-        <Text style={styles.sectionLabel}>Duration</Text>
-        <Pressable style={styles.field} onPress={() => setDurationOpen((open) => !open)}>
-          <Ionicons name="time-outline" size={18} color={Colors.textMuted} />
-          <Text style={styles.fieldText}>
-            {quote.hours} hours ({quote.includedKm} km)
-          </Text>
-          <Ionicons name={durationOpen ? "chevron-up" : "chevron-down"} size={16} color={Colors.textMuted} />
-        </Pressable>
-
-        {durationOpen && (
-          <View style={styles.durationList}>
-            {DURATION_OPTIONS.map((option) => {
-              const selected = option.hours === quote.hours;
-              return (
-                <Pressable
-                  key={option.hours}
-                  style={[styles.durationRow, selected && styles.durationRowSelected]}
-                  onPress={() => { setHours(option.hours); setDurationOpen(false); }}
-                >
-                  <Text style={[styles.durationText, selected && styles.durationTextSelected]}>
-                    {option.hours} hours ({option.includedKm} km)
-                  </Text>
-                  <Text style={[styles.durationPrice, selected && styles.durationTextSelected]}>
-                    {formatMoney(option.price)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
-
-        <View style={styles.noteRow}>
-          <Ionicons name="time-outline" size={16} color={Colors.textMuted} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.noteTitle}>
-              Min. {HOURLY_HIRE_CONFIG.minHours} hours and max. {HOURLY_HIRE_CONFIG.maxHours} hours
-            </Text>
-            <Text style={styles.noteBody}>
-              On long bookings your chauffeur may need to stop to refuel and take breaks.
-            </Text>
-          </View>
-        </View>
-        <View style={styles.noteRow}>
-          <Ionicons name="swap-horizontal-outline" size={16} color={Colors.textMuted} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.noteTitle}>
-              {HOURLY_HIRE_CONFIG.includedKmPerHour} km per hour included
-            </Text>
-            <Text style={styles.noteBody}>
-              Extra distance is charged at {formatMoney(quote.overageRatePerKm)} per km after your trip.
-            </Text>
-          </View>
-        </View>
-
-        {/* When */}
-        <Text style={styles.sectionLabel}>When</Text>
         <View style={styles.segment}>
           {(["now", "later"] as const).map((mode) => (
             <Pressable
@@ -324,117 +243,160 @@ export default function HourlyHireScreen() {
               onPress={() => setStartMode(mode)}
             >
               <Text style={[styles.segmentText, startMode === mode && styles.segmentTextActive]}>
-                {mode === "now" ? "Start now" : "Schedule"}
+                {mode === "now" ? "Now" : "Schedule"}
               </Text>
             </Pressable>
           ))}
         </View>
 
         {startMode === "later" && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.slotStrip}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.slots}>
             {slots.map((slot) => {
-              const selected = scheduledAt?.getTime() === slot.getTime();
+              const active = scheduledAt?.getTime() === slot.getTime();
               return (
                 <Pressable
                   key={slot.toISOString()}
-                  style={[styles.slotChip, selected && styles.slotChipSelected]}
+                  style={[styles.slot, active && styles.slotActive]}
                   onPress={() => setScheduledAt(slot)}
                 >
-                  <Text style={[styles.slotText, selected && styles.slotTextSelected]}>
-                    {formatWhen(slot)}
-                  </Text>
+                  <Text style={[styles.slotDay, active && styles.slotTextActive]}>{dayLabel(slot)}</Text>
+                  <Text style={[styles.slotTime, active && styles.slotTextActive]}>{timeLabel(slot)}</Text>
                 </Pressable>
               );
             })}
           </ScrollView>
         )}
 
-        {/* Payment — hourly hire is card only */}
-        <Text style={styles.sectionLabel}>Payment</Text>
-        <View style={styles.field}>
-          <Ionicons name="card-outline" size={18} color={Colors.textMuted} />
-          <Text style={styles.fieldText}>Card</Text>
-          <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
-        </View>
-        <Text style={styles.noteBody}>Hourly bookings are paid by card.</Text>
-
-        {/* Price-rise disclosure — the rider agrees to the ceiling here */}
-        <View style={styles.upliftCard}>
-          <Ionicons name="trending-up" size={16} color="#FFE066" />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.upliftTitle}>If no chauffeur is available</Text>
-            <Text style={styles.upliftBody}>
-              Your booking goes to every available V-Class chauffeur. If none accepts, we raise the
-              fare by {Math.round(HOURLY_BIDDING_CONFIG.stepPercent * 100)}% a minute — up to{" "}
-              {formatMoney(maxPrice)} ({Math.round(HOURLY_BIDDING_CONFIG.maxUpliftPercent * 100)}% more) —
-              to secure one. We'll tell you each time it changes, and you're never charged more than{" "}
-              {formatMoney(maxPrice)}.
-            </Text>
-          </View>
-        </View>
+        <Pressable style={styles.infoRow} onPress={() => setDetailsOpen(true)}>
+          <Ionicons name="information-circle-outline" size={16} color={Colors.textSecondary} />
+          <Text style={styles.infoText}>
+            {HOURLY_HIRE_CONFIG.includedKmPerHour} km per hour included · Card payment
+          </Text>
+          <Ionicons name="chevron-forward" size={15} color={Colors.textSecondary} />
+        </Pressable>
       </ScrollView>
 
-      {/* Price bar */}
-      <View style={[styles.footer, { paddingBottom: insets.bottom + 14 }]}>
-        <View style={styles.priceRow}>
-          <View>
-            <Text style={styles.priceLabel}>
-              {quote.hours} hours · {quote.includedKm} km included
-            </Text>
-            <Text style={styles.priceValue}>{formatMoney(quote.price)}</Text>
-          </View>
-          <Ionicons name="car-sport" size={26} color={Colors.textMuted} />
+      <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+        <View style={styles.priceLine}>
+          <Text style={styles.priceCaption}>{quote.hours} hours · {quote.includedKm} km</Text>
+          <Text style={styles.price}>{money(quote.price)}</Text>
         </View>
         <Pressable
-          style={[styles.bookBtn, !canBook && styles.bookBtnDisabled]}
+          style={[styles.cta, !canBook && styles.ctaDisabled]}
           onPress={handleBook}
           disabled={!canBook}
         >
-          {submitting ? (
-            <ActivityIndicator color={Colors.primary} />
-          ) : (
-            <Text style={styles.bookBtnText}>
-              {startMode === "later" ? "Reserve V-Class" : `Book ${quote.hours}-hour journey`}
-            </Text>
-          )}
+          {submitting
+            ? <ActivityIndicator color={Colors.primary} />
+            : <Text style={styles.ctaText}>{startMode === "later" ? "Reserve V-Class" : "Book V-Class"}</Text>}
         </Pressable>
       </View>
 
-      {/* Pickup picker */}
+      {/* Duration picker */}
+      <Modal visible={durationOpen} transparent animationType="slide" onRequestClose={() => setDurationOpen(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setDurationOpen(false)}>
+          <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.grabber} />
+            <Text style={styles.sheetTitle}>Duration</Text>
+            <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+              {DURATION_OPTIONS.map((option) => {
+                const active = option.hours === quote.hours;
+                return (
+                  <Pressable
+                    key={option.hours}
+                    style={styles.optionRow}
+                    onPress={() => { setHours(option.hours); setDurationOpen(false); }}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.optionTitle, active && styles.optionTitleActive]}>
+                        {option.hours} hours
+                      </Text>
+                      <Text style={styles.optionMeta}>{option.includedKm} km included</Text>
+                    </View>
+                    <Text style={[styles.optionPrice, active && styles.optionTitleActive]}>
+                      {money(option.price)}
+                    </Text>
+                    {active && <Ionicons name="checkmark" size={18} color={Colors.white} style={{ marginLeft: 10 }} />}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* How it works */}
+      <Modal visible={detailsOpen} transparent animationType="slide" onRequestClose={() => setDetailsOpen(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setDetailsOpen(false)}>
+          <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + 20 }]} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.grabber} />
+            <Text style={styles.sheetTitle}>How hourly hire works</Text>
+
+            {[
+              {
+                icon: "speedometer-outline" as const,
+                title: `${HOURLY_HIRE_CONFIG.includedKmPerHour} km per hour included`,
+                body: `Extra distance is billed after your trip at ${money(quote.overageRatePerKm)} per km.`,
+              },
+              {
+                icon: "time-outline" as const,
+                title: `${HOURLY_HIRE_CONFIG.minHours}–${HOURLY_HIRE_CONFIG.maxHours} hours`,
+                body: "On longer bookings your chauffeur may stop to refuel and take breaks.",
+              },
+              {
+                icon: "trending-up-outline" as const,
+                title: `Price may rise to ${money(maxPrice)}`,
+                body: `If no chauffeur accepts, the fare rises ${Math.round(HOURLY_BIDDING_CONFIG.stepPercent * 100)}% a minute, up to ${money(maxPrice)}. You're told every time, and never charged more.`,
+              },
+              {
+                icon: "card-outline" as const,
+                title: "Card payment",
+                body: "Hourly bookings are charged to your card.",
+              },
+            ].map((item) => (
+              <View key={item.title} style={styles.detailRow}>
+                <Ionicons name={item.icon} size={19} color={Colors.white} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.detailTitle}>{item.title}</Text>
+                  <Text style={styles.detailBody}>{item.body}</Text>
+                </View>
+              </View>
+            ))}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Pickup search */}
       <Modal visible={pickerOpen} animationType="slide" onRequestClose={() => setPickerOpen(false)}>
-        <View style={[styles.container, { paddingTop: insets.top + 10 }]}>
+        <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
           <View style={styles.header}>
-            <Pressable onPress={() => setPickerOpen(false)} hitSlop={12} style={styles.backBtn}>
-              <Ionicons name="close" size={22} color={Colors.white} />
+            <Pressable onPress={() => setPickerOpen(false)} hitSlop={14} style={styles.iconBtn}>
+              <Ionicons name="close" size={24} color={Colors.white} />
             </Pressable>
-            <Text style={styles.headerTitle}>Pickup location</Text>
-            <View style={{ width: 38 }} />
+            <Text style={styles.headerTitle}>Pickup</Text>
+            <View style={styles.iconBtn} />
           </View>
-          <View style={styles.searchWrap}>
-            <Ionicons name="search" size={18} color={Colors.textMuted} />
+          <View style={styles.search}>
+            <Ionicons name="search" size={18} color={Colors.textSecondary} />
             <TextInput
               style={styles.searchInput}
               value={query}
               onChangeText={setQuery}
-              placeholder="Search for an address"
+              placeholder="Search address"
               placeholderTextColor={Colors.textMuted}
               autoFocus
             />
-            {searching && <ActivityIndicator size="small" color={Colors.textMuted} />}
+            {searching && <ActivityIndicator size="small" color={Colors.textSecondary} />}
           </View>
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20 }}>
-            {suggestions.map((suggestion) => (
-              <Pressable
-                key={suggestion.placeId}
-                style={styles.suggestionRow}
-                onPress={() => choosePickup(suggestion)}
-              >
-                <Ionicons name="location-outline" size={18} color={Colors.textMuted} />
-                <Text style={styles.suggestionText} numberOfLines={2}>{suggestion.description}</Text>
+            {suggestions.map((s) => (
+              <Pressable key={s.placeId} style={styles.suggestion} onPress={() => choosePickup(s)}>
+                <Ionicons name="location-outline" size={18} color={Colors.textSecondary} />
+                <Text style={styles.suggestionText} numberOfLines={2}>{s.description}</Text>
               </Pressable>
             ))}
             {!searching && query.trim().length >= 3 && suggestions.length === 0 && (
-              <Text style={styles.emptyText}>No matching places found.</Text>
+              <Text style={styles.empty}>No places found</Text>
             )}
           </ScrollView>
         </View>
@@ -444,113 +406,103 @@ export default function HourlyHireScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.primary },
+  screen: { flex: 1, backgroundColor: Colors.primary },
+
   header: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 20, paddingBottom: 14,
+    paddingHorizontal: 12, paddingBottom: 8,
   },
-  backBtn: { width: 38, height: 38, alignItems: "center", justifyContent: "center" },
-  headerTitle: { fontSize: 18, fontFamily: "Inter_700Bold", color: Colors.white },
+  iconBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+  headerTitle: { fontSize: 17, fontFamily: "Inter_600SemiBold", color: Colors.white },
 
-  content: { paddingHorizontal: 20, gap: 10 },
+  body: { paddingHorizontal: 20, gap: 16 },
 
-  vehicleCard: {
-    flexDirection: "row", alignItems: "center", gap: 14,
-    backgroundColor: Colors.card, borderRadius: 18, padding: 16,
-    borderWidth: 1, borderColor: Colors.border, marginBottom: 6,
-  },
-  vehicleArt: { width: 84, height: 54 },
-  vehicleName: { fontSize: 17, fontFamily: "Inter_700Bold", color: Colors.white },
-  vehicleDesc: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textSecondary, marginTop: 2, lineHeight: 17 },
-  capacityRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 6 },
-  capacityText: { fontSize: 12, fontFamily: "Inter_500Medium", color: Colors.textMuted },
+  hero: { alignItems: "center", paddingVertical: 18 },
+  heroArt: { width: 190, height: 108 },
+  heroTitle: { fontSize: 24, fontFamily: "Inter_700Bold", color: Colors.white, marginTop: 10 },
+  heroMeta: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textSecondary, marginTop: 4 },
 
-  sectionLabel: {
-    fontSize: 11, fontFamily: "Inter_600SemiBold", color: Colors.textMuted,
-    textTransform: "uppercase", letterSpacing: 0.6, marginTop: 10,
-  },
-  field: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    minHeight: 52, paddingHorizontal: 14, borderRadius: 14,
-    backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border,
-  },
-  fieldText: { flex: 1, fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.white },
-  fieldPlaceholder: { color: Colors.textMuted, fontFamily: "Inter_400Regular" },
-
-  durationList: {
-    borderRadius: 14, backgroundColor: Colors.card,
+  group: {
+    backgroundColor: Colors.card, borderRadius: 16,
     borderWidth: 1, borderColor: Colors.border, overflow: "hidden",
   },
-  durationRow: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 14, paddingVertical: 13,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border,
-  },
-  durationRowSelected: { backgroundColor: Colors.surface },
-  durationText: { fontSize: 14, fontFamily: "Inter_500Medium", color: Colors.textSecondary },
-  durationPrice: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: Colors.textMuted },
-  durationTextSelected: { color: Colors.white, fontFamily: "Inter_700Bold" },
-
-  noteRow: { flexDirection: "row", gap: 10, alignItems: "flex-start", marginTop: 10 },
-  noteTitle: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: Colors.white },
-  noteBody: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textMuted, lineHeight: 17, marginTop: 2 },
+  row: { flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 16, paddingVertical: 15 },
+  rowBody: { flex: 1 },
+  rowLabel: { fontSize: 11, fontFamily: "Inter_500Medium", color: Colors.textSecondary, letterSpacing: 0.3 },
+  rowValue: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.white, marginTop: 2 },
+  rowValueEmpty: { color: Colors.textSecondary, fontFamily: "Inter_400Regular" },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: Colors.border, marginLeft: 48 },
 
   segment: {
-    flexDirection: "row", gap: 8, backgroundColor: Colors.card,
-    borderRadius: 14, padding: 5, borderWidth: 1, borderColor: Colors.border,
+    flexDirection: "row", backgroundColor: Colors.card, borderRadius: 14,
+    padding: 4, borderWidth: 1, borderColor: Colors.border,
   },
-  segmentBtn: { flex: 1, minHeight: 42, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  segmentBtn: { flex: 1, height: 42, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   segmentBtnActive: { backgroundColor: Colors.white },
-  segmentBtnDisabled: { opacity: 0.4 },
-  segmentText: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: Colors.textSecondary },
+  segmentText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.textSecondary },
   segmentTextActive: { color: Colors.primary, fontFamily: "Inter_700Bold" },
-  segmentTextDisabled: { color: Colors.textMuted },
 
-  upliftCard: {
-    flexDirection: "row", gap: 10, alignItems: "flex-start",
-    backgroundColor: "rgba(255,224,102,0.08)",
-    borderWidth: 1, borderColor: "rgba(255,224,102,0.25)",
-    borderRadius: 14, padding: 13, marginTop: 14,
+  slots: { marginTop: -4 },
+  slot: {
+    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, marginRight: 8,
+    backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, alignItems: "center",
   },
-  upliftTitle: { fontSize: 13, fontFamily: "Inter_700Bold", color: "#FFE066" },
-  upliftBody: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textSecondary, lineHeight: 18, marginTop: 3 },
+  slotActive: { backgroundColor: Colors.white, borderColor: Colors.white },
+  slotDay: { fontSize: 11, fontFamily: "Inter_500Medium", color: Colors.textSecondary },
+  slotTime: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.white, marginTop: 2 },
+  slotTextActive: { color: Colors.primary },
 
-  slotStrip: { marginTop: 4 },
-  slotChip: {
-    paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, marginRight: 8,
-    backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border,
+  infoRow: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    paddingVertical: 14, paddingHorizontal: 2,
   },
-  slotChipSelected: { backgroundColor: Colors.white, borderColor: Colors.white },
-  slotText: { fontSize: 12, fontFamily: "Inter_500Medium", color: Colors.textSecondary },
-  slotTextSelected: { color: Colors.primary, fontFamily: "Inter_700Bold" },
+  infoText: { flex: 1, fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textSecondary },
 
   footer: {
     position: "absolute", left: 0, right: 0, bottom: 0,
-    paddingHorizontal: 20, paddingTop: 14, gap: 12,
+    paddingHorizontal: 20, paddingTop: 16, gap: 14,
     backgroundColor: Colors.card,
-    borderTopWidth: 1, borderTopColor: Colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border,
   },
-  priceRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  priceLabel: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textMuted },
-  priceValue: { fontSize: 24, fontFamily: "Inter_700Bold", color: Colors.white, marginTop: 2 },
-  bookBtn: {
-    minHeight: 54, borderRadius: 14, alignItems: "center", justifyContent: "center",
-    backgroundColor: Colors.white,
-  },
-  bookBtnDisabled: { opacity: 0.45 },
-  bookBtnText: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.primary },
+  priceLine: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between" },
+  priceCaption: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textSecondary },
+  price: { fontSize: 26, fontFamily: "Inter_700Bold", color: Colors.white },
+  cta: { height: 54, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white },
+  ctaDisabled: { opacity: 0.4 },
+  ctaText: { fontSize: 16, fontFamily: "Inter_700Bold", color: Colors.primary },
 
-  searchWrap: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    marginHorizontal: 20, marginBottom: 12, paddingHorizontal: 14,
-    minHeight: 50, borderRadius: 14,
-    backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border,
+  sheetBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
+  sheet: {
+    backgroundColor: Colors.secondary,
+    borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    paddingHorizontal: 20, paddingTop: 10,
   },
-  searchInput: { flex: 1, fontSize: 14, fontFamily: "Inter_400Regular", color: Colors.white },
-  suggestionRow: {
-    flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14,
+  grabber: { width: 38, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: "center", marginBottom: 14 },
+  sheetTitle: { fontSize: 19, fontFamily: "Inter_700Bold", color: Colors.white, marginBottom: 12 },
+
+  optionRow: {
+    flexDirection: "row", alignItems: "center", paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border,
+  },
+  optionTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.textSecondary },
+  optionTitleActive: { color: Colors.white, fontFamily: "Inter_700Bold" },
+  optionMeta: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textSecondary, marginTop: 2, opacity: 0.8 },
+  optionPrice: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.textSecondary },
+
+  detailRow: { flexDirection: "row", gap: 14, alignItems: "flex-start", paddingVertical: 12 },
+  detailTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.white },
+  detailBody: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textSecondary, lineHeight: 19, marginTop: 3 },
+
+  search: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    marginHorizontal: 20, marginBottom: 10, paddingHorizontal: 14, height: 50,
+    borderRadius: 14, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border,
+  },
+  searchInput: { flex: 1, fontSize: 15, fontFamily: "Inter_400Regular", color: Colors.white },
+  suggestion: {
+    flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 15,
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border,
   },
   suggestionText: { flex: 1, fontSize: 14, fontFamily: "Inter_400Regular", color: Colors.white },
-  emptyText: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textMuted, paddingVertical: 20, textAlign: "center" },
+  empty: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textSecondary, textAlign: "center", paddingVertical: 24 },
 });

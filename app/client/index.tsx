@@ -3175,16 +3175,9 @@ export default function ClientHomeScreen() {
 
             {/* Chauffeur-by-the-hour (V-Class only) */}
             <Pressable style={styles.hourlyEntryCard} onPress={() => router.push("/client/hourly" as any)}>
-              <View style={styles.hourlyEntryIcon}>
-                <Ionicons name="time" size={20} color={Colors.white} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.hourlyEntryTitle}>Hourly & full-day hire</Text>
-                <Text style={styles.hourlyEntryBody}>
-                  Keep a V-Class and chauffeur from 2 hours · 40 km per hour included
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+              <Ionicons name="time-outline" size={18} color={Colors.white} />
+              <Text style={styles.hourlyEntryTitle}>Book by the hour</Text>
+              <Ionicons name="chevron-forward" size={16} color={Colors.textSecondary} />
             </Pressable>
 
             {/* Selfie nudge banner */}
@@ -4961,24 +4954,13 @@ const styles = StyleSheet.create({
   hourlyEntryCard: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    backgroundColor: Colors.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 14,
-    padding: 13,
-    marginBottom: 10,
-  },
-  hourlyEntryIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    gap: 10,
     backgroundColor: Colors.surface,
-    alignItems: "center",
-    justifyContent: "center",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    height: 46,
   },
-  hourlyEntryTitle: { fontSize: 14, fontFamily: "Inter_700Bold", color: Colors.white },
-  hourlyEntryBody: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textMuted, marginTop: 2, lineHeight: 16 },
+  hourlyEntryTitle: { flex: 1, fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.white },
   selfieNudgeBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -4996,10 +4978,10 @@ const styles = StyleSheet.create({
     color: "#FFE066",
   },
   selfieNudgeBody: {
-    fontSize: 11,
+    fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: "rgba(255,224,102,0.7)",
-    marginTop: 1,
+    color: "rgba(255,224,102,0.92)",
+    marginTop: 2,
   },
     marginBottom: 4,
   },
@@ -5133,7 +5115,7 @@ const styles = StyleSheet.create({
   locationInputLabel: {
     fontSize: 11,
     fontFamily: "Inter_500Medium",
-    color: Colors.textMuted,
+    color: Colors.textSecondary,
     marginBottom: 2,
     textTransform: "uppercase",
     letterSpacing: 0.5,
