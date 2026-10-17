@@ -7,12 +7,12 @@ import {
   TEMPORARY_SERVICE_BLOCK_MESSAGE,
 } from "../lib/maintenance-config";
 
-test("temporary service block configuration is enabled and matches required message", () => {
-  assert.equal(TEMPORARY_SERVICE_BLOCK, true, "TEMPORARY_SERVICE_BLOCK must be true for OTA delivery");
+test("temporary service block configuration is lifted (false) allowing users to log in", () => {
+  assert.equal(TEMPORARY_SERVICE_BLOCK, false, "TEMPORARY_SERVICE_BLOCK must be false when block is lifted");
   assert.equal(
     TEMPORARY_SERVICE_BLOCK_MESSAGE,
     "Temporarily unavailable, try again later",
-    "Message must exactly match 'Temporarily unavailable, try again later'",
+    "Message must match 'Temporarily unavailable, try again later'",
   );
 });
 

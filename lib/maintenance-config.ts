@@ -10,6 +10,6 @@
  * When this temporary block is lifted (set to false and published via OTA), users will
  * be able to log in again normally with their existing credentials.
  */
-export const TEMPORARY_SERVICE_BLOCK = true;
+export const TEMPORARY_SERVICE_BLOCK = false;
 
 export const TEMPORARY_SERVICE_BLOCK_MESSAGE = "Temporarily unavailable, try again later";
