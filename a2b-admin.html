@@ -720,7 +720,10 @@ tbody tr:hover { background:#fafaf8; }
     <!-- USERS -->
     <div class="view" id="view-users">
       <div class="notice">⚠️ <span>Users with <strong>role: driver</strong> have started chauffeur registration. Users with <strong>role: client</strong> are riders.</span></div>
-      <div class="sec-head"><div class="sec-title">All Users</div></div>
+      <div class="sec-head">
+        <div class="sec-title">All Users</div>
+        <button class="btn-sm btn-black" onclick="openAddUserModal()" style="padding:7px 15px;font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:6px">+ Add Client / Rider</button>
+      </div>
       <div class="table-card" id="users-table"><div class="loading">Loading…</div></div>
     </div>
 
@@ -3314,6 +3317,88 @@ async function saveAdminPassword(id) {
     toast('✅ Password updated.', 'ok');
   } catch (e) {
     toast('❌ ' + (e.message || 'Unable to update password.'), 'err');
+  }
+}
+
+function openAddUserModal() {
+  document.getElementById('m-title').textContent = 'Add New Client / Rider';
+  document.getElementById('m-sub').textContent = 'Create a rider account that can be used on both the website and mobile app';
+  document.getElementById('m-body').innerHTML = `
+    <div class="notice">📱 <span>Accounts created here can immediately log into the <strong>A2B Lift Client mobile app</strong> and the website using their email and password.</span></div>
+    <div class="field" style="margin-top:14px">
+      <div class="f-label">Full Name *</div>
+      <input id="add-user-name" class="f-input" type="text" placeholder="e.g. John Khumalo" required />
+    </div>
+    <div class="field" style="margin-top:14px">
+      <div class="f-label">Email Address *</div>
+      <input id="add-user-email" class="f-input" type="email" placeholder="e.g. john@example.com" required />
+    </div>
+    <div class="field" style="margin-top:14px">
+      <div class="f-label">Phone Number *</div>
+      <input id="add-user-phone" class="f-input" type="tel" placeholder="e.g. +27 71 000 0000" required />
+    </div>
+    <div class="field" style="margin-top:14px">
+      <div class="f-label">Password * (min 8 characters)</div>
+      <div style="display:flex;gap:8px">
+        <input id="add-user-password" class="f-input" type="text" placeholder="At least 8 characters" style="flex:1" value="A2BLift2026!" required />
+        <button type="button" class="btn-sm btn-outline" onclick="document.getElementById('add-user-password').value='A2B'+Math.random().toString(36).slice(2,8)+'!'+Math.floor(10+Math.random()*90)">Generate</button>
+      </div>
+    </div>
+    <div class="field" style="margin-top:14px">
+      <div class="f-label">Account Role</div>
+      <select id="add-user-role" class="f-input">
+        <option value="client" selected>Client / Rider</option>
+        <option value="chauffeur">Chauffeur / Driver</option>
+      </select>
+    </div>
+    <div class="field" style="margin-top:14px;display:flex;align-items:center;gap:10px">
+      <input id="add-user-liftclub" type="checkbox" style="width:18px;height:18px;accent-color:var(--black);cursor:pointer" />
+      <label for="add-user-liftclub" style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text)">Immediately approve as Lift Club member (R200 fee waiver)</label>
+    </div>
+  `;
+  document.getElementById('m-foot').innerHTML = `
+    <button class="btn-lg btn-outline" onclick="closeModal()">Cancel</button>
+    <button class="btn-lg btn-green" id="btn-submit-add-user" onclick="submitAddUser()">Create Account</button>
+  `;
+  openModal();
+  setTimeout(() => document.getElementById('add-user-name')?.focus(), 50);
+}
+
+async function submitAddUser() {
+  const name = String(document.getElementById('add-user-name')?.value || '').trim();
+  const email = String(document.getElementById('add-user-email')?.value || '').trim();
+  const phone = String(document.getElementById('add-user-phone')?.value || '').trim();
+  const password = String(document.getElementById('add-user-password')?.value || '');
+  const role = String(document.getElementById('add-user-role')?.value || 'client');
+  const isLiftClubMember = Boolean(document.getElementById('add-user-liftclub')?.checked);
+
+  if (!name || !email || !phone || !password) {
+    toast('❌ Please fill in all required fields.', 'err');
+    return;
+  }
+  if (password.length < 8) {
+    toast('❌ Password must be at least 8 characters.', 'err');
+    return;
+  }
+
+  const btn = document.getElementById('btn-submit-add-user');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating account…'; }
+
+  try {
+    const res = await apiFetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, phone, password, role, isLiftClubMember })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Failed to create user.');
+
+    closeModal();
+    toast('✅ User account created! They can now log in on website and mobile app.', 'ok');
+    loadUsers();
+  } catch (err) {
+    toast('❌ ' + (err.message || 'Unable to create user.'), 'err');
+    if (btn) { btn.disabled = false; btn.textContent = 'Create Account'; }
   }
 }
 

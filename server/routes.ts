@@ -1783,7 +1783,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!loginIdentifier || !password) {
         return res.status(400).json({ message: "Email and password are required." });
       }
-      const user = await storage.getUserByUsername(loginIdentifier);
+      const user = await storage.getUserByUsernameOrPhone(loginIdentifier);
       if (!user) {
         console.warn(`[auth/login] no account for "${String(loginIdentifier).toLowerCase().trim()}"`);
         return res.status(401).json({ message: "Invalid credentials" });
@@ -4350,9 +4350,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     if (!clientId) return res.status(500).send("Google OAuth not configured");
     const callbackUrl = `https://api-production-0783.up.railway.app/api/auth/google/callback`;
-    const redirect = typeof req.query.redirect === "string" ? req.query.redirect : "";
+    const redirect = typeof req.query.redirect === "string" ? req.query.redirect : (typeof req.query.redirect_uri === "string" ? req.query.redirect_uri : "");
+    const isAppRedirect = redirect.startsWith("a2bliftclient://") || redirect.startsWith("a2blift://") || redirect.startsWith("exp://");
     const platform = req.query.platform === "web" && isAllowedGoogleWebRedirect(redirect) ? "web" : "app";
-    const state = encodeGoogleAuthState(platform === "web" ? { platform, redirect } : { platform: "app" });
+    const state = encodeGoogleAuthState(platform === "web" ? { platform, redirect } : { platform: "app", redirect: isAppRedirect ? redirect : "" });
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
     url.searchParams.set("client_id", clientId);
     url.searchParams.set("redirect_uri", callbackUrl);
@@ -4369,11 +4370,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { code, error, state } = req.query as any;
       const authState = decodeGoogleAuthState(typeof state === "string" ? state : undefined);
       const isWeb = authState.platform === "web" && isAllowedGoogleWebRedirect(authState.redirect);
+      const appRedirect = (!isWeb && authState.redirect && (authState.redirect.startsWith("a2bliftclient://") || authState.redirect.startsWith("a2blift://") || authState.redirect.startsWith("exp://")))
+        ? authState.redirect
+        : "a2blift://auth";
       if (error || !code) {
         if (isWeb) {
           return res.redirect(buildGoogleWebRedirect(authState.redirect, { error: String(error || "cancelled") }));
         }
-        return res.redirect(`a2blift://auth?error=${encodeURIComponent(error || "cancelled")}`);
+        const sep = appRedirect.includes("?") ? "&" : "?";
+        return res.redirect(`${appRedirect}${sep}error=${encodeURIComponent(error || "cancelled")}`);
       }
       const clientId = process.env.GOOGLE_CLIENT_ID!;
       const clientSecret = process.env.GOOGLE_CLIENT_SECRET!;
@@ -4389,7 +4394,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (isWeb) {
           return res.redirect(buildGoogleWebRedirect(authState.redirect, { error: String(tokens.error_description || tokens.error) }));
         }
-        return res.redirect(`a2blift://auth?error=${encodeURIComponent(tokens.error_description || tokens.error)}`);
+        const sep = appRedirect.includes("?") ? "&" : "?";
+        return res.redirect(`${appRedirect}${sep}error=${encodeURIComponent(tokens.error_description || tokens.error)}`);
       }
 
       const userInfoRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
@@ -4400,7 +4406,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (isWeb) {
           return res.redirect(buildGoogleWebRedirect(authState.redirect, { error: "no_email" }));
         }
-        return res.redirect(`a2blift://auth?error=no_email`);
+        const sep = appRedirect.includes("?") ? "&" : "?";
+        return res.redirect(`${appRedirect}${sep}error=no_email`);
       }
 
       const email = googleUser.email.trim().toLowerCase();
@@ -4420,13 +4427,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       // Deep link back into the app with the JWT
       const payload = encodeURIComponent(JSON.stringify({ user: safeUser, accessToken: appToken }));
-      return res.redirect(`a2blift://auth?payload=${payload}`);
+      const sep = appRedirect.includes("?") ? "&" : "?";
+      return res.redirect(`${appRedirect}${sep}payload=${payload}`);
     } catch (err: any) {
       const authState = decodeGoogleAuthState(typeof req.query.state === "string" ? req.query.state : undefined);
       if (authState.platform === "web" && isAllowedGoogleWebRedirect(authState.redirect)) {
         return res.redirect(buildGoogleWebRedirect(authState.redirect, { error: err.message || "oauth_failed" }));
       }
-      return res.redirect(`a2blift://auth?error=${encodeURIComponent(err.message)}`);
+      const appRedirect = (authState.redirect && (authState.redirect.startsWith("a2bliftclient://") || authState.redirect.startsWith("a2blift://") || authState.redirect.startsWith("exp://")))
+        ? authState.redirect
+        : "a2blift://auth";
+      const sep = appRedirect.includes("?") ? "&" : "?";
+      return res.redirect(`${appRedirect}${sep}error=${encodeURIComponent(err.message)}`);
     }
   });
 
@@ -13007,6 +13019,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({ message: "Ride deleted" });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Admin: create a new user (client/rider or chauffeur) that can immediately log into the app and website
+  app.post("/api/admin/users", requireAuth, requireRole(["admin"]), async (req: AuthedRequest, res: Response) => {
+    try {
+      const { name, email: bodyEmail, phone, password, role, isLiftClubMember } = req.body;
+      const rawEmail = typeof bodyEmail === "string" ? bodyEmail.trim() : "";
+      const normalizedPhone = typeof phone === "string" ? phone.trim() : "";
+      const rawName = typeof name === "string" ? name.trim() : "";
+      const rawPassword = typeof password === "string" ? password : "";
+
+      if (!rawEmail || !rawName || !normalizedPhone || !rawPassword) {
+        return res.status(400).json({ message: "Name, email, phone number, and password are required." });
+      }
+
+      if (rawPassword.length < 8) {
+        return res.status(400).json({ message: "Password must be at least 8 characters." });
+      }
+
+      const emailValidation = validateEmailAddress(rawEmail);
+      if (!emailValidation.valid) {
+        return res.status(400).json({ message: emailValidation.message || "Please enter a valid email address." });
+      }
+      const email = emailValidation.normalized;
+
+      const userRole = (role === "chauffeur" ? "chauffeur" : "client") as UserRole;
+      const hashedPassword = await bcrypt.hash(rawPassword, 10);
+
+      const user = await withUserIdentityLocks(
+        [email, normalizePhoneIdentity(normalizedPhone)],
+        async () => {
+          await assertUserIdentityAvailable({ email, phone: normalizedPhone });
+          return storage.createUser({
+            username: email,
+            password: hashedPassword,
+            name: rawName,
+            phone: normalizedPhone,
+            role: userRole,
+          });
+        },
+      );
+
+      if (isLiftClubMember) {
+        try {
+          await storage.createLiftClubMembership({
+            userId: user.id,
+            status: "approved",
+            feeAmount: 200,
+            paidAt: new Date(),
+            reviewedAt: new Date(),
+            reviewerAdminId: req.auth!.sub,
+          });
+        } catch (e: any) {
+          console.warn("[admin/users] createLiftClubMembership non-fatal:", e.message);
+        }
+      }
+
+      const safeUser = await hydrateAuthUser(user);
+      return res.status(201).json({ success: true, user: safeUser, message: "User account created successfully." });
+    } catch (error: any) {
+      if (error instanceof UserIdentityConflictError) {
+        return res.status(409).json({ message: error.message });
+      }
+      if (error.code === "23505") {
+        return res.status(409).json({ message: "An account with this email or phone number already exists." });
+      }
+      return res.status(500).json({ message: error.message || "Unable to create user account." });
     }
   });
 

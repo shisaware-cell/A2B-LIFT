@@ -57,6 +57,7 @@ import {
   type RewardTransaction,
   type RewardCashout,
 } from "../shared/schema";
+import { normalizePhoneIdentity } from "./user-identity";
 
 const dbUrl = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL;
 if (!dbUrl) {
@@ -77,6 +78,8 @@ export interface IStorage {
   // Users / Auth
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
+  getUserByPhone(phone: string): Promise<User | undefined>;
+  getUserByUsernameOrPhone(identifier: string): Promise<User | undefined>;
   getUserByReferralCode(referralCode: string): Promise<User | undefined>;
   createUser(user: InsertUser & Partial<User>): Promise<User>;
   updateUser(id: string, data: Partial<User>): Promise<User | undefined>;
@@ -280,6 +283,31 @@ export class DatabaseStorage implements IStorage {
       .from(users)
       .where(sql`lower(trim(${users.username})) = ${normalised}`);
     return user;
+  }
+
+  async getUserByPhone(phone: string): Promise<User | undefined> {
+    const normalised = normalizePhoneIdentity(phone);
+    if (!normalised) return undefined;
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(sql`CASE
+        WHEN regexp_replace(COALESCE(${users.phone}, ''), '[^0-9]', '', 'g') LIKE '00%'
+          THEN substring(regexp_replace(${users.phone}, '[^0-9]', '', 'g') FROM 3)
+        WHEN length(regexp_replace(COALESCE(${users.phone}, ''), '[^0-9]', '', 'g')) = 10
+          AND regexp_replace(${users.phone}, '[^0-9]', '', 'g') LIKE '0%'
+          THEN '27' || substring(regexp_replace(${users.phone}, '[^0-9]', '', 'g') FROM 2)
+        WHEN length(regexp_replace(COALESCE(${users.phone}, ''), '[^0-9]', '', 'g')) = 9
+          THEN '27' || regexp_replace(${users.phone}, '[^0-9]', '', 'g')
+        ELSE regexp_replace(COALESCE(${users.phone}, ''), '[^0-9]', '', 'g')
+      END = ${normalised}`);
+    return user;
+  }
+
+  async getUserByUsernameOrPhone(identifier: string): Promise<User | undefined> {
+    const userByUsername = await this.getUserByUsername(identifier);
+    if (userByUsername) return userByUsername;
+    return this.getUserByPhone(identifier);
   }
 
   async getUserByReferralCode(referralCode: string): Promise<User | undefined> {

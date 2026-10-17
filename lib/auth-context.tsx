@@ -9,7 +9,9 @@ import React, {
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Application from "expo-application";
+import Constants from "expo-constants";
 import * as Linking from "expo-linking";
+import { resolveAppVariant } from "../packages/mobile-core/src/app-variant-resolver";
 import { apiRequest, isUnauthorizedError, cleanErrorMessage } from "@/lib/query-client";
 import { TEMPORARY_SERVICE_BLOCK, TEMPORARY_SERVICE_BLOCK_MESSAGE } from "./maintenance-config";
 
@@ -259,7 +261,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(TEMPORARY_SERVICE_BLOCK_MESSAGE);
     }
     const deviceId = await getOrCreateDeviceId();
-    const appVariant = process.env.EXPO_PUBLIC_APP_VARIANT || (Platform.OS === "web" ? "web" : "driver");
+    const appVariant =
+      Platform.OS === "web"
+        ? "web"
+        : resolveAppVariant(
+            Application.applicationId,
+            process.env.EXPO_PUBLIC_APP_VARIANT,
+            Constants.expoConfig?.extra?.appVariant,
+          );
     const res = await apiRequest("POST", "/api/auth/login", {
       username,
       password,
