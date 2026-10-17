@@ -3173,6 +3173,20 @@ export default function ClientHomeScreen() {
           >
             <Text style={styles.sheetTitle}>Where to?</Text>
 
+            {/* Chauffeur-by-the-hour (V-Class only) */}
+            <Pressable style={styles.hourlyEntryCard} onPress={() => router.push("/client/hourly" as any)}>
+              <View style={styles.hourlyEntryIcon}>
+                <Ionicons name="time" size={20} color={Colors.white} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.hourlyEntryTitle}>Hourly & full-day hire</Text>
+                <Text style={styles.hourlyEntryBody}>
+                  Keep a V-Class and chauffeur from 2 hours · 40 km per hour included
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+            </Pressable>
+
             {/* Selfie nudge banner */}
             {!user?.profilePhoto && (
               <Pressable style={styles.selfieNudgeBanner} onPress={() => router.push("/client/profile")}>
@@ -4944,6 +4958,27 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent,
     borderRadius: 2,
     alignSelf: "center",
+  hourlyEntryCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 14,
+    padding: 13,
+    marginBottom: 10,
+  },
+  hourlyEntryIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: Colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  hourlyEntryTitle: { fontSize: 14, fontFamily: "Inter_700Bold", color: Colors.white },
+  hourlyEntryBody: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textMuted, marginTop: 2, lineHeight: 16 },
   selfieNudgeBanner: {
     flexDirection: "row",
     alignItems: "center",

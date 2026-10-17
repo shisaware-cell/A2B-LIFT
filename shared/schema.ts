@@ -131,6 +131,10 @@ export const rides = pgTable("rides", {
   rewardsAmountUsed: real("rewards_amount_used").default(0),
   // Reservations: rider books in advance; status stays "reserved" until dispatch time
   scheduledFor: timestamp("scheduled_for"),
+  // Chauffeur-by-the-hour (V-Class only): "one_way" | "hourly".
+  // Hourly rides are priced per booked hour instead of by distance.
+  bookingType: text("booking_type").notNull().default("one_way"),
+  hourlyDurationHours: integer("hourly_duration_hours"),
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
 });

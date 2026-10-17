@@ -235,6 +235,10 @@ var rides = (0, import_pg_core.pgTable)("rides", {
   rewardsAmountUsed: (0, import_pg_core.real)("rewards_amount_used").default(0),
   // Reservations: rider books in advance; status stays "reserved" until dispatch time
   scheduledFor: (0, import_pg_core.timestamp)("scheduled_for"),
+  // Chauffeur-by-the-hour (V-Class only): "one_way" | "hourly".
+  // Hourly rides are priced per booked hour instead of by distance.
+  bookingType: (0, import_pg_core.text)("booking_type").notNull().default("one_way"),
+  hourlyDurationHours: (0, import_pg_core.integer)("hourly_duration_hours"),
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
   completedAt: (0, import_pg_core.timestamp)("completed_at")
 });
@@ -677,6 +681,65 @@ var rewardCashouts = (0, import_pg_core.pgTable)("reward_cashouts", {
   paidAt: (0, import_pg_core.timestamp)("paid_at")
 });
 
+// shared/email-validation.ts
+var COMMON_TLD_TYPOS = {
+  con: "com",
+  cmo: "com",
+  comm: "com",
+  coom: "com",
+  om: "com",
+  nte: "net",
+  ogr: "org"
+};
+function validateEmailAddress(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  const parts = normalized.split("@");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    return { valid: false, normalized, message: "Please enter a valid email address." };
+  }
+  const [localPart, domain] = parts;
+  if (normalized.length > 254 || localPart.length > 64 || localPart.startsWith(".") || localPart.endsWith(".") || localPart.includes("..") || !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/i.test(localPart)) {
+    return { valid: false, normalized, message: "Please enter a valid email address." };
+  }
+  const labels = domain.split(".");
+  if (labels.length < 2 || labels.some((label) => !label || label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label))) {
+    return { valid: false, normalized, message: "Please enter a valid email domain." };
+  }
+  const tld = labels[labels.length - 1];
+  const suggestedTld = COMMON_TLD_TYPOS[tld];
+  if (suggestedTld) {
+    const suggestedDomain = [...labels.slice(0, -1), suggestedTld].join(".");
+    return {
+      valid: false,
+      normalized,
+      message: `Please check the email domain. Did you mean ${localPart}@${suggestedDomain}?`
+    };
+  }
+  if (!/^[a-z]{2,24}$/i.test(tld) && !/^xn--[a-z0-9-]{2,59}$/i.test(tld)) {
+    return { valid: false, normalized, message: "Please enter a valid email domain." };
+  }
+  return { valid: true, normalized };
+}
+
+// server/user-identity.ts
+function normalizeEmailIdentity(value) {
+  return validateEmailAddress(value).normalized;
+}
+function normalizePhoneIdentity(value) {
+  let digits = String(value || "").replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (digits.length === 10 && digits.startsWith("0")) return `27${digits.slice(1)}`;
+  if (digits.length === 9) return `27${digits}`;
+  return digits;
+}
+var UserIdentityConflictError = class extends Error {
+  constructor(field) {
+    super(field === "email" ? "An account with this email already exists" : "An account with this phone number already exists");
+    this.field = field;
+    this.name = "UserIdentityConflictError";
+  }
+};
+
 // server/storage.ts
 var dbUrl = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL;
 if (!dbUrl) {
@@ -698,6 +761,26 @@ var DatabaseStorage = class {
     const normalised = username.toLowerCase().trim();
     const [user] = await db.select().from(users).where(import_drizzle_orm2.sql`lower(trim(${users.username})) = ${normalised}`);
     return user;
+  }
+  async getUserByPhone(phone) {
+    const normalised = normalizePhoneIdentity(phone);
+    if (!normalised) return void 0;
+    const [user] = await db.select().from(users).where(import_drizzle_orm2.sql`CASE
+        WHEN regexp_replace(COALESCE(${users.phone}, ''), '[^0-9]', '', 'g') LIKE '00%'
+          THEN substring(regexp_replace(${users.phone}, '[^0-9]', '', 'g') FROM 3)
+        WHEN length(regexp_replace(COALESCE(${users.phone}, ''), '[^0-9]', '', 'g')) = 10
+          AND regexp_replace(${users.phone}, '[^0-9]', '', 'g') LIKE '0%'
+          THEN '27' || substring(regexp_replace(${users.phone}, '[^0-9]', '', 'g') FROM 2)
+        WHEN length(regexp_replace(COALESCE(${users.phone}, ''), '[^0-9]', '', 'g')) = 9
+          THEN '27' || regexp_replace(${users.phone}, '[^0-9]', '', 'g')
+        ELSE regexp_replace(COALESCE(${users.phone}, ''), '[^0-9]', '', 'g')
+      END = ${normalised}`);
+    return user;
+  }
+  async getUserByUsernameOrPhone(identifier) {
+    const userByUsername = await this.getUserByUsername(identifier);
+    if (userByUsername) return userByUsername;
+    return this.getUserByPhone(identifier);
   }
   async getUserByReferralCode(referralCode) {
     const code = referralCode.trim().toUpperCase();
@@ -2056,46 +2139,6 @@ function validateAdminPassword(value) {
   return { ok: true };
 }
 
-// shared/email-validation.ts
-var COMMON_TLD_TYPOS = {
-  con: "com",
-  cmo: "com",
-  comm: "com",
-  coom: "com",
-  om: "com",
-  nte: "net",
-  ogr: "org"
-};
-function validateEmailAddress(value) {
-  const normalized = String(value || "").trim().toLowerCase();
-  const parts = normalized.split("@");
-  if (parts.length !== 2 || !parts[0] || !parts[1]) {
-    return { valid: false, normalized, message: "Please enter a valid email address." };
-  }
-  const [localPart, domain] = parts;
-  if (normalized.length > 254 || localPart.length > 64 || localPart.startsWith(".") || localPart.endsWith(".") || localPart.includes("..") || !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/i.test(localPart)) {
-    return { valid: false, normalized, message: "Please enter a valid email address." };
-  }
-  const labels = domain.split(".");
-  if (labels.length < 2 || labels.some((label) => !label || label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label))) {
-    return { valid: false, normalized, message: "Please enter a valid email domain." };
-  }
-  const tld = labels[labels.length - 1];
-  const suggestedTld = COMMON_TLD_TYPOS[tld];
-  if (suggestedTld) {
-    const suggestedDomain = [...labels.slice(0, -1), suggestedTld].join(".");
-    return {
-      valid: false,
-      normalized,
-      message: `Please check the email domain. Did you mean ${localPart}@${suggestedDomain}?`
-    };
-  }
-  if (!/^[a-z]{2,24}$/i.test(tld) && !/^xn--[a-z0-9-]{2,59}$/i.test(tld)) {
-    return { valid: false, normalized, message: "Please enter a valid email domain." };
-  }
-  return { valid: true, normalized };
-}
-
 // server/auth-middleware.ts
 init_auth();
 function extractBearer(req) {
@@ -2872,6 +2915,45 @@ function combineDirectionSegments(segments) {
   };
 }
 
+// shared/hourly-hire.ts
+var HOURLY_VEHICLE_TYPE = "luxury_van";
+var HOURLY_HIRE_CONFIG = {
+  minHours: 2,
+  maxHours: 24,
+  /** Distance allowance granted per booked hour. */
+  includedKmPerHour: 40,
+  /** R1 422.50/hour — derived from the 2-hour anchor of R2 845. */
+  ratePerHour: 1422.5,
+  /** Distance used beyond the allowance is billed at the V-Class per-km rate. */
+  overageRatePerKm: VEHICLE_CATEGORY_PRICING.luxury_van.pricePerKm
+};
+function roundCurrency2(amount) {
+  return Math.round(amount * 100) / 100;
+}
+function normalizeHourlyDuration(hours) {
+  const parsed = Math.round(Number(hours));
+  if (!Number.isFinite(parsed)) return HOURLY_HIRE_CONFIG.minHours;
+  return Math.min(
+    HOURLY_HIRE_CONFIG.maxHours,
+    Math.max(HOURLY_HIRE_CONFIG.minHours, parsed)
+  );
+}
+function isValidHourlyDuration(hours) {
+  const parsed = Number(hours);
+  return Number.isFinite(parsed) && Number.isInteger(parsed) && parsed >= HOURLY_HIRE_CONFIG.minHours && parsed <= HOURLY_HIRE_CONFIG.maxHours;
+}
+function getHourlyQuote(hours) {
+  const bookedHours = normalizeHourlyDuration(hours);
+  return {
+    hours: bookedHours,
+    includedKm: bookedHours * HOURLY_HIRE_CONFIG.includedKmPerHour,
+    price: roundCurrency2(bookedHours * HOURLY_HIRE_CONFIG.ratePerHour),
+    ratePerHour: HOURLY_HIRE_CONFIG.ratePerHour,
+    overageRatePerKm: HOURLY_HIRE_CONFIG.overageRatePerKm,
+    vehicleType: HOURLY_VEHICLE_TYPE
+  };
+}
+
 // server/payment-cards.ts
 function parsePaystackMetadata(rawMetadata) {
   let meta = {};
@@ -3099,25 +3181,6 @@ function validateResetPassword(password) {
   }
   return null;
 }
-
-// server/user-identity.ts
-function normalizeEmailIdentity(value) {
-  return validateEmailAddress(value).normalized;
-}
-function normalizePhoneIdentity(value) {
-  let digits = String(value || "").replace(/\D/g, "");
-  if (digits.startsWith("00")) digits = digits.slice(2);
-  if (digits.length === 10 && digits.startsWith("0")) return `27${digits.slice(1)}`;
-  if (digits.length === 9) return `27${digits}`;
-  return digits;
-}
-var UserIdentityConflictError = class extends Error {
-  constructor(field) {
-    super(field === "email" ? "An account with this email already exists" : "An account with this phone number already exists");
-    this.field = field;
-    this.name = "UserIdentityConflictError";
-  }
-};
 
 // server/routes.ts
 var RIDE_MATCH_RADIUS_KM = 4;
@@ -4513,7 +4576,7 @@ async function registerRoutes(app2) {
       if (!loginIdentifier || !password) {
         return res.status(400).json({ message: "Email and password are required." });
       }
-      const user = await storage.getUserByUsername(loginIdentifier);
+      const user = await storage.getUserByUsernameOrPhone(loginIdentifier);
       if (!user) {
         console.warn(`[auth/login] no account for "${String(loginIdentifier).toLowerCase().trim()}"`);
         return res.status(401).json({ message: "Invalid credentials" });
@@ -6606,9 +6669,10 @@ If you did not request this, you can ignore this email.`,
     const clientId = process.env.GOOGLE_CLIENT_ID;
     if (!clientId) return res.status(500).send("Google OAuth not configured");
     const callbackUrl = `https://api-production-0783.up.railway.app/api/auth/google/callback`;
-    const redirect = typeof req.query.redirect === "string" ? req.query.redirect : "";
+    const redirect = typeof req.query.redirect === "string" ? req.query.redirect : typeof req.query.redirect_uri === "string" ? req.query.redirect_uri : "";
+    const isAppRedirect = redirect.startsWith("a2bliftclient://") || redirect.startsWith("a2blift://") || redirect.startsWith("exp://");
     const platform = req.query.platform === "web" && isAllowedGoogleWebRedirect(redirect) ? "web" : "app";
-    const state = encodeGoogleAuthState(platform === "web" ? { platform, redirect } : { platform: "app" });
+    const state = encodeGoogleAuthState(platform === "web" ? { platform, redirect } : { platform: "app", redirect: isAppRedirect ? redirect : "" });
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
     url.searchParams.set("client_id", clientId);
     url.searchParams.set("redirect_uri", callbackUrl);
@@ -6624,11 +6688,13 @@ If you did not request this, you can ignore this email.`,
       const { code, error, state } = req.query;
       const authState = decodeGoogleAuthState(typeof state === "string" ? state : void 0);
       const isWeb = authState.platform === "web" && isAllowedGoogleWebRedirect(authState.redirect);
+      const appRedirect = !isWeb && authState.redirect && (authState.redirect.startsWith("a2bliftclient://") || authState.redirect.startsWith("a2blift://") || authState.redirect.startsWith("exp://")) ? authState.redirect : "a2blift://auth";
       if (error || !code) {
         if (isWeb) {
           return res.redirect(buildGoogleWebRedirect(authState.redirect, { error: String(error || "cancelled") }));
         }
-        return res.redirect(`a2blift://auth?error=${encodeURIComponent(error || "cancelled")}`);
+        const sep2 = appRedirect.includes("?") ? "&" : "?";
+        return res.redirect(`${appRedirect}${sep2}error=${encodeURIComponent(error || "cancelled")}`);
       }
       const clientId = process.env.GOOGLE_CLIENT_ID;
       const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -6643,7 +6709,8 @@ If you did not request this, you can ignore this email.`,
         if (isWeb) {
           return res.redirect(buildGoogleWebRedirect(authState.redirect, { error: String(tokens.error_description || tokens.error) }));
         }
-        return res.redirect(`a2blift://auth?error=${encodeURIComponent(tokens.error_description || tokens.error)}`);
+        const sep2 = appRedirect.includes("?") ? "&" : "?";
+        return res.redirect(`${appRedirect}${sep2}error=${encodeURIComponent(tokens.error_description || tokens.error)}`);
       }
       const userInfoRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
         headers: { Authorization: `Bearer ${tokens.access_token}` }
@@ -6653,7 +6720,8 @@ If you did not request this, you can ignore this email.`,
         if (isWeb) {
           return res.redirect(buildGoogleWebRedirect(authState.redirect, { error: "no_email" }));
         }
-        return res.redirect(`a2blift://auth?error=no_email`);
+        const sep2 = appRedirect.includes("?") ? "&" : "?";
+        return res.redirect(`${appRedirect}${sep2}error=no_email`);
       }
       const email = googleUser.email.trim().toLowerCase();
       let user = await storage.getUserByUsername(email);
@@ -6670,13 +6738,16 @@ If you did not request this, you can ignore this email.`,
         }));
       }
       const payload = encodeURIComponent(JSON.stringify({ user: safeUser, accessToken: appToken }));
-      return res.redirect(`a2blift://auth?payload=${payload}`);
+      const sep = appRedirect.includes("?") ? "&" : "?";
+      return res.redirect(`${appRedirect}${sep}payload=${payload}`);
     } catch (err) {
       const authState = decodeGoogleAuthState(typeof req.query.state === "string" ? req.query.state : void 0);
       if (authState.platform === "web" && isAllowedGoogleWebRedirect(authState.redirect)) {
         return res.redirect(buildGoogleWebRedirect(authState.redirect, { error: err.message || "oauth_failed" }));
       }
-      return res.redirect(`a2blift://auth?error=${encodeURIComponent(err.message)}`);
+      const appRedirect = authState.redirect && (authState.redirect.startsWith("a2bliftclient://") || authState.redirect.startsWith("a2blift://") || authState.redirect.startsWith("exp://")) ? authState.redirect : "a2blift://auth";
+      const sep = appRedirect.includes("?") ? "&" : "?";
+      return res.redirect(`${appRedirect}${sep}error=${encodeURIComponent(err.message)}`);
     }
   });
   app2.post("/api/auth/google", async (req, res) => {
@@ -10785,7 +10856,16 @@ If you did not request this, you can ignore this email.`,
           }
         }
       }
-      const categoryId = normalizeVehicleType2(rideData.vehicleType || "budget");
+      const isHourly = String(rideData.bookingType || "one_way") === "hourly";
+      const hourlyHours = isHourly ? Number(rideData.hourlyDurationHours) : null;
+      if (isHourly && !isValidHourlyDuration(hourlyHours)) {
+        return res.status(400).json({
+          success: false,
+          message: `Hourly bookings must be between ${HOURLY_HIRE_CONFIG.minHours} and ${HOURLY_HIRE_CONFIG.maxHours} whole hours.`
+        });
+      }
+      const hourlyQuote = isHourly ? getHourlyQuote(hourlyHours) : null;
+      const categoryId = isHourly ? HOURLY_VEHICLE_TYPE : normalizeVehicleType2(rideData.vehicleType || "budget");
       if (!getVehicleCategories()[categoryId]) {
         return res.status(400).json({ success: false, message: "Select a valid vehicle category." });
       }
@@ -10795,19 +10875,27 @@ If you did not request this, you can ignore this email.`,
       let safeDurationMin = Number.isFinite(normalizedDurationMin) && normalizedDurationMin > 0 ? normalizedDurationMin : null;
       const stops = normalizeRideStops(rideData.stops);
       const pickup = { lat: Number(rideData.pickupLat), lng: Number(rideData.pickupLng) };
-      const destination = { lat: Number(rideData.dropoffLat), lng: Number(rideData.dropoffLng) };
-      if (!isValidLocationSample(pickup.lat, pickup.lng) || !isValidLocationSample(destination.lat, destination.lng)) {
+      const destination = isHourly ? { lat: pickup.lat, lng: pickup.lng } : { lat: Number(rideData.dropoffLat), lng: Number(rideData.dropoffLng) };
+      if (!isValidLocationSample(pickup.lat, pickup.lng)) {
+        return res.status(400).json({ success: false, message: "A valid pickup location is required." });
+      }
+      if (!isHourly && !isValidLocationSample(destination.lat, destination.lng)) {
         return res.status(400).json({ success: false, message: "Valid pickup and destination coordinates are required." });
       }
-      try {
-        const [verifiedRoute] = await fetchVerifiedDirections(pickup, destination, stops);
-        safeDistanceKm = verifiedRoute.distanceKm;
-        safeDurationMin = verifiedRoute.durationMin;
-      } catch (routeError) {
-        return res.status(400).json({
-          success: false,
-          message: routeError?.message || "The complete route could not be verified."
-        });
+      if (isHourly && hourlyQuote) {
+        safeDistanceKm = hourlyQuote.includedKm;
+        safeDurationMin = hourlyQuote.hours * 60;
+      } else {
+        try {
+          const [verifiedRoute] = await fetchVerifiedDirections(pickup, destination, stops);
+          safeDistanceKm = verifiedRoute.distanceKm;
+          safeDurationMin = verifiedRoute.durationMin;
+        } catch (routeError) {
+          return res.status(400).json({
+            success: false,
+            message: routeError?.message || "The complete route could not be verified."
+          });
+        }
       }
       const selectedRouteId = typeof rideData.selectedRouteId === "string" && rideData.selectedRouteId.trim() ? rideData.selectedRouteId.trim() : null;
       const rideForDemand = {
@@ -10824,7 +10912,15 @@ If you did not request this, you can ignore this email.`,
         activeRequests,
         eligibleDrivers: eligibleDrivers.length
       });
-      const priceEstimate = calculatePrice(safeDistanceKm, categoryId, {
+      const priceEstimate = isHourly && hourlyQuote ? {
+        ...calculatePrice(safeDistanceKm, categoryId, { estimatedDurationMin: safeDurationMin }),
+        totalPrice: hourlyQuote.price,
+        baseFare: hourlyQuote.price,
+        pricePerKm: hourlyQuote.overageRatePerKm,
+        surgeMultiplier: 1,
+        demandMultiplier: 1,
+        surgeReason: null
+      } : calculatePrice(safeDistanceKm, categoryId, {
         isLateNight: isSouthAfricaLateNight(),
         surgeMultiplier: surge.multiplier,
         surgeReason: surge.reason,
@@ -10861,11 +10957,13 @@ If you did not request this, you can ignore this email.`,
         pickupLat: rideData.pickupLat,
         pickupLng: rideData.pickupLng,
         pickupAddress: rideData.pickupAddress || null,
-        dropoffLat: rideData.dropoffLat,
-        dropoffLng: rideData.dropoffLng,
-        dropoffAddress: rideData.dropoffAddress || null,
+        dropoffLat: destination.lat,
+        dropoffLng: destination.lng,
+        dropoffAddress: isHourly ? rideData.pickupAddress || null : rideData.dropoffAddress || null,
         stops,
         vehicleType: categoryId,
+        bookingType: isHourly ? "hourly" : "one_way",
+        ...isHourly && hourlyQuote ? { hourlyDurationHours: hourlyQuote.hours } : {},
         paymentMethod: rideData.paymentMethod || "cash",
         price: safeFare,
         distanceKm: safeDistanceKm,
@@ -14094,6 +14192,65 @@ If you did not request this, you can ignore this email.`,
       return res.status(500).json({ message: error.message });
     }
   });
+  app2.post("/api/admin/users", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const { name, email: bodyEmail, phone, password, role, isLiftClubMember } = req.body;
+      const rawEmail = typeof bodyEmail === "string" ? bodyEmail.trim() : "";
+      const normalizedPhone = typeof phone === "string" ? phone.trim() : "";
+      const rawName = typeof name === "string" ? name.trim() : "";
+      const rawPassword = typeof password === "string" ? password : "";
+      if (!rawEmail || !rawName || !normalizedPhone || !rawPassword) {
+        return res.status(400).json({ message: "Name, email, phone number, and password are required." });
+      }
+      if (rawPassword.length < 8) {
+        return res.status(400).json({ message: "Password must be at least 8 characters." });
+      }
+      const emailValidation = validateEmailAddress(rawEmail);
+      if (!emailValidation.valid) {
+        return res.status(400).json({ message: emailValidation.message || "Please enter a valid email address." });
+      }
+      const email = emailValidation.normalized;
+      const userRole = role === "chauffeur" ? "chauffeur" : "client";
+      const hashedPassword = await import_bcryptjs.default.hash(rawPassword, 10);
+      const user = await withUserIdentityLocks(
+        [email, normalizePhoneIdentity(normalizedPhone)],
+        async () => {
+          await assertUserIdentityAvailable({ email, phone: normalizedPhone });
+          return storage.createUser({
+            username: email,
+            password: hashedPassword,
+            name: rawName,
+            phone: normalizedPhone,
+            role: userRole
+          });
+        }
+      );
+      if (isLiftClubMember) {
+        try {
+          await storage.createLiftClubMembership({
+            userId: user.id,
+            status: "approved",
+            feeAmount: 200,
+            paidAt: /* @__PURE__ */ new Date(),
+            reviewedAt: /* @__PURE__ */ new Date(),
+            reviewerAdminId: req.auth.sub
+          });
+        } catch (e) {
+          console.warn("[admin/users] createLiftClubMembership non-fatal:", e.message);
+        }
+      }
+      const safeUser = await hydrateAuthUser(user);
+      return res.status(201).json({ success: true, user: safeUser, message: "User account created successfully." });
+    } catch (error) {
+      if (error instanceof UserIdentityConflictError) {
+        return res.status(409).json({ message: error.message });
+      }
+      if (error.code === "23505") {
+        return res.status(409).json({ message: "An account with this email or phone number already exists." });
+      }
+      return res.status(500).json({ message: error.message || "Unable to create user account." });
+    }
+  });
   app2.put("/api/admin/users/:id/password", requireAuth, requireRole(["admin"]), async (req, res) => {
     try {
       const validation = validateAdminPassword(req.body?.password);
@@ -14676,6 +14833,8 @@ function setupErrorHandler(app2) {
     await pool2.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS last_driver_login_at timestamp`);
     await pool2.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS active_vehicle_id varchar`);
     await pool2.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS vehicle_id varchar`);
+    await pool2.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS booking_type text NOT NULL DEFAULT 'one_way'`);
+    await pool2.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS hourly_duration_hours integer`);
     await pool2.query(`ALTER TABLE documents ADD COLUMN IF NOT EXISTS vehicle_id varchar`);
     await pool2.query(`
       CREATE TABLE IF NOT EXISTS operator_profiles (

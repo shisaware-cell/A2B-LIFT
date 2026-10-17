@@ -95,6 +95,7 @@ function ClassicTabLayout() {
           tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
         }}
       />
+      <Tabs.Screen name="hourly" options={{ href: null }} />
       <Tabs.Screen name="notifications" options={{ href: null }} />
       <Tabs.Screen name="referrals" options={{ href: null }} />
       <Tabs.Screen name="safety" options={{ href: null }} />

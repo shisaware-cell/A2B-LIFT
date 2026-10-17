@@ -65,6 +65,12 @@ import {
   getVehicleCategoryTitle,
   CATEGORY_MAX_SEATS,
 } from "../shared/fare-policy";
+import {
+  HOURLY_VEHICLE_TYPE,
+  HOURLY_HIRE_CONFIG,
+  getHourlyQuote,
+  isValidHourlyDuration,
+} from "../shared/hourly-hire";
 import { processPaystackChargeSuccess } from "./payment-cards";
 import { normalizePaystackReference } from "../shared/paystack-reference";
 import {
@@ -9170,7 +9176,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      const categoryId = normalizeVehicleType(rideData.vehicleType || "budget");
+      // ── Chauffeur-by-the-hour (V-Class only) ──
+      // Priced per booked hour instead of by distance, and has no drop-off:
+      // the chauffeur stays with the rider for the booked block of time.
+      const isHourly = String(rideData.bookingType || "one_way") === "hourly";
+      const hourlyHours = isHourly ? Number(rideData.hourlyDurationHours) : null;
+      if (isHourly && !isValidHourlyDuration(hourlyHours)) {
+        return res.status(400).json({
+          success: false,
+          message: `Hourly bookings must be between ${HOURLY_HIRE_CONFIG.minHours} and ${HOURLY_HIRE_CONFIG.maxHours} whole hours.`,
+        });
+      }
+      const hourlyQuote = isHourly ? getHourlyQuote(hourlyHours) : null;
+
+      const categoryId = isHourly
+        ? HOURLY_VEHICLE_TYPE
+        : normalizeVehicleType(rideData.vehicleType || "budget");
       if (!getVehicleCategories()[categoryId]) {
         return res.status(400).json({ success: false, message: "Select a valid vehicle category." });
       }
@@ -9180,22 +9201,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let safeDurationMin = Number.isFinite(normalizedDurationMin) && normalizedDurationMin > 0 ? normalizedDurationMin : null;
       const stops = normalizeRideStops(rideData.stops);
       const pickup = { lat: Number(rideData.pickupLat), lng: Number(rideData.pickupLng) };
-      const destination = { lat: Number(rideData.dropoffLat), lng: Number(rideData.dropoffLng) };
-      if (
-        !isValidLocationSample(pickup.lat, pickup.lng) ||
-        !isValidLocationSample(destination.lat, destination.lng)
-      ) {
+      // Hourly hire has no destination — the booking starts and is released at
+      // the pickup point, so the drop-off mirrors the pickup.
+      const destination = isHourly
+        ? { lat: pickup.lat, lng: pickup.lng }
+        : { lat: Number(rideData.dropoffLat), lng: Number(rideData.dropoffLng) };
+      if (!isValidLocationSample(pickup.lat, pickup.lng)) {
+        return res.status(400).json({ success: false, message: "A valid pickup location is required." });
+      }
+      if (!isHourly && !isValidLocationSample(destination.lat, destination.lng)) {
         return res.status(400).json({ success: false, message: "Valid pickup and destination coordinates are required." });
       }
-      try {
-        const [verifiedRoute] = await fetchVerifiedDirections(pickup, destination, stops);
-        safeDistanceKm = verifiedRoute.distanceKm;
-        safeDurationMin = verifiedRoute.durationMin;
-      } catch (routeError: any) {
-        return res.status(400).json({
-          success: false,
-          message: routeError?.message || "The complete route could not be verified.",
-        });
+      if (isHourly && hourlyQuote) {
+        // The distance allowance is what the rider has paid for up front.
+        safeDistanceKm = hourlyQuote.includedKm;
+        safeDurationMin = hourlyQuote.hours * 60;
+      } else {
+        try {
+          const [verifiedRoute] = await fetchVerifiedDirections(pickup, destination, stops);
+          safeDistanceKm = verifiedRoute.distanceKm;
+          safeDurationMin = verifiedRoute.durationMin;
+        } catch (routeError: any) {
+          return res.status(400).json({
+            success: false,
+            message: routeError?.message || "The complete route could not be verified.",
+          });
+        }
       }
       const selectedRouteId = typeof rideData.selectedRouteId === "string" && rideData.selectedRouteId.trim()
         ? rideData.selectedRouteId.trim()
@@ -9214,12 +9245,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         activeRequests,
         eligibleDrivers: eligibleDrivers.length,
       });
-      const priceEstimate = calculatePrice(safeDistanceKm, categoryId, {
-        isLateNight: isSouthAfricaLateNight(),
-        surgeMultiplier: surge.multiplier,
-        surgeReason: surge.reason,
-        estimatedDurationMin: safeDurationMin,
-      });
+      // Hourly hire is a fixed, quoted product — no surge and no late-night premium,
+      // so the rider pays exactly the price shown when they booked.
+      const priceEstimate = isHourly && hourlyQuote
+        ? {
+            ...calculatePrice(safeDistanceKm, categoryId, { estimatedDurationMin: safeDurationMin }),
+            totalPrice: hourlyQuote.price,
+            baseFare: hourlyQuote.price,
+            pricePerKm: hourlyQuote.overageRatePerKm,
+            surgeMultiplier: 1,
+            demandMultiplier: 1,
+            surgeReason: null,
+          }
+        : calculatePrice(safeDistanceKm, categoryId, {
+            isLateNight: isSouthAfricaLateNight(),
+            surgeMultiplier: surge.multiplier,
+            surgeReason: surge.reason,
+            estimatedDurationMin: safeDurationMin,
+          });
       const safeFare = priceEstimate.totalPrice;
       const routeCurrency = typeof rideData.routeCurrency === "string" && rideData.routeCurrency.trim()
         ? rideData.routeCurrency.trim().toUpperCase()
@@ -9260,11 +9303,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pickupLat: rideData.pickupLat,
         pickupLng: rideData.pickupLng,
         pickupAddress: rideData.pickupAddress || null,
-        dropoffLat: rideData.dropoffLat,
-        dropoffLng: rideData.dropoffLng,
-        dropoffAddress: rideData.dropoffAddress || null,
+        dropoffLat: destination.lat,
+        dropoffLng: destination.lng,
+        dropoffAddress: isHourly
+          ? (rideData.pickupAddress || null)
+          : (rideData.dropoffAddress || null),
         stops,
         vehicleType: categoryId,
+        bookingType: isHourly ? "hourly" : "one_way",
+        ...(isHourly && hourlyQuote ? { hourlyDurationHours: hourlyQuote.hours } : {}),
         paymentMethod: rideData.paymentMethod || "cash",
         price: safeFare,
         distanceKm: safeDistanceKm,
