@@ -239,6 +239,9 @@ var rides = (0, import_pg_core.pgTable)("rides", {
   // Hourly rides are priced per booked hour instead of by distance.
   bookingType: (0, import_pg_core.text)("booking_type").notNull().default("one_way"),
   hourlyDurationHours: (0, import_pg_core.integer)("hourly_duration_hours"),
+  // Open-bid dispatch: how many 5% increases have been applied while searching.
+  // The original quote stays in quotedFare; price/finalFare carry the current offer.
+  offerEscalationSteps: (0, import_pg_core.integer)("offer_escalation_steps").notNull().default(0),
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
   completedAt: (0, import_pg_core.timestamp)("completed_at")
 });
@@ -2116,7 +2119,13 @@ function getVehicleDispatchPriority(requestedVehicleType, activeVehicleType) {
 function getRideOfferExpiresAt(now = /* @__PURE__ */ new Date()) {
   return new Date(now.getTime() + RIDE_OFFER_WINDOW_MS);
 }
+function isOpenBidRide(ride) {
+  return String(ride?.bookingType || "one_way") === "hourly";
+}
 function isRideOfferActive(ride, chauffeurId, now = /* @__PURE__ */ new Date()) {
+  if (isOpenBidRide(ride)) {
+    return String(ride.status || "") === "searching";
+  }
   if (!ride.currentOfferedChauffeurId || ride.currentOfferedChauffeurId !== chauffeurId) {
     return false;
   }
@@ -2927,6 +2936,34 @@ var HOURLY_HIRE_CONFIG = {
   /** Distance used beyond the allowance is billed at the V-Class per-km rate. */
   overageRatePerKm: VEHICLE_CATEGORY_PRICING.luxury_van.pricePerKm
 };
+var HOURLY_BIDDING_CONFIG = {
+  /** Fare increase applied at each step. */
+  stepPercent: 0.05,
+  /** Time with no acceptance before the next increase. */
+  stepIntervalMs: 6e4,
+  /** Hard ceiling on the total increase above the original quote. */
+  maxUpliftPercent: 0.2
+};
+var HOURLY_MAX_ESCALATION_STEPS = Math.round(
+  HOURLY_BIDDING_CONFIG.maxUpliftPercent / HOURLY_BIDDING_CONFIG.stepPercent
+);
+function clampEscalationSteps(steps) {
+  const parsed = Math.floor(Number(steps));
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.min(HOURLY_MAX_ESCALATION_STEPS, parsed);
+}
+function getEscalatedPrice(basePrice, steps) {
+  const base = Number(basePrice);
+  if (!Number.isFinite(base) || base <= 0) return 0;
+  const applied = clampEscalationSteps(steps);
+  return roundCurrency2(base * (1 + applied * HOURLY_BIDDING_CONFIG.stepPercent));
+}
+function getMaxEscalatedPrice(basePrice) {
+  return getEscalatedPrice(basePrice, HOURLY_MAX_ESCALATION_STEPS);
+}
+function hasReachedEscalationCap(steps) {
+  return clampEscalationSteps(steps) >= HOURLY_MAX_ESCALATION_STEPS;
+}
 function roundCurrency2(amount) {
   return Math.round(amount * 100) / 100;
 }
@@ -3984,6 +4021,108 @@ async function registerRoutes(app2) {
     }, 46e3);
     dispatchTimers.set(rideId, timer);
   }
+  const hourlyEscalationTimers = /* @__PURE__ */ new Map();
+  function cancelHourlyEscalation(rideId) {
+    const timer = hourlyEscalationTimers.get(rideId);
+    if (timer) clearTimeout(timer);
+    hourlyEscalationTimers.delete(rideId);
+  }
+  function scheduleHourlyEscalation(rideId) {
+    cancelHourlyEscalation(rideId);
+    const timer = setTimeout(() => {
+      escalateHourlyOffer(rideId).catch(
+        (error) => console.error("[open-bid] escalation failed:", error?.message || error)
+      );
+    }, HOURLY_BIDDING_CONFIG.stepIntervalMs);
+    hourlyEscalationTimers.set(rideId, timer);
+  }
+  async function broadcastOpenBidOffer(ride) {
+    const latestRide = await storage.getRide(ride.id);
+    if (!latestRide || latestRide.status !== "searching") {
+      cancelHourlyEscalation(ride.id);
+      return { offered: null, ride: latestRide };
+    }
+    const eligible = await getEligibleChauffeursForRide(latestRide, { logDiagnostics: true });
+    const updated = await storage.updateRide(latestRide.id, {
+      dispatchStartedAt: latestRide.dispatchStartedAt || /* @__PURE__ */ new Date(),
+      currentOfferedChauffeurId: null,
+      currentOfferExpiresAt: null
+    });
+    let clientFirstName = "Rider";
+    let clientPhoto = null;
+    try {
+      const client = await storage.getUser(latestRide.clientId);
+      clientFirstName = getUserFirstName(client, "Rider");
+      clientPhoto = client?.profilePhoto || null;
+    } catch {
+    }
+    const steps = clampEscalationSteps(latestRide.offerEscalationSteps);
+    const offerPayload = {
+      ...updated || latestRide,
+      clientFirstName,
+      clientPhoto,
+      isOpenBid: true,
+      offerEscalationSteps: steps,
+      originalFare: Number(latestRide.quotedFare ?? latestRide.price ?? 0)
+    };
+    const eligibleIds = new Set(eligible.map((c) => c.id));
+    const sockets = await io.fetchSockets();
+    for (const socket of sockets) {
+      const socketData = socket.data;
+      if (socketData?.chauffeurId && eligibleIds.has(socketData.chauffeurId)) {
+        socket.emit("ride:new", offerPayload);
+      }
+    }
+    const hours = latestRide.hourlyDurationHours;
+    const title = `V-Class hourly \u2014 ${hours ? `${hours} hours` : "open job"}`;
+    const body = `${latestRide.pickupAddress || "Nearby pickup"} \xB7 R${Number(latestRide.price || 0).toFixed(2)}${steps > 0 ? " (increased)" : ""}`;
+    await Promise.all(
+      eligible.map(
+        (chauffeur2) => chauffeur2.userId ? storage.createNotification({ userId: chauffeur2.userId, title, body, type: "ride_request" }).catch(() => void 0) : Promise.resolve(void 0)
+      )
+    );
+    const pushTokens = await getDriverPushTokens(eligible);
+    if (pushTokens.length > 0) {
+      await sendExpoPushNotification(pushTokens, title, body, {
+        rideId: latestRide.id,
+        type: "ride:new",
+        vehicleType: latestRide.vehicleType
+      }, { urgent: true });
+    }
+    if (!hasReachedEscalationCap(steps)) scheduleHourlyEscalation(latestRide.id);
+    return { offered: null, ride: updated || latestRide };
+  }
+  async function escalateHourlyOffer(rideId) {
+    hourlyEscalationTimers.delete(rideId);
+    const ride = await storage.getRide(rideId);
+    if (!ride || ride.status !== "searching" || !isOpenBidRide(ride)) return;
+    const currentSteps = clampEscalationSteps(ride.offerEscalationSteps);
+    if (hasReachedEscalationCap(currentSteps)) return;
+    const nextSteps = currentSteps + 1;
+    const basePrice = Number(ride.quotedFare ?? ride.price ?? 0);
+    const newPrice = getEscalatedPrice(basePrice, nextSteps);
+    if (!newPrice) return;
+    await storage.updateRide(rideId, {
+      offerEscalationSteps: nextSteps,
+      price: newPrice,
+      finalFare: newPrice,
+      ...ride.actualFare != null ? { actualFare: newPrice } : {}
+    });
+    await notifyUserEvent({
+      userId: ride.clientId,
+      type: "fare_increase",
+      title: "Still finding your chauffeur",
+      body: `We raised your fare to R${newPrice.toFixed(2)} to secure a V-Class. You agreed to a maximum of R${getMaxEscalatedPrice(basePrice).toFixed(2)}.`,
+      data: { rideId, price: newPrice, steps: nextSteps }
+    }).catch(() => void 0);
+    io.to(`ride:${rideId}`).emit("ride:fare_updated", {
+      rideId,
+      price: newPrice,
+      offerEscalationSteps: nextSteps,
+      originalFare: basePrice
+    });
+    await broadcastOpenBidOffer({ id: rideId });
+  }
   async function dispatchNextRideOffer(ride) {
     if (dispatchingRideIds.has(ride.id)) {
       return { offered: null, ride: await storage.getRide(ride.id) };
@@ -3992,6 +4131,9 @@ async function registerRoutes(app2) {
     try {
       const latestRide = await storage.getRide(ride.id);
       if (!latestRide || latestRide.status !== "searching") return { offered: null, ride: latestRide };
+      if (isOpenBidRide(latestRide)) {
+        return await broadcastOpenBidOffer(latestRide);
+      }
       let eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true, logDiagnostics: true });
       if (!eligible.length && skippedChauffeursByRide.get(latestRide.id)?.size) {
         skippedChauffeursByRide.delete(latestRide.id);
@@ -11477,6 +11619,7 @@ If you did not request this, you can ignore this email.`,
       if (timer) clearTimeout(timer);
       dispatchTimers.delete(updated.id);
       skippedChauffeursByRide.delete(updated.id);
+      cancelHourlyEscalation(updated.id);
       let clientFirstName = "Rider";
       try {
         const client = await storage.getUser(updated.clientId);
@@ -14835,6 +14978,7 @@ function setupErrorHandler(app2) {
     await pool2.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS vehicle_id varchar`);
     await pool2.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS booking_type text NOT NULL DEFAULT 'one_way'`);
     await pool2.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS hourly_duration_hours integer`);
+    await pool2.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS offer_escalation_steps integer NOT NULL DEFAULT 0`);
     await pool2.query(`ALTER TABLE documents ADD COLUMN IF NOT EXISTS vehicle_id varchar`);
     await pool2.query(`
       CREATE TABLE IF NOT EXISTS operator_profiles (

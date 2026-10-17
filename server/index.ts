@@ -523,6 +523,7 @@ function setupErrorHandler(app: express.Application) {
     // Chauffeur-by-the-hour (V-Class only)
     await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS booking_type text NOT NULL DEFAULT 'one_way'`);
     await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS hourly_duration_hours integer`);
+    await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS offer_escalation_steps integer NOT NULL DEFAULT 0`);
     await pool.query(`ALTER TABLE documents ADD COLUMN IF NOT EXISTS vehicle_id varchar`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS operator_profiles (

@@ -29,8 +29,10 @@ import { apiRequest } from "@/lib/query-client";
 import Colors from "@/constants/colors";
 import {
   HOURLY_HIRE_CONFIG,
+  HOURLY_BIDDING_CONFIG,
   getHourlyDurationOptions,
   getHourlyQuote,
+  getMaxEscalatedPrice,
 } from "@shared/hourly-hire";
 
 const CATEGORY_VAN_ART = require("../../assets/images/category-van.png");
@@ -65,7 +67,8 @@ export default function HourlyHireScreen() {
   const [hours, setHours] = useState<number>(HOURLY_HIRE_CONFIG.minHours);
   const [startMode, setStartMode] = useState<"now" | "later">("now");
   const [scheduledAt, setScheduledAt] = useState<Date | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "card" | "wallet">("card");
+  /** Hourly hire is card-only, both for instant and scheduled bookings. */
+  const paymentMethod = "card" as const;
   const [submitting, setSubmitting] = useState(false);
 
   // Pickup search
@@ -77,6 +80,7 @@ export default function HourlyHireScreen() {
   const sessionTokenRef = useRef(`${Date.now()}`);
 
   const quote = useMemo(() => getHourlyQuote(hours), [hours]);
+  const maxPrice = useMemo(() => getMaxEscalatedPrice(quote.price), [quote.price]);
 
   /* ── Prefill pickup with the rider's current location ── */
   useEffect(() => {
@@ -180,10 +184,6 @@ export default function HourlyHireScreen() {
     }
     if (startMode === "later" && !scheduledAt) {
       Alert.alert("Choose a time", "Select when your chauffeur should arrive.");
-      return;
-    }
-    if (startMode === "later" && paymentMethod !== "card") {
-      Alert.alert("Card required", "Scheduled bookings must be paid by card.");
       return;
     }
 
@@ -321,10 +321,7 @@ export default function HourlyHireScreen() {
             <Pressable
               key={mode}
               style={[styles.segmentBtn, startMode === mode && styles.segmentBtnActive]}
-              onPress={() => {
-                setStartMode(mode);
-                if (mode === "later") setPaymentMethod("card");
-              }}
+              onPress={() => setStartMode(mode)}
             >
               <Text style={[styles.segmentText, startMode === mode && styles.segmentTextActive]}>
                 {mode === "now" ? "Start now" : "Schedule"}
@@ -352,38 +349,29 @@ export default function HourlyHireScreen() {
           </ScrollView>
         )}
 
-        {/* Payment */}
+        {/* Payment — hourly hire is card only */}
         <Text style={styles.sectionLabel}>Payment</Text>
-        <View style={styles.segment}>
-          {(["card", "wallet", "cash"] as const).map((method) => {
-            const disabled = startMode === "later" && method !== "card";
-            return (
-              <Pressable
-                key={method}
-                style={[
-                  styles.segmentBtn,
-                  paymentMethod === method && styles.segmentBtnActive,
-                  disabled && styles.segmentBtnDisabled,
-                ]}
-                disabled={disabled}
-                onPress={() => setPaymentMethod(method)}
-              >
-                <Text
-                  style={[
-                    styles.segmentText,
-                    paymentMethod === method && styles.segmentTextActive,
-                    disabled && styles.segmentTextDisabled,
-                  ]}
-                >
-                  {method === "card" ? "Card" : method === "wallet" ? "Wallet" : "Cash"}
-                </Text>
-              </Pressable>
-            );
-          })}
+        <View style={styles.field}>
+          <Ionicons name="card-outline" size={18} color={Colors.textMuted} />
+          <Text style={styles.fieldText}>Card</Text>
+          <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
         </View>
-        {startMode === "later" && (
-          <Text style={styles.noteBody}>Scheduled bookings are paid by card.</Text>
-        )}
+        <Text style={styles.noteBody}>Hourly bookings are paid by card.</Text>
+
+        {/* Price-rise disclosure — the rider agrees to the ceiling here */}
+        <View style={styles.upliftCard}>
+          <Ionicons name="trending-up" size={16} color="#FFE066" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.upliftTitle}>If no chauffeur is available</Text>
+            <Text style={styles.upliftBody}>
+              Your booking goes to every available V-Class chauffeur. If none accepts, we raise the
+              fare by {Math.round(HOURLY_BIDDING_CONFIG.stepPercent * 100)}% a minute — up to{" "}
+              {formatMoney(maxPrice)} ({Math.round(HOURLY_BIDDING_CONFIG.maxUpliftPercent * 100)}% more) —
+              to secure one. We'll tell you each time it changes, and you're never charged more than{" "}
+              {formatMoney(maxPrice)}.
+            </Text>
+          </View>
+        </View>
       </ScrollView>
 
       {/* Price bar */}
@@ -517,6 +505,15 @@ const styles = StyleSheet.create({
   segmentText: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: Colors.textSecondary },
   segmentTextActive: { color: Colors.primary, fontFamily: "Inter_700Bold" },
   segmentTextDisabled: { color: Colors.textMuted },
+
+  upliftCard: {
+    flexDirection: "row", gap: 10, alignItems: "flex-start",
+    backgroundColor: "rgba(255,224,102,0.08)",
+    borderWidth: 1, borderColor: "rgba(255,224,102,0.25)",
+    borderRadius: 14, padding: 13, marginTop: 14,
+  },
+  upliftTitle: { fontSize: 13, fontFamily: "Inter_700Bold", color: "#FFE066" },
+  upliftBody: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textSecondary, lineHeight: 18, marginTop: 3 },
 
   slotStrip: { marginTop: 4 },
   slotChip: {

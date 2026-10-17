@@ -24,6 +24,52 @@ export const HOURLY_HIRE_CONFIG = {
   overageRatePerKm: VEHICLE_CATEGORY_PRICING.luxury_van.pricePerKm,
 } as const;
 
+/**
+ * Hourly bookings are broadcast to every available V-Class chauffeur rather
+ * than offered to one driver at a time. If nobody accepts, the fare steps up
+ * at a fixed interval until a chauffeur takes it or the cap is reached. The
+ * rider agrees to the ceiling up front and is notified at every increase.
+ */
+export const HOURLY_BIDDING_CONFIG = {
+  /** Fare increase applied at each step. */
+  stepPercent: 0.05,
+  /** Time with no acceptance before the next increase. */
+  stepIntervalMs: 60_000,
+  /** Hard ceiling on the total increase above the original quote. */
+  maxUpliftPercent: 0.2,
+} as const;
+
+/** Number of increases allowed before the ceiling is reached (4 x 5% = 20%). */
+export const HOURLY_MAX_ESCALATION_STEPS = Math.round(
+  HOURLY_BIDDING_CONFIG.maxUpliftPercent / HOURLY_BIDDING_CONFIG.stepPercent,
+);
+
+export function clampEscalationSteps(steps: unknown): number {
+  const parsed = Math.floor(Number(steps));
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.min(HOURLY_MAX_ESCALATION_STEPS, parsed);
+}
+
+/**
+ * Fare after a number of escalation steps. Step 0 is the original quote and
+ * the result never exceeds the agreed ceiling.
+ */
+export function getEscalatedPrice(basePrice: unknown, steps: unknown): number {
+  const base = Number(basePrice);
+  if (!Number.isFinite(base) || base <= 0) return 0;
+  const applied = clampEscalationSteps(steps);
+  return roundCurrency(base * (1 + applied * HOURLY_BIDDING_CONFIG.stepPercent));
+}
+
+/** The most a rider can ever be charged for a given quote. */
+export function getMaxEscalatedPrice(basePrice: unknown): number {
+  return getEscalatedPrice(basePrice, HOURLY_MAX_ESCALATION_STEPS);
+}
+
+export function hasReachedEscalationCap(steps: unknown): boolean {
+  return clampEscalationSteps(steps) >= HOURLY_MAX_ESCALATION_STEPS;
+}
+
 export interface HourlyQuote {
   hours: number;
   includedKm: number;

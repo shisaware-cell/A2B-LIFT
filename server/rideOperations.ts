@@ -106,14 +106,31 @@ export function getRideOfferExpiresAt(now = new Date()) {
   return new Date(now.getTime() + RIDE_OFFER_WINDOW_MS);
 }
 
+/**
+ * Hourly bookings are broadcast to every eligible V-Class chauffeur instead of
+ * being offered to one driver at a time, so they carry no assigned driver and
+ * stay claimable by anyone until someone accepts.
+ */
+export function isOpenBidRide(ride: { bookingType?: string | null; status?: string | null }) {
+  return String(ride?.bookingType || "one_way") === "hourly";
+}
+
 export function isRideOfferActive(
   ride: {
     currentOfferedChauffeurId?: string | null;
     currentOfferExpiresAt?: Date | string | null;
+    bookingType?: string | null;
+    status?: string | null;
   },
   chauffeurId: string,
   now = new Date(),
 ) {
+  // Open bid: any eligible driver may claim it while it is still searching.
+  // acceptRideAtomic decides the winner if two drivers tap at once.
+  if (isOpenBidRide(ride)) {
+    return String(ride.status || "") === "searching";
+  }
+
   if (!ride.currentOfferedChauffeurId || ride.currentOfferedChauffeurId !== chauffeurId) {
     return false;
   }

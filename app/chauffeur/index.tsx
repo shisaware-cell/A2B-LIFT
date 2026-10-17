@@ -3398,9 +3398,18 @@ export default function ChauffeurDashboard() {
                 </Text>
                 <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
               </Pressable>
-              <View style={styles.offerTimerPill}>
-                <Text style={styles.offerTimerText}>{incomingOfferSeconds}s</Text>
-              </View>
+              {incomingRide.bookingType === "hourly" ? (
+                <View style={styles.hourlyPill}>
+                  <Ionicons name="time" size={11} color={Colors.primary} />
+                  <Text style={styles.hourlyPillText}>
+                    {incomingRide.hourlyDurationHours ? `${incomingRide.hourlyDurationHours}h` : "Hourly"}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.offerTimerPill}>
+                  <Text style={styles.offerTimerText}>{incomingOfferSeconds}s</Text>
+                </View>
+              )}
               {getIncomingRideFare(incomingRide) ? (
                 <View style={styles.incomingEarnBox}>
                   <Text style={styles.incomingEarnLabel}>
@@ -3420,10 +3429,28 @@ export default function ChauffeurDashboard() {
                 <Text style={styles.addrText} numberOfLines={1}>{stop.address}</Text>
               </View>
             ))}
-            <View style={styles.addrRow}>
-              <View style={styles.dotRed} />
-              <Text style={styles.addrText} numberOfLines={1}>{incomingRide.dropoffAddress || "Dropoff"}</Text>
-            </View>
+            {incomingRide.bookingType === "hourly" ? (
+              <View style={styles.addrRow}>
+                <Ionicons name="time-outline" size={13} color={Colors.textMuted} />
+                <Text style={styles.addrText} numberOfLines={1}>
+                  {incomingRide.hourlyDurationHours || 2} hours with the guest
+                  {incomingRide.distanceKm ? ` · ${Math.round(incomingRide.distanceKm)} km included` : ""}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.addrRow}>
+                <View style={styles.dotRed} />
+                <Text style={styles.addrText} numberOfLines={1}>{incomingRide.dropoffAddress || "Dropoff"}</Text>
+              </View>
+            )}
+            {incomingRide.bookingType === "hourly" && Number(incomingRide.offerEscalationSteps) > 0 ? (
+              <View style={styles.boostRow}>
+                <Ionicons name="trending-up" size={12} color={Colors.success} />
+                <Text style={styles.boostText}>
+                  Fare increased {Math.round(Number(incomingRide.offerEscalationSteps) * 5)}% — still unclaimed
+                </Text>
+              </View>
+            ) : null}
             <View style={styles.rideInfoPills}>
               <View style={styles.rideInfoPill}>
                 <Ionicons name="car-sport-outline" size={12} color={Colors.white} />
@@ -4201,6 +4228,14 @@ const styles = StyleSheet.create({
   incomingHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   incomingClientButton: { flex: 1, flexDirection: "row", alignItems: "center", gap: 4 },
   incomingTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.warning, flex: 1 },
+  hourlyPill: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: Colors.white, borderRadius: 999,
+    paddingHorizontal: 9, paddingVertical: 4,
+  },
+  hourlyPillText: { fontSize: 11, fontFamily: "Inter_700Bold", color: Colors.primary },
+  boostRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
+  boostText: { fontSize: 11, fontFamily: "Inter_600SemiBold", color: Colors.success },
   incomingPrice: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.white },
   incomingEarnBox: { alignItems: "flex-end" },
   incomingEarnLabel: { fontSize: 8, fontFamily: "Inter_500Medium", color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5 },

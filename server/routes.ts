@@ -21,6 +21,7 @@ import {
   getVehicleDispatchPriority,
   getRideOfferExpiresAt,
   isRideOfferActive,
+  isOpenBidRide,
   isVehicleEligibleForRide,
   normalizeVehicleType,
   resolveVehicleDispatchCategory,
@@ -68,8 +69,13 @@ import {
 import {
   HOURLY_VEHICLE_TYPE,
   HOURLY_HIRE_CONFIG,
+  HOURLY_BIDDING_CONFIG,
   getHourlyQuote,
   isValidHourlyDuration,
+  clampEscalationSteps,
+  getEscalatedPrice,
+  getMaxEscalatedPrice,
+  hasReachedEscalationCap,
 } from "../shared/hourly-hire";
 import { processPaystackChargeSuccess } from "./payment-cards";
 import { normalizePaystackReference } from "../shared/paystack-reference";
@@ -1101,6 +1107,136 @@ export async function registerRoutes(app: Express): Promise<Server> {
     dispatchTimers.set(rideId, timer);
   }
 
+  // ── Open-bid dispatch for hourly V-Class bookings ───────────────────────
+  // The job is shown to every available V-Class chauffeur at once and any of
+  // them may claim it. If nobody does, the fare steps up every minute (5%, to
+  // a +20% ceiling the rider agreed to at booking) and is re-broadcast.
+  const hourlyEscalationTimers = new Map<string, NodeJS.Timeout>();
+
+  function cancelHourlyEscalation(rideId: string) {
+    const timer = hourlyEscalationTimers.get(rideId);
+    if (timer) clearTimeout(timer);
+    hourlyEscalationTimers.delete(rideId);
+  }
+
+  function scheduleHourlyEscalation(rideId: string) {
+    cancelHourlyEscalation(rideId);
+    const timer = setTimeout(() => {
+      escalateHourlyOffer(rideId).catch((error: any) =>
+        console.error("[open-bid] escalation failed:", error?.message || error),
+      );
+    }, HOURLY_BIDDING_CONFIG.stepIntervalMs);
+    hourlyEscalationTimers.set(rideId, timer);
+  }
+
+  async function broadcastOpenBidOffer(ride: any) {
+    const latestRide = await storage.getRide(ride.id);
+    if (!latestRide || latestRide.status !== "searching") {
+      cancelHourlyEscalation(ride.id);
+      return { offered: null, ride: latestRide };
+    }
+
+    const eligible = await getEligibleChauffeursForRide(latestRide, { logDiagnostics: true });
+
+    // No single assigned driver — the offer stays open to everyone eligible.
+    const updated = await storage.updateRide(latestRide.id, {
+      dispatchStartedAt: latestRide.dispatchStartedAt || new Date(),
+      currentOfferedChauffeurId: null,
+      currentOfferExpiresAt: null,
+    } as any);
+
+    let clientFirstName = "Rider";
+    let clientPhoto: string | null = null;
+    try {
+      const client = await storage.getUser(latestRide.clientId);
+      clientFirstName = getUserFirstName(client, "Rider");
+      clientPhoto = client?.profilePhoto || null;
+    } catch {}
+
+    const steps = clampEscalationSteps((latestRide as any).offerEscalationSteps);
+    const offerPayload = {
+      ...(updated || latestRide),
+      clientFirstName,
+      clientPhoto,
+      isOpenBid: true,
+      offerEscalationSteps: steps,
+      originalFare: Number(latestRide.quotedFare ?? latestRide.price ?? 0),
+    };
+
+    const eligibleIds = new Set(eligible.map((c: any) => c.id));
+    const sockets = await io.fetchSockets();
+    for (const socket of sockets) {
+      const socketData = socket.data as any;
+      if (socketData?.chauffeurId && eligibleIds.has(socketData.chauffeurId)) {
+        socket.emit("ride:new", offerPayload);
+      }
+    }
+
+    const hours = (latestRide as any).hourlyDurationHours;
+    const title = `V-Class hourly — ${hours ? `${hours} hours` : "open job"}`;
+    const body = `${latestRide.pickupAddress || "Nearby pickup"} · R${Number(latestRide.price || 0).toFixed(2)}${steps > 0 ? " (increased)" : ""}`;
+
+    await Promise.all(
+      eligible.map((chauffeur: any) =>
+        chauffeur.userId
+          ? storage
+              .createNotification({ userId: chauffeur.userId, title, body, type: "ride_request" })
+              .catch(() => undefined)
+          : Promise.resolve(undefined),
+      ),
+    );
+    const pushTokens = await getDriverPushTokens(eligible);
+    if (pushTokens.length > 0) {
+      await sendExpoPushNotification(pushTokens, title, body, {
+        rideId: latestRide.id,
+        type: "ride:new",
+        vehicleType: latestRide.vehicleType,
+      }, { urgent: true });
+    }
+
+    if (!hasReachedEscalationCap(steps)) scheduleHourlyEscalation(latestRide.id);
+    return { offered: null, ride: updated || latestRide };
+  }
+
+  async function escalateHourlyOffer(rideId: string) {
+    hourlyEscalationTimers.delete(rideId);
+    const ride = await storage.getRide(rideId);
+    if (!ride || ride.status !== "searching" || !isOpenBidRide(ride as any)) return;
+
+    const currentSteps = clampEscalationSteps((ride as any).offerEscalationSteps);
+    if (hasReachedEscalationCap(currentSteps)) return; // Ceiling reached — keep the offer open at this price.
+
+    const nextSteps = currentSteps + 1;
+    const basePrice = Number(ride.quotedFare ?? ride.price ?? 0);
+    const newPrice = getEscalatedPrice(basePrice, nextSteps);
+    if (!newPrice) return;
+
+    await storage.updateRide(rideId, {
+      offerEscalationSteps: nextSteps,
+      price: newPrice,
+      finalFare: newPrice,
+      ...(ride.actualFare != null ? { actualFare: newPrice } : {}),
+    } as any);
+
+    // The rider agreed to the ceiling up front, but is told about every rise.
+    await notifyUserEvent({
+      userId: ride.clientId,
+      type: "fare_increase",
+      title: "Still finding your chauffeur",
+      body: `We raised your fare to R${newPrice.toFixed(2)} to secure a V-Class. You agreed to a maximum of R${getMaxEscalatedPrice(basePrice).toFixed(2)}.`,
+      data: { rideId, price: newPrice, steps: nextSteps },
+    }).catch(() => undefined);
+
+    io.to(`ride:${rideId}`).emit("ride:fare_updated", {
+      rideId,
+      price: newPrice,
+      offerEscalationSteps: nextSteps,
+      originalFare: basePrice,
+    });
+
+    await broadcastOpenBidOffer({ id: rideId });
+  }
+
   async function dispatchNextRideOffer(ride: any) {
     if (dispatchingRideIds.has(ride.id)) {
       return { offered: null, ride: await storage.getRide(ride.id) };
@@ -1109,6 +1245,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
     const latestRide = await storage.getRide(ride.id);
     if (!latestRide || latestRide.status !== "searching") return { offered: null, ride: latestRide };
+
+    // Hourly bookings go out to every available V-Class driver instead of
+    // being offered to one driver at a time.
+    if (isOpenBidRide(latestRide as any)) {
+      return await broadcastOpenBidOffer(latestRide);
+    }
 
     let eligible = await getEligibleChauffeursForRide(latestRide, { excludeSkipped: true, logDiagnostics: true });
     if (!eligible.length && skippedChauffeursByRide.get(latestRide.id)?.size) {
@@ -9927,6 +10069,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (timer) clearTimeout(timer);
       dispatchTimers.delete(updated.id);
       skippedChauffeursByRide.delete(updated.id);
+      // A claimed open-bid job must stop climbing in price.
+      cancelHourlyEscalation(updated.id);
 
       // Enrich with client first name and resolved chauffeur details before emitting
       let clientFirstName = "Rider";
