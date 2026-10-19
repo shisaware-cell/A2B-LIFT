@@ -3731,32 +3731,46 @@ export default function ClientHomeScreen() {
             )}
 
             {/* ─── Active Trip Destination & Change Location ─── */}
+            {/* Hourly hire has no fixed destination — the rider booked time, so
+                we show the booked hours instead of echoing the pickup back. */}
             <View style={styles.activeDestinationCard}>
               <View style={styles.activeDestinationRow}>
                 <View style={styles.activeDestIconBox}>
-                  <Ionicons name="location" size={16} color={Colors.error} />
+                  <Ionicons
+                    name={currentRide?.bookingType === "hourly" ? "time" : "location"}
+                    size={16}
+                    color={Colors.error}
+                  />
                 </View>
                 <View style={styles.activeDestInfo}>
-                  <Text style={styles.activeDestLabel}>Destination</Text>
+                  <Text style={styles.activeDestLabel}>
+                    {currentRide?.bookingType === "hourly" ? "Booked" : "Destination"}
+                  </Text>
                   <Text style={styles.activeDestAddress} numberOfLines={2}>
-                    {currentRide?.dropoffAddress || dropoffAddress || "Dropoff address"}
+                    {currentRide?.bookingType === "hourly"
+                      ? `${currentRide?.hourlyDurationHours || 2} hours · ${(currentRide?.hourlyDurationHours || 2) * 40} km included`
+                      : currentRide?.dropoffAddress || dropoffAddress || "Dropoff address"}
                   </Text>
                 </View>
-                <Pressable
-                  style={styles.changeDestBtn}
-                  onPress={openActiveDestinationEditor}
-                  hitSlop={8}
-                  accessibilityLabel="Change destination"
-                >
-                  <Ionicons name="create-outline" size={14} color={Colors.white} />
-                  <Text style={styles.changeDestBtnText}>Change</Text>
-                </Pressable>
+                {currentRide?.bookingType !== "hourly" && (
+                  <Pressable
+                    style={styles.changeDestBtn}
+                    onPress={openActiveDestinationEditor}
+                    hitSlop={8}
+                    accessibilityLabel="Change destination"
+                  >
+                    <Ionicons name="create-outline" size={14} color={Colors.white} />
+                    <Text style={styles.changeDestBtnText}>Change</Text>
+                  </Pressable>
+                )}
               </View>
             </View>
 
             {currentRide?.price && (
               <View style={styles.tripPriceRow}>
-                <Text style={styles.tripPriceLabel}>Ride Price</Text>
+                <Text style={styles.tripPriceLabel}>
+                  {currentRide?.bookingType === "hourly" ? "Hourly rate" : "Ride Price"}
+                </Text>
                 <Text style={styles.tripPriceValue}>R {currentRide.price}</Text>
               </View>
             )}

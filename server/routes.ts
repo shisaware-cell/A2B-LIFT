@@ -76,6 +76,7 @@ import {
   getEscalatedPrice,
   getMaxEscalatedPrice,
   hasReachedEscalationCap,
+  getHourlyOverageCharge,
 } from "../shared/hourly-hire";
 import { processPaystackChargeSuccess } from "./payment-cards";
 import { normalizePaystackReference } from "../shared/paystack-reference";
@@ -1235,6 +1236,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
 
     await broadcastOpenBidOffer({ id: rideId });
+  }
+
+  /**
+   * Charges whatever is still owed on a card-paid ride to the rider's default
+   * card. Hourly hire is paid up front at the quoted price, but two things can
+   * raise the total afterwards: an open-bid escalation accepted by a driver,
+   * and distance beyond the included allowance. Both are collected here so the
+   * rider is never charged twice for the same rand.
+   */
+  async function chargeOutstandingOnCard(rideId: string, reason: string) {
+    const ride = await storage.getRide(rideId);
+    if (!ride) return { charged: 0 };
+    if (String((ride as any).paymentMethod || "") !== "card") return { charged: 0 };
+
+    const owed = Number((ride as any).finalFare ?? ride.price ?? 0);
+    if (!Number.isFinite(owed) || owed <= 0) return { charged: 0 };
+
+    const payments = await storage.getPaymentsByRide(rideId).catch(() => []);
+    const paid = (payments || [])
+      .filter((p: any) => p.status === "paid")
+      .reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+
+    const outstanding = Math.round((owed - paid) * 100) / 100;
+    if (outstanding < 1) return { charged: 0 }; // under R1 — not worth a card fee
+
+    const user = await storage.getUser(ride.clientId);
+    const cards = await storage.getSavedCardsByUser(ride.clientId).catch(() => []);
+    const card = (cards || []).find((c: any) => c.isDefault) || (cards || [])[0];
+    if (!user || !card) {
+      console.warn(`[hourly] ${reason}: R${outstanding} outstanding on ride ${rideId} but no saved card`);
+      await storage.updateRide(rideId, { paymentStatus: "partial" } as any).catch(() => undefined);
+      return { charged: 0, outstanding };
+    }
+
+    const reference = `A2B-RIDE-${rideId}-${reason}-${Date.now()}`;
+    try {
+      const response = await paystackAPI.post("/transaction/charge_authorization", {
+        authorization_code: card.paystackAuthCode,
+        email: user.username,
+        amount: Math.round(outstanding * 100),
+        currency: "ZAR",
+        reference,
+        metadata: { userId: ride.clientId, rideId, reason },
+      });
+      if (response.data?.data?.status !== "success") {
+        throw new Error(response.data?.data?.status || "declined");
+      }
+      await storage.createPayment({
+        rideId,
+        payerUserId: ride.clientId,
+        amount: outstanding,
+        method: "card",
+        status: "paid",
+        currency: "ZAR",
+        paidAt: new Date(),
+        paystackReference: reference,
+        paystackAuthCode: card.paystackAuthCode,
+      } as any);
+      await storage.updateRide(rideId, { paymentStatus: "paid" } as any).catch(() => undefined);
+      return { charged: outstanding };
+    } catch (error: any) {
+      console.error(`[hourly] ${reason} charge failed for ride ${rideId}:`, error.response?.data || error.message);
+      await storage.updateRide(rideId, { paymentStatus: "partial" } as any).catch(() => undefined);
+      return { charged: 0, outstanding };
+    }
   }
 
   async function dispatchNextRideOffer(ride: any) {
@@ -10071,6 +10137,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       skippedChauffeursByRide.delete(updated.id);
       // A claimed open-bid job must stop climbing in price.
       cancelHourlyEscalation(updated.id);
+      if (isOpenBidRide(updated as any)) {
+        // The rider paid the opening quote at booking; if the offer climbed
+        // before a driver took it, collect the agreed uplift now.
+        void chargeOutstandingOnCard(updated.id, "escalation").catch(() => undefined);
+      }
 
       // Enrich with client first name and resolved chauffeur details before emitting
       let clientFirstName = "Rider";
@@ -10220,8 +10291,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const waitingFee = waitingFeeCents / 100;
 
         let finalFare: number;
-        // If the trip ended early (e.g. covered less than 80% of estimated distance, like only 100m or 1km of a 15km trip)
-        if (recordedDistanceKm < quotedDistanceKm * 0.8) {
+        const isHourlyBooking = String((existingRide as any).bookingType || "one_way") === "hourly";
+        if (isHourlyBooking) {
+          // Hourly hire is a FIXED price for the booked time — the rider bought
+          // hours, not kilometres. So we never reduce it for short distance and
+          // never add per-minute traffic adjustments. The only extra is distance
+          // beyond the included allowance, at the published overage rate.
+          const quotedHourlyPrice = Math.max(0, Number(existingRide.price || baseFare || 0));
+          const overage = getHourlyOverageCharge(
+            recordedDistanceKm,
+            (existingRide as any).hourlyDurationHours,
+          );
+          // No waiting fee either: the rider already paid for the chauffeur's
+          // time, so waiting is the service rather than an extra.
+          finalFare = Math.round((quotedHourlyPrice + overage) * 100) / 100;
+          updateData.hourlyOverageCharge = overage;
+        } else if (recordedDistanceKm < quotedDistanceKm * 0.8) {
+          // If the trip ended early (e.g. covered less than 80% of estimated distance, like only 100m or 1km of a 15km trip)
           const unfinishedFareCents = calculateUnfinishedTripFare({
             baseFareCents: Math.round(baseFare * 100),
             pricePerKmCents: Math.round(pricePerKm * 100),
@@ -10246,7 +10332,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         updateData.completedAt = now;
         updateData.actualDurationMin = Math.round(actualDurationMin * 10) / 10;
         updateData.actualDistanceKm = Math.round(recordedDistanceKm * 100) / 100;
-        updateData.waitingFee = waitingFee;
+        updateData.waitingFee = isHourlyBooking ? 0 : waitingFee;
         updateData.price = finalFare;
         updateData.finalFare = finalFare;
         updateData.settlementStatus = "completed";
@@ -10312,6 +10398,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const ride = await storage.updateRide(req.params.id, updateData as any);
       if (!ride) return res.status(404).json({ message: "Ride not found" });
+      if (status === "trip_completed" && Number((updateData as any).hourlyOverageCharge || 0) > 0) {
+        // Distance beyond the hourly allowance is only known once the trip ends.
+        void chargeOutstandingOnCard(ride.id, "overage").catch(() => undefined);
+      }
       let cancellationDriverEarnings = 0;
       if (status === "cancelled" || status === "trip_completed") {
         const timer = dispatchTimers.get(ride.id);

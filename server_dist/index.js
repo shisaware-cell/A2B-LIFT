@@ -239,6 +239,8 @@ var rides = (0, import_pg_core.pgTable)("rides", {
   // Hourly rides are priced per booked hour instead of by distance.
   bookingType: (0, import_pg_core.text)("booking_type").notNull().default("one_way"),
   hourlyDurationHours: (0, import_pg_core.integer)("hourly_duration_hours"),
+  // Charge added at completion for distance beyond the included allowance.
+  hourlyOverageCharge: (0, import_pg_core.real)("hourly_overage_charge").notNull().default(0),
   // Open-bid dispatch: how many 5% increases have been applied while searching.
   // The original quote stays in quotedFare; price/finalFare carry the current offer.
   offerEscalationSteps: (0, import_pg_core.integer)("offer_escalation_steps").notNull().default(0),
@@ -2990,6 +2992,12 @@ function getHourlyQuote(hours) {
     vehicleType: HOURLY_VEHICLE_TYPE
   };
 }
+function getHourlyOverageCharge(actualDistanceKm, hours) {
+  const quote = getHourlyQuote(hours);
+  const distance = Number(actualDistanceKm);
+  if (!Number.isFinite(distance) || distance <= quote.includedKm) return 0;
+  return roundCurrency2((distance - quote.includedKm) * quote.overageRatePerKm);
+}
 
 // server/payment-cards.ts
 function parsePaystackMetadata(rawMetadata) {
@@ -4122,6 +4130,56 @@ async function registerRoutes(app2) {
       originalFare: basePrice
     });
     await broadcastOpenBidOffer({ id: rideId });
+  }
+  async function chargeOutstandingOnCard(rideId, reason) {
+    const ride = await storage.getRide(rideId);
+    if (!ride) return { charged: 0 };
+    if (String(ride.paymentMethod || "") !== "card") return { charged: 0 };
+    const owed = Number(ride.finalFare ?? ride.price ?? 0);
+    if (!Number.isFinite(owed) || owed <= 0) return { charged: 0 };
+    const payments2 = await storage.getPaymentsByRide(rideId).catch(() => []);
+    const paid = (payments2 || []).filter((p) => p.status === "paid").reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const outstanding = Math.round((owed - paid) * 100) / 100;
+    if (outstanding < 1) return { charged: 0 };
+    const user = await storage.getUser(ride.clientId);
+    const cards = await storage.getSavedCardsByUser(ride.clientId).catch(() => []);
+    const card = (cards || []).find((c) => c.isDefault) || (cards || [])[0];
+    if (!user || !card) {
+      console.warn(`[hourly] ${reason}: R${outstanding} outstanding on ride ${rideId} but no saved card`);
+      await storage.updateRide(rideId, { paymentStatus: "partial" }).catch(() => void 0);
+      return { charged: 0, outstanding };
+    }
+    const reference = `A2B-RIDE-${rideId}-${reason}-${Date.now()}`;
+    try {
+      const response = await paystackAPI.post("/transaction/charge_authorization", {
+        authorization_code: card.paystackAuthCode,
+        email: user.username,
+        amount: Math.round(outstanding * 100),
+        currency: "ZAR",
+        reference,
+        metadata: { userId: ride.clientId, rideId, reason }
+      });
+      if (response.data?.data?.status !== "success") {
+        throw new Error(response.data?.data?.status || "declined");
+      }
+      await storage.createPayment({
+        rideId,
+        payerUserId: ride.clientId,
+        amount: outstanding,
+        method: "card",
+        status: "paid",
+        currency: "ZAR",
+        paidAt: /* @__PURE__ */ new Date(),
+        paystackReference: reference,
+        paystackAuthCode: card.paystackAuthCode
+      });
+      await storage.updateRide(rideId, { paymentStatus: "paid" }).catch(() => void 0);
+      return { charged: outstanding };
+    } catch (error) {
+      console.error(`[hourly] ${reason} charge failed for ride ${rideId}:`, error.response?.data || error.message);
+      await storage.updateRide(rideId, { paymentStatus: "partial" }).catch(() => void 0);
+      return { charged: 0, outstanding };
+    }
   }
   async function dispatchNextRideOffer(ride) {
     if (dispatchingRideIds.has(ride.id)) {
@@ -11620,6 +11678,9 @@ If you did not request this, you can ignore this email.`,
       dispatchTimers.delete(updated.id);
       skippedChauffeursByRide.delete(updated.id);
       cancelHourlyEscalation(updated.id);
+      if (isOpenBidRide(updated)) {
+        void chargeOutstandingOnCard(updated.id, "escalation").catch(() => void 0);
+      }
       let clientFirstName = "Rider";
       try {
         const client = await storage.getUser(updated.clientId);
@@ -11733,7 +11794,16 @@ If you did not request this, you can ignore this email.`,
         const waitingFeeCents = arrivedAt ? calculateWaitingFee(minutesSinceArrival) : 0;
         const waitingFee = waitingFeeCents / 100;
         let finalFare;
-        if (recordedDistanceKm < quotedDistanceKm * 0.8) {
+        const isHourlyBooking = String(existingRide.bookingType || "one_way") === "hourly";
+        if (isHourlyBooking) {
+          const quotedHourlyPrice = Math.max(0, Number(existingRide.price || baseFare || 0));
+          const overage = getHourlyOverageCharge(
+            recordedDistanceKm,
+            existingRide.hourlyDurationHours
+          );
+          finalFare = Math.round((quotedHourlyPrice + overage) * 100) / 100;
+          updateData.hourlyOverageCharge = overage;
+        } else if (recordedDistanceKm < quotedDistanceKm * 0.8) {
           const unfinishedFareCents = calculateUnfinishedTripFare({
             baseFareCents: Math.round(baseFare * 100),
             pricePerKmCents: Math.round(pricePerKm * 100),
@@ -11755,7 +11825,7 @@ If you did not request this, you can ignore this email.`,
         updateData.completedAt = now;
         updateData.actualDurationMin = Math.round(actualDurationMin * 10) / 10;
         updateData.actualDistanceKm = Math.round(recordedDistanceKm * 100) / 100;
-        updateData.waitingFee = waitingFee;
+        updateData.waitingFee = isHourlyBooking ? 0 : waitingFee;
         updateData.price = finalFare;
         updateData.finalFare = finalFare;
         updateData.settlementStatus = "completed";
@@ -11805,6 +11875,9 @@ If you did not request this, you can ignore this email.`,
       }
       const ride = await storage.updateRide(req.params.id, updateData);
       if (!ride) return res.status(404).json({ message: "Ride not found" });
+      if (status === "trip_completed" && Number(updateData.hourlyOverageCharge || 0) > 0) {
+        void chargeOutstandingOnCard(ride.id, "overage").catch(() => void 0);
+      }
       let cancellationDriverEarnings = 0;
       if (status === "cancelled" || status === "trip_completed") {
         const timer = dispatchTimers.get(ride.id);
@@ -14979,6 +15052,7 @@ function setupErrorHandler(app2) {
     await pool2.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS booking_type text NOT NULL DEFAULT 'one_way'`);
     await pool2.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS hourly_duration_hours integer`);
     await pool2.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS offer_escalation_steps integer NOT NULL DEFAULT 0`);
+    await pool2.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS hourly_overage_charge real NOT NULL DEFAULT 0`);
     await pool2.query(`ALTER TABLE documents ADD COLUMN IF NOT EXISTS vehicle_id varchar`);
     await pool2.query(`
       CREATE TABLE IF NOT EXISTS operator_profiles (

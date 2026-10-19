@@ -179,6 +179,24 @@ export default function HourlyHireScreen() {
       });
       const data = await res.json();
       if (!res.ok || data?.success === false) throw new Error(data?.message || "Could not create your booking.");
+
+      const ride = data?.ride || data;
+      // Hourly hire is card-only, so the card has to be charged before we hand
+      // the rider back to the map — otherwise the job dispatches unpaid.
+      const chargeRes = await apiRequest("POST", "/api/payments/charge-ride", { rideId: ride.id });
+      const charge = await chargeRes.json();
+      if (!charge?.success) {
+        await apiRequest("PUT", `/api/rides/${ride.id}/status`, { status: "cancelled" }).catch(() => {});
+        if (charge?.needsCard) {
+          Alert.alert("Add a card", "Hourly hire is paid by card. Add one in your wallet to continue.", [
+            { text: "Go to wallet", onPress: () => router.push("/client/wallet" as any) },
+            { text: "Not now", style: "cancel" },
+          ]);
+        } else {
+          Alert.alert("Payment failed", charge?.message || "Your card could not be charged.");
+        }
+        return;
+      }
       router.replace("/client");
     } catch (error: any) {
       Alert.alert("Booking failed", error?.message || "Please try again.");

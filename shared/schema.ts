@@ -135,6 +135,8 @@ export const rides = pgTable("rides", {
   // Hourly rides are priced per booked hour instead of by distance.
   bookingType: text("booking_type").notNull().default("one_way"),
   hourlyDurationHours: integer("hourly_duration_hours"),
+  // Charge added at completion for distance beyond the included allowance.
+  hourlyOverageCharge: real("hourly_overage_charge").notNull().default(0),
   // Open-bid dispatch: how many 5% increases have been applied while searching.
   // The original quote stays in quotedFare; price/finalFare carry the current offer.
   offerEscalationSteps: integer("offer_escalation_steps").notNull().default(0),
