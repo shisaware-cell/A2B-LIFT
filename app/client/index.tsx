@@ -3173,13 +3173,6 @@ export default function ClientHomeScreen() {
           >
             <Text style={styles.sheetTitle}>Where to?</Text>
 
-            {/* Chauffeur-by-the-hour (V-Class only) */}
-            <Pressable style={styles.hourlyEntryCard} onPress={() => router.push("/client/hourly" as any)}>
-              <Ionicons name="time-outline" size={18} color={Colors.white} />
-              <Text style={styles.hourlyEntryTitle}>Book by the hour</Text>
-              <Ionicons name="chevron-forward" size={16} color={Colors.textSecondary} />
-            </Pressable>
-
             {/* Selfie nudge banner */}
             {!user?.profilePhoto && (
               <Pressable style={styles.selfieNudgeBanner} onPress={() => router.push("/client/profile")}>
@@ -3268,6 +3261,17 @@ export default function ClientHomeScreen() {
                   </View>
                 </View>
               </View>
+              {/* Hourly hire is V-Class only */}
+              {selectedVehicle.id === "luxury_van" && (
+                <Pressable
+                  style={styles.hourlyChip}
+                  hitSlop={8}
+                  onPress={() => router.push("/client/hourly" as any)}
+                >
+                  <Ionicons name="time-outline" size={13} color={Colors.primary} />
+                  <Text style={styles.hourlyChipText}>Hourly</Text>
+                </Pressable>
+              )}
               <Ionicons name="chevron-down" size={16} color={Colors.textMuted} />
             </Pressable>
 
@@ -4724,6 +4728,19 @@ export default function ClientHomeScreen() {
                     </View>
                     <Text style={styles.vehicleOptionPrice}>{formatVehicleRate(vt)}</Text>
                   </View>
+                  {vt.id === "luxury_van" && (
+                    <Pressable
+                      style={styles.hourlyChipWide}
+                      hitSlop={6}
+                      onPress={() => {
+                        setShowVehicleSheet(false);
+                        router.push("/client/hourly" as any);
+                      }}
+                    >
+                      <Ionicons name="time-outline" size={13} color={Colors.primary} />
+                      <Text style={styles.hourlyChipText}>Book by the hour</Text>
+                    </Pressable>
+                  )}
                 </View>
                 {selectedVehicle.id === vt.id && (
                   <Ionicons name="checkmark-circle" size={22} color={Colors.white} />
@@ -4951,16 +4968,27 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent,
     borderRadius: 2,
     alignSelf: "center",
-  hourlyEntryCard: {
+  hourlyChip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    height: 46,
+    gap: 5,
+    backgroundColor: Colors.white,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    height: 30,
   },
-  hourlyEntryTitle: { flex: 1, fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.white },
+  hourlyChipWide: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 5,
+    backgroundColor: Colors.white,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    height: 30,
+    marginTop: 8,
+  },
+  hourlyChipText: { fontSize: 12, fontFamily: "Inter_700Bold", color: Colors.primary },
   selfieNudgeBanner: {
     flexDirection: "row",
     alignItems: "center",
