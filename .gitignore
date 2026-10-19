@@ -54,3 +54,4 @@ yarn-error.*
 .vercel
 
 .env
+*.zip
