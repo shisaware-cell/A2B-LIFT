@@ -4968,6 +4968,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent,
     borderRadius: 2,
     alignSelf: "center",
+  },
   hourlyChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -5010,7 +5011,6 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: "rgba(255,224,102,0.92)",
     marginTop: 2,
-  },
     marginBottom: 4,
   },
   sheetTitle: {
