@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/query-client";
 import { uploadDocument } from "@/lib/supabase-storage";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 
 const REQUIRED_DOCUMENTS = [
   { type: "pay_later:id_copy", label: "ID copy", icon: "id-card-outline" as const },
@@ -164,7 +165,7 @@ const styles = StyleSheet.create({
   documentCopy: { flex: 1, minWidth: 0 },
   documentName: { color: Colors.textPrimary, fontSize: 14, fontFamily: "Inter_500Medium" },
   documentMeta: { color: Colors.textMuted, fontSize: 12, marginTop: 3, fontFamily: "Inter_400Regular" },
-  primaryButton: { height: 48, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white, marginTop: 8 },
+  primaryButton: { height: 48, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white, marginTop: 8, ...whiteButtonHiddenStyle },
   primaryButtonText: { color: "#000", fontSize: 14, fontFamily: "Inter_600SemiBold" },
   disabled: { opacity: 0.45 },
   warning: { borderRadius: 8, padding: 14, backgroundColor: "#2B1717" },

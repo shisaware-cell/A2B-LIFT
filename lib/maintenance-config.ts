@@ -13,3 +13,18 @@
 export const TEMPORARY_SERVICE_BLOCK = false;
 
 export const TEMPORARY_SERVICE_BLOCK_MESSAGE = "Temporarily unavailable, try again later";
+
+/**
+ * Temporary White Buttons Visibility Configuration
+ *
+ * When TEMPORARY_HIDE_WHITE_BUTTONS is true:
+ * All primary white action buttons in the client and driver apps
+ * (login, register, dashboard actions, etc.) are hidden (display: 'none').
+ *
+ * When set to false, all white buttons are instantly restored to their normal visible state.
+ */
+export const TEMPORARY_HIDE_WHITE_BUTTONS = false;
+
+export const whiteButtonHiddenStyle = TEMPORARY_HIDE_WHITE_BUTTONS
+  ? ({ display: "none" } as const)
+  : {};

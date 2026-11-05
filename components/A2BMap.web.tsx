@@ -1,3 +1,4 @@
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 import React, { useRef, useEffect, useMemo, useCallback } from "react";
 import { View, Text, StyleSheet, ActivityIndicator, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -555,6 +556,7 @@ const styles = StyleSheet.create({
     zIndex: 20,
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.08)",
+    ...whiteButtonHiddenStyle,
   },
   gradientTop: {
     position: "absolute",

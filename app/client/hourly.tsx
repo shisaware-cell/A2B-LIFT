@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import { apiRequest } from "@/lib/query-client";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 import {
   HOURLY_HIRE_CONFIG,
   HOURLY_BIDDING_CONFIG,
@@ -456,7 +457,7 @@ const styles = StyleSheet.create({
     padding: 4, borderWidth: 1, borderColor: Colors.border,
   },
   segmentBtn: { flex: 1, height: 42, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  segmentBtnActive: { backgroundColor: Colors.white },
+  segmentBtnActive: { backgroundColor: Colors.white, ...whiteButtonHiddenStyle },
   segmentText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.textSecondary },
   segmentTextActive: { color: Colors.primary, fontFamily: "Inter_700Bold" },
 
@@ -465,7 +466,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, marginRight: 8,
     backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, alignItems: "center",
   },
-  slotActive: { backgroundColor: Colors.white, borderColor: Colors.white },
+  slotActive: { backgroundColor: Colors.white, borderColor: Colors.white, ...whiteButtonHiddenStyle },
   slotDay: { fontSize: 11, fontFamily: "Inter_500Medium", color: Colors.textSecondary },
   slotTime: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.white, marginTop: 2 },
   slotTextActive: { color: Colors.primary },
@@ -485,7 +486,7 @@ const styles = StyleSheet.create({
   priceLine: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between" },
   priceCaption: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textSecondary },
   price: { fontSize: 26, fontFamily: "Inter_700Bold", color: Colors.white },
-  cta: { height: 54, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white },
+  cta: { height: 54, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white, ...whiteButtonHiddenStyle },
   ctaDisabled: { opacity: 0.4 },
   ctaText: { fontSize: 16, fontFamily: "Inter_700Bold", color: Colors.primary },
 

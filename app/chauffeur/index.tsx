@@ -44,6 +44,7 @@ import {
   buildAppleMapsNavigationUrl,
 } from "@/lib/google-navigation";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 import A2BMap from "@/components/A2BMap";
 import { VEHICLE_CATEGORY_PRICING, getDriverDisplayFare, getDriverNetFare } from "@shared/fare-policy";
 import { normalizeRideStops } from "@shared/ride-stops";
@@ -4201,7 +4202,7 @@ const styles = StyleSheet.create({
   rideInfoPill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
   rideInfoPillText: { color: Colors.white, fontFamily: "Inter_600SemiBold", fontSize: 11 },
   tripDist: { fontSize: 11, fontFamily: "Inter_400Regular", color: Colors.textMuted },
-  tripAcceptBtn: { marginTop: 4, backgroundColor: Colors.white, borderRadius: 10, paddingVertical: 9, alignItems: "center" },
+  tripAcceptBtn: { marginTop: 4, backgroundColor: Colors.white, borderRadius: 10, paddingVertical: 9, alignItems: "center", ...whiteButtonHiddenStyle },
   tripAcceptBtnText: { fontSize: 13, fontFamily: "Inter_700Bold", color: Colors.primary },
 
   // Bottom cards
@@ -4243,7 +4244,7 @@ const styles = StyleSheet.create({
   offerTimerText: { fontSize: 11, fontFamily: "Inter_700Bold", color: Colors.warning },
   incomingActions: { flexDirection: "row", gap: 10, marginTop: 2 },
   declineBtn: { width: 52, height: 52, borderRadius: 14, backgroundColor: "rgba(255,77,77,0.1)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,77,77,0.25)" },
-  acceptBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: Colors.white, borderRadius: 14, paddingVertical: 14 },
+  acceptBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: Colors.white, borderRadius: 14, paddingVertical: 14, ...whiteButtonHiddenStyle },
   acceptBtnText: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.primary },
 
   // Shared
@@ -4261,8 +4262,8 @@ const styles = StyleSheet.create({
   nextStopBadge: { fontSize: 9, fontFamily: "Inter_700Bold", color: Colors.white, backgroundColor: Colors.accent, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 },
   dotGreen: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.success },
   dotRed: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.error },
-  actionBtn: { minHeight: 48, backgroundColor: Colors.white, paddingVertical: 14, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
-  completeBtnStyle: { backgroundColor: Colors.success },
+  actionBtn: { minHeight: 48, backgroundColor: Colors.white, paddingVertical: 14, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, ...whiteButtonHiddenStyle },
+  completeBtnStyle: { backgroundColor: Colors.success, display: "flex" },
   actionBtnText: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.primary },
 
   // FAB & menu
@@ -4348,7 +4349,7 @@ const styles = StyleSheet.create({
   payPopupSubtitle: { fontSize: 14, fontFamily: "Inter_500Medium", color: Colors.textMuted, textAlign: "center" },
   payPopupAmount: { fontSize: 36, fontFamily: "Inter_700Bold", color: Colors.white, textAlign: "center" },
   payPopupBody: { fontSize: 15, fontFamily: "Inter_400Regular", color: Colors.textMuted, textAlign: "center", lineHeight: 22 },
-  payPopupBtn: { marginTop: 8, backgroundColor: Colors.white, borderRadius: 14, paddingHorizontal: 40, paddingVertical: 14, width: "100%", alignItems: "center" },
+  payPopupBtn: { marginTop: 8, backgroundColor: Colors.white, borderRadius: 14, paddingHorizontal: 40, paddingVertical: 14, width: "100%", alignItems: "center", ...whiteButtonHiddenStyle },
   payPopupBtnText: { fontSize: 16, fontFamily: "Inter_700Bold", color: Colors.primary },
   cashInputCard: {
     width: "100%",
@@ -4430,7 +4431,7 @@ const styles = StyleSheet.create({
   ratingActionsRow: { flexDirection: "row", gap: 10 },
   ratingSecondaryBtn: { flex: 1, borderRadius: 14, paddingVertical: 14, alignItems: "center", backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: GLASS_BORDER },
   ratingSecondaryBtnText: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.white },
-  ratingPrimaryBtn: { flex: 1, borderRadius: 14, paddingVertical: 14, alignItems: "center", backgroundColor: Colors.white },
+  ratingPrimaryBtn: { flex: 1, borderRadius: 14, paddingVertical: 14, alignItems: "center", backgroundColor: Colors.white, ...whiteButtonHiddenStyle },
   ratingPrimaryBtnText: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.primary },
 
   waitingTimerBadge: {

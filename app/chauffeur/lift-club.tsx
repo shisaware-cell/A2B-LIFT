@@ -5,6 +5,7 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { apiRequest } from "@/lib/query-client";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 
 type LiftClubRouteState = {
   route: any | null;
@@ -165,7 +166,7 @@ const styles = StyleSheet.create({
   input: { minHeight: 50, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 14, color: Colors.white, fontSize: 14, fontFamily: "Inter_400Regular", backgroundColor: "rgba(255,255,255,0.04)" },
   twoCols: { flexDirection: "row", gap: 10 },
   colInput: { flex: 1 },
-  primaryButton: { height: 58, borderRadius: 16, backgroundColor: Colors.white, alignItems: "center", justifyContent: "center" },
+  primaryButton: { height: 58, borderRadius: 16, backgroundColor: Colors.white, alignItems: "center", justifyContent: "center", ...whiteButtonHiddenStyle },
   primaryText: { fontSize: 16, fontFamily: "Inter_700Bold", color: Colors.primary },
   secondaryButton: { height: 52, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, alignItems: "center", justifyContent: "center", marginTop: 12 },
   secondaryText: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.white },

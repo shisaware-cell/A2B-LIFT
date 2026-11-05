@@ -38,6 +38,7 @@ import {
 import { useSocket } from "@/lib/socket-context";
 import { uploadDocument } from "@/lib/supabase-storage";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 import A2BMap from "@/components/A2BMap";
 import LivenessCamera, { type LivenessChallenge, type LivenessCaptureResult } from "@/components/LivenessCamera";
 import LiftClubMembershipRequiredModal from "@/components/LiftClubMembershipRequiredModal";
@@ -4339,6 +4340,7 @@ export default function ClientHomeScreen() {
                     style={{
                       paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, marginRight: 8,
                       backgroundColor: active ? Colors.white : Colors.card,
+                      ...(active ? whiteButtonHiddenStyle : {}),
                       borderWidth: 1, borderColor: active ? Colors.white : Colors.border,
                     }}
                   >
@@ -4358,6 +4360,7 @@ export default function ClientHomeScreen() {
                       style={{
                         paddingHorizontal: 13, paddingVertical: 8, borderRadius: 10,
                         backgroundColor: active ? Colors.white : Colors.card,
+                        ...(active ? whiteButtonHiddenStyle : {}),
                         borderWidth: 1, borderColor: active ? Colors.white : Colors.border,
                       }}
                     >
@@ -4385,6 +4388,7 @@ export default function ClientHomeScreen() {
               onPress={handleReserveRide}
               style={{
                 backgroundColor: reserveSlot ? Colors.white : Colors.card,
+                ...(reserveSlot ? whiteButtonHiddenStyle : {}),
                 opacity: reserveSubmitting ? 0.6 : 1,
                 paddingVertical: 15, borderRadius: 14, alignItems: "center",
               }}
@@ -4991,6 +4995,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 11,
     height: 30,
+    ...whiteButtonHiddenStyle,
   },
   hourlyChipWide: {
     flexDirection: "row",
@@ -5002,6 +5007,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 30,
     marginTop: 8,
+    ...whiteButtonHiddenStyle,
   },
   hourlyChipText: { fontSize: 12, fontFamily: "Inter_700Bold", color: Colors.primary },
   selfieNudgeBanner: {
@@ -5312,6 +5318,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
+    ...whiteButtonHiddenStyle,
   },
   confirmBtnText: {
     fontSize: 14,
@@ -5683,6 +5690,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
+    ...whiteButtonHiddenStyle,
   },
   requestBtnText: {
     fontSize: 14,
@@ -6252,6 +6260,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: Colors.white,
     marginTop: 8,
+    ...whiteButtonHiddenStyle,
   },
   retryBtnText: {
     fontSize: 15,
@@ -7018,6 +7027,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 14,
     alignItems: "center",
+    ...whiteButtonHiddenStyle,
   },
   submitRatingButtonDisabled: {
     opacity: 0.5,
@@ -7487,6 +7497,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     minHeight: 50,
+    ...whiteButtonHiddenStyle,
   },
   livenessBtnDisabled: {
     opacity: 0.5,

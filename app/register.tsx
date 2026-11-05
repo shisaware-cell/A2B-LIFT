@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { getAppVariant, getAuthenticatedHomeRoute, usesRoleSelect } from "@mobile-core/app-variant";
 import { useAuth } from "@mobile-core/auth";
-import { TEMPORARY_SERVICE_BLOCK, TEMPORARY_SERVICE_BLOCK_MESSAGE } from "@mobile-core/maintenance";
+import { TEMPORARY_SERVICE_BLOCK, TEMPORARY_SERVICE_BLOCK_MESSAGE, whiteButtonHiddenStyle } from "@mobile-core/maintenance";
 import { apiRequest } from "@mobile-core/query";
 import { Colors } from "@mobile-ui/colors";
 import * as WebBrowser from "expo-web-browser";
@@ -405,12 +405,12 @@ const styles = StyleSheet.create({
   phonePrefixText: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.white },
   inputWrapper: { flexDirection: "row", alignItems: "center", backgroundColor: Colors.card, borderRadius: 12, paddingHorizontal: 16, gap: 12, borderWidth: 1, borderColor: Colors.border },
   input: { flex: 1, paddingVertical: 15, fontSize: 15, fontFamily: "Inter_400Regular", color: Colors.white },
-  registerBtn: { backgroundColor: Colors.white, paddingVertical: 15, borderRadius: 14, alignItems: "center", marginTop: 4 },
+  registerBtn: { backgroundColor: Colors.white, paddingVertical: 15, borderRadius: 14, alignItems: "center", marginTop: 4, ...whiteButtonHiddenStyle },
   registerBtnText: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.primary },
   dividerRow: { flexDirection: "row", alignItems: "center", gap: 12, marginVertical: 2 },
   dividerLine: { flex: 1, height: 1, backgroundColor: Colors.border },
   dividerText: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textMuted },
-  googleBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, backgroundColor: "#ffffff", paddingVertical: 14, borderRadius: 14, borderWidth: 1, borderColor: "#e0e0e0" },
+  googleBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, backgroundColor: "#ffffff", paddingVertical: 14, borderRadius: 14, borderWidth: 1, borderColor: "#e0e0e0", ...whiteButtonHiddenStyle },
   googleBtnText: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: "#1a1a1a" },
   googleIconWrap: { width: 22, height: 22, borderRadius: 11, backgroundColor: "#fff", borderWidth: 1, borderColor: "#e0e0e0", alignItems: "center", justifyContent: "center" },
   googleG: { fontSize: 13, fontWeight: "700", color: "#4285F4" },

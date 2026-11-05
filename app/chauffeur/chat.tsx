@@ -1,3 +1,4 @@
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 import React, { useState, useCallback, useEffect } from "react";
 import { View, Text, StyleSheet, Pressable, TextInput, FlatList, Platform, KeyboardAvoidingView, ActivityIndicator, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -179,5 +180,5 @@ const styles = StyleSheet.create({
     maxHeight: 120,
     minHeight: 44,
   },
-  sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.white, alignItems: "center", justifyContent: "center", marginBottom: 2 },
+  sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.white, alignItems: "center", justifyContent: "center", marginBottom: 2, ...whiteButtonHiddenStyle },
 });

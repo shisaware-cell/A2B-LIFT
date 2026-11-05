@@ -1,3 +1,4 @@
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 import React, { useRef, useEffect, useMemo, useCallback, useState } from "react";
 import { View, Text, StyleSheet, ActivityIndicator, Image, Pressable } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
@@ -890,6 +891,7 @@ const styles = StyleSheet.create({
     zIndex: 20,
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.08)",
+    ...whiteButtonHiddenStyle,
   },
   statusOverlay: {
     position: "absolute",

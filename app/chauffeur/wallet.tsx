@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/query-client";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 import LiftClubMembershipRequiredModal from "@/components/LiftClubMembershipRequiredModal";
 
 interface Bank { name: string; code: string; }
@@ -518,6 +519,7 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 6,
     backgroundColor: Colors.white, paddingVertical: 10, paddingHorizontal: 24,
     borderRadius: 12, marginTop: 4,
+    ...whiteButtonHiddenStyle,
   },
   withdrawBtnText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.primary },
   withdrawBtnDisabled: { backgroundColor: Colors.surface, opacity: 0.6 },
@@ -565,7 +567,7 @@ const styles = StyleSheet.create({
   modalActions: { flexDirection: "row", gap: 12 },
   cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: "center", backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border },
   cancelBtnText: { fontSize: 14, fontFamily: "Inter_500Medium", color: Colors.textSecondary },
-  confirmBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: "center", backgroundColor: Colors.white },
+  confirmBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: "center", backgroundColor: Colors.white, ...whiteButtonHiddenStyle },
   confirmBtnText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.primary },
   bankPickerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, marginBottom: 8 },
   bankRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: Colors.border },

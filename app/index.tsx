@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@mobile-core/auth";
 import { getAppVariant } from "@mobile-core/app-variant";
+import { whiteButtonHiddenStyle } from "@mobile-core/maintenance";
 import { Colors } from "@mobile-ui/colors";
 import { EntranceView } from "@mobile-ui/motion";
 
@@ -217,6 +218,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
+    ...whiteButtonHiddenStyle,
   },
   btnPressed: {
     opacity: 0.9,

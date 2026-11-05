@@ -20,6 +20,7 @@ import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { apiRequest } from "@/lib/query-client";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 
 type FleetInvite = {
   id: string;
@@ -280,7 +281,7 @@ export default function FleetScreen() {
           Fleet &amp; Driver management is exclusively available to approved A2B fleet partners and driver operators.
         </Text>
         <Pressable
-          style={{ backgroundColor: Colors.white, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 28, alignItems: "center" }}
+          style={[{ backgroundColor: Colors.white, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 28, alignItems: "center" }, whiteButtonHiddenStyle]}
           onPress={() => router.replace("/chauffeur" as never)}
         >
           <Text style={{ color: Colors.primary, fontFamily: "Inter_700Bold", fontSize: 14 }}>Back to Dashboard</Text>
@@ -714,7 +715,7 @@ const styles = StyleSheet.create({
   acceptText: { color: Colors.white, fontFamily: "Inter_700Bold", fontSize: 12 },
   declineBtn: { borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14, backgroundColor: "rgba(255,77,77,0.12)", borderWidth: 1, borderColor: "rgba(255,77,77,0.35)" },
   declineText: { color: Colors.error, fontFamily: "Inter_700Bold", fontSize: 12 },
-  smallAssignBtn: { borderRadius: 999, paddingVertical: 9, paddingHorizontal: 16, backgroundColor: Colors.white },
+  smallAssignBtn: { borderRadius: 999, paddingVertical: 9, paddingHorizontal: 16, backgroundColor: Colors.white, ...whiteButtonHiddenStyle },
   smallAssignText: { color: Colors.primary, fontFamily: "Inter_700Bold", fontSize: 12 },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "flex-end" },
   modalSheet: { backgroundColor: Colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, gap: 14, maxHeight: "88%" },
@@ -731,6 +732,6 @@ const styles = StyleSheet.create({
   modalActions: { flexDirection: "row", gap: 10 },
   secondaryBtn: { flex: 1, minHeight: 46, borderRadius: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border },
   secondaryText: { color: Colors.white, fontFamily: "Inter_700Bold" },
-  submitBtn: { minHeight: 50, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white },
+  submitBtn: { minHeight: 50, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white, ...whiteButtonHiddenStyle },
   submitText: { color: Colors.primary, fontFamily: "Inter_700Bold" },
 });

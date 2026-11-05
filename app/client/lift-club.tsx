@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/query-client";
 import { uploadDocument } from "@/lib/supabase-storage";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 
 type Membership = {
   id?: string;
@@ -285,7 +286,7 @@ const styles = StyleSheet.create({
   infoTitle: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.white },
   fee: { fontSize: 34, fontFamily: "Inter_700Bold", color: Colors.white },
   muted: { fontSize: 14, fontFamily: "Inter_400Regular", color: Colors.textSecondary, lineHeight: 21 },
-  primaryButton: { height: 58, borderRadius: 16, backgroundColor: Colors.white, alignItems: "center", justifyContent: "center", marginTop: 4 },
+  primaryButton: { height: 58, borderRadius: 16, backgroundColor: Colors.white, alignItems: "center", justifyContent: "center", marginTop: 4, ...whiteButtonHiddenStyle },
   primaryButtonText: { fontSize: 16, fontFamily: "Inter_700Bold", color: Colors.primary },
   secondaryButton: { height: 48, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, marginTop: 4 },
   secondaryButtonText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.white },

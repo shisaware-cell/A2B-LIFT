@@ -9,6 +9,7 @@ import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest, getApiUrl } from "@/lib/query-client";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 import { normalizePaystackReference } from "@shared/paystack-reference";
@@ -778,6 +779,7 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 6,
     backgroundColor: Colors.white, paddingVertical: 10, paddingHorizontal: 24,
     borderRadius: 12, marginTop: 8,
+    ...whiteButtonHiddenStyle,
   },
   topupBtnText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.primary },
   section: { marginHorizontal: 20, marginBottom: 24 },
@@ -826,7 +828,7 @@ const styles = StyleSheet.create({
   modalSub: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textMuted, marginTop: -8 },
   amountRow: { flexDirection: "row", gap: 10 },
   amountChip: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: Colors.surface, alignItems: "center", borderWidth: 1, borderColor: Colors.border },
-  amountChipActive: { backgroundColor: Colors.white, borderColor: Colors.white },
+  amountChipActive: { backgroundColor: Colors.white, borderColor: Colors.white, ...whiteButtonHiddenStyle },
   amountChipText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.textSecondary },
   amountChipTextActive: { color: Colors.primary },
   customAmountWrap: { flexDirection: "row", alignItems: "center", backgroundColor: Colors.surface, borderRadius: 12, paddingHorizontal: 16, borderWidth: 1, borderColor: Colors.border },
@@ -834,7 +836,7 @@ const styles = StyleSheet.create({
   customAmountInput: { flex: 1, paddingVertical: 14, fontSize: 24, fontFamily: "Inter_700Bold", color: Colors.white },
   paystackNote: { flexDirection: "row", alignItems: "center", gap: 6 },
   paystackNoteText: { fontSize: 11, fontFamily: "Inter_400Regular", color: Colors.textSecondary },
-  payBtn: { backgroundColor: Colors.white, paddingVertical: 15, borderRadius: 14, alignItems: "center" },
+  payBtn: { backgroundColor: Colors.white, paddingVertical: 15, borderRadius: 14, alignItems: "center", ...whiteButtonHiddenStyle },
   payBtnText: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.primary },
   cardIllustration: {
     backgroundColor: Colors.surface, borderRadius: 16, padding: 24,

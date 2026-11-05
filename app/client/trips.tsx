@@ -10,6 +10,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest, queryClient } from "@/lib/query-client";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   reserved:           { label: "Reserved",    color: "#7B5CD6" },
@@ -314,7 +315,7 @@ const styles = StyleSheet.create({
   helpTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.white },
   helpSubtext: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.textMuted, lineHeight: 18 },
   helpInput: { backgroundColor: Colors.surface, borderRadius: 12, padding: 14, fontSize: 14, fontFamily: "Inter_400Regular", color: Colors.white, minHeight: 100, borderWidth: 1, borderColor: Colors.border },
-  helpSendBtn: { backgroundColor: Colors.white, borderRadius: 12, paddingVertical: 14, alignItems: "center" },
+  helpSendBtn: { backgroundColor: Colors.white, borderRadius: 12, paddingVertical: 14, alignItems: "center", ...whiteButtonHiddenStyle },
   helpSendBtnText: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.primary },
   helpSentBox: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: `${Colors.success}18`, borderRadius: 10, padding: 14 },
   helpSentText: { fontSize: 13, fontFamily: "Inter_500Medium", color: Colors.success, flex: 1 },

@@ -18,6 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { apiRequest } from "@/lib/query-client";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 import { FleetMap, FleetMapRef } from "@/components/FleetMap";
 
 // Johannesburg default center
@@ -759,6 +760,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 28,
     alignItems: "center",
+    ...whiteButtonHiddenStyle,
   },
   restrictedBackBtnText: {
     color: "#0B0C10",

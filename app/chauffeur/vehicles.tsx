@@ -9,6 +9,7 @@ import { apiRequest } from "@/lib/query-client";
 import { uploadDocument } from "@/lib/supabase-storage";
 import { pickImageOrDocument } from "@/lib/image-picker-helper";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 
 const emptyForm = { carMake: "", vehicleModel: "", vehicleYear: "", plateNumber: "", vehicleType: "budget", carColor: "", passengerCapacity: "4", luggageCapacity: "2" };
 
@@ -829,7 +830,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 13, fontFamily: "Inter_700Bold", color: Colors.textSecondary, textTransform: "uppercase", marginTop: 14, marginBottom: 10 },
   form: { gap: 10, marginBottom: 16 },
   input: { minHeight: 46, borderRadius: 12, paddingHorizontal: 14, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, color: Colors.white },
-  addVehicleBtn: { minHeight: 48, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white, flexDirection: "row", gap: 8, marginTop: 12 },
+  addVehicleBtn: { minHeight: 48, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white, flexDirection: "row", gap: 8, marginTop: 12, ...whiteButtonHiddenStyle },
   categorySelect: { minHeight: 54, borderRadius: 12, paddingHorizontal: 14, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, flexDirection: "row", alignItems: "center", gap: 10 },
   categoryLabel: { color: Colors.textMuted, fontFamily: "Inter_600SemiBold", fontSize: 11, textTransform: "uppercase" },
   categoryValue: { color: Colors.white, fontFamily: "Inter_700Bold", fontSize: 14, marginTop: 2 },
@@ -838,7 +839,7 @@ const styles = StyleSheet.create({
   categoryOptionActive: { backgroundColor: Colors.surface },
   categoryOptionTitle: { color: Colors.white, fontFamily: "Inter_700Bold", fontSize: 13 },
   categoryOptionDesc: { color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 11, marginTop: 3 },
-  submitBtn: { minHeight: 48, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white },
+  submitBtn: { minHeight: 48, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white, ...whiteButtonHiddenStyle },
   submitText: { color: Colors.primary, fontFamily: "Inter_700Bold" },
   emptyText: { color: Colors.textMuted, fontFamily: "Inter_400Regular" },
   vehicleCard: { gap: 12, backgroundColor: Colors.card, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: Colors.border, marginBottom: 10 },
@@ -915,7 +916,7 @@ const styles = StyleSheet.create({
   sheetFooter: { paddingTop: 10 },
   savePhotosBtn: { minHeight: 50, borderRadius: 14, backgroundColor: Colors.surface, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1, borderColor: Colors.border },
   savePhotosBtnDisabled: { opacity: 0.5 },
-  savePhotosBtnActive: { backgroundColor: Colors.white, borderColor: Colors.white },
+  savePhotosBtnActive: { backgroundColor: Colors.white, borderColor: Colors.white, ...whiteButtonHiddenStyle },
   savePhotosText: { color: Colors.textMuted, fontSize: 14, fontFamily: "Inter_700Bold" },
   savePhotosTextActive: { color: Colors.primary },
 

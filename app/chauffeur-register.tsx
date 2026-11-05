@@ -11,6 +11,7 @@ import { uploadDocument } from "@/lib/supabase-storage";
 import { pickImageOrDocument, PickedMedia } from "@/lib/image-picker-helper";
 import DocumentUploadModal from "@/components/DocumentUploadModal";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 
 const DRIVER_DOCS = [
   { id: "driver:pdrp_certificate", label: "PDRP Certificate", optional: false },
@@ -444,6 +445,6 @@ const styles = StyleSheet.create({
   docThumbnail: { width: 34, height: 34, borderRadius: 6, backgroundColor: "#222" },
   errorBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(255,77,77,0.1)", padding: 12, borderRadius: 10, marginBottom: 12 },
   errorText: { flex: 1, fontSize: 13, color: Colors.error, fontFamily: "Inter_400Regular" },
-  submitBtn: { minHeight: 52, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white, marginTop: 20 },
+  submitBtn: { minHeight: 52, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white, marginTop: 20, ...whiteButtonHiddenStyle },
   submitText: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.primary },
 });

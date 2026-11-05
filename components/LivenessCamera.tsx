@@ -1,3 +1,4 @@
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 /**
  * LivenessCamera.tsx
  *
@@ -505,6 +506,7 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", justifyContent: "center",
     backgroundColor: "#fff",
     borderRadius: 16, paddingVertical: 16,
+    ...whiteButtonHiddenStyle,
   },
   captureBtnText: { fontSize: 16, fontFamily: "Inter_700Bold", color: Colors.primary },
 
@@ -533,6 +535,7 @@ const styles = StyleSheet.create({
     flex: 1.2, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
     minHeight: 52, borderRadius: 14,
     backgroundColor: "#fff",
+    ...whiteButtonHiddenStyle,
   },
   confirmBtnText:  { color: Colors.primary, fontSize: 15, fontFamily: "Inter_700Bold" },
 

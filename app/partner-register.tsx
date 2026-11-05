@@ -11,6 +11,7 @@ import { uploadDocument } from "@/lib/supabase-storage";
 import { pickImageOrDocument, PickedMedia } from "@/lib/image-picker-helper";
 import DocumentUploadModal from "@/components/DocumentUploadModal";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 
 const PARTNER_DOCS = [
   { id: "partner:company_registration", label: "Company Registration", optional: true },
@@ -375,6 +376,6 @@ const styles = StyleSheet.create({
   docMeta: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textMuted, marginTop: 2 },
   errorBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(255,77,77,0.1)", padding: 12, borderRadius: 10, marginBottom: 12 },
   errorText: { flex: 1, fontSize: 13, color: Colors.error, fontFamily: "Inter_400Regular" },
-  submitBtn: { minHeight: 52, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white, marginTop: 4 },
+  submitBtn: { minHeight: 52, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: Colors.white, marginTop: 4, ...whiteButtonHiddenStyle },
   submitText: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.primary },
 });

@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useSegments } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 
 type Props = {
   visible: boolean;
@@ -112,6 +113,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
+    ...whiteButtonHiddenStyle,
   },
   primaryButtonText: {
     fontSize: 15,

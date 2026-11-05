@@ -24,6 +24,7 @@ import {
   type ReferralAppTarget,
 } from "@/lib/referral-links";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 import LiftClubMembershipRequiredModal from "@/components/LiftClubMembershipRequiredModal";
 
 type ReferralSummary = {
@@ -1128,6 +1129,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: "center",
     justifyContent: "center",
+    ...whiteButtonHiddenStyle,
   },
   secondaryActionDisabled: {
     opacity: 0.45,
@@ -1401,6 +1403,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: 15,
     marginTop: 4,
+    ...whiteButtonHiddenStyle,
   },
   submitBtnDisabled: {
     opacity: 0.45,

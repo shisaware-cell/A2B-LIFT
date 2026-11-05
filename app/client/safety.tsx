@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth-context";
 import { apiRequest, queryClient } from "@/lib/query-client";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
+import { whiteButtonHiddenStyle } from "@/lib/maintenance-config";
 
 const REPORT_TYPES = [
   { id: "emergency", label: "Emergency", icon: "warning" as const, color: Colors.error },
@@ -225,8 +226,8 @@ const styles = StyleSheet.create({
   aiResponseHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   aiResponseTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.white },
   aiResponseText: { fontSize: 14, fontFamily: "Inter_400Regular", color: Colors.textSecondary, lineHeight: 20 },
-  doneBtn: { backgroundColor: Colors.white, paddingVertical: 12, borderRadius: 12, alignItems: "center" },
+  doneBtn: { backgroundColor: Colors.white, paddingVertical: 12, borderRadius: 12, alignItems: "center", ...whiteButtonHiddenStyle },
   doneBtnText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.primary },
-  submitBtn: { backgroundColor: Colors.white, paddingVertical: 16, borderRadius: 14, alignItems: "center" },
+  submitBtn: { backgroundColor: Colors.white, paddingVertical: 16, borderRadius: 14, alignItems: "center", ...whiteButtonHiddenStyle },
   submitBtnText: { fontSize: 16, fontFamily: "Inter_600SemiBold", color: Colors.primary },
 });
