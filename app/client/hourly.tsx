@@ -219,7 +219,7 @@ export default function HourlyHireScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 150 }]}
+        contentContainerStyle={[styles.body, { paddingBottom: Math.max(insets.bottom, 12) + 170 }]}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.hero}>
@@ -295,7 +295,7 @@ export default function HourlyHireScreen() {
         </Pressable>
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) + 16 }]}>
         <View style={styles.priceLine}>
           <Text style={styles.priceCaption}>{quote.hours} hours · {quote.includedKm} km</Text>
           <Text style={styles.price}>{money(quote.price)}</Text>

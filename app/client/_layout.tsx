@@ -95,7 +95,10 @@ function ClassicTabLayout() {
           tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
         }}
       />
-      <Tabs.Screen name="hourly" options={{ href: null }} />
+      {/* Hourly hire is a focused booking flow with its own back button, so the
+          tab bar is hidden — it is positioned absolutely and would otherwise
+          cover the sticky Book V-Class button. */}
+      <Tabs.Screen name="hourly" options={{ href: null, tabBarStyle: { display: "none" } }} />
       <Tabs.Screen name="notifications" options={{ href: null }} />
       <Tabs.Screen name="referrals" options={{ href: null }} />
       <Tabs.Screen name="safety" options={{ href: null }} />
