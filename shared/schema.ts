@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
   pgTable,
+  uuid,
+  numeric,
   text,
   varchar,
   integer,
@@ -750,3 +752,16 @@ export const rewardCashouts = pgTable("reward_cashouts", {
 export type ReferralEvent = typeof referralEvents.$inferSelect;
 export type RewardTransaction = typeof rewardTransactions.$inferSelect;
 export type RewardCashout = typeof rewardCashouts.$inferSelect;
+
+// Server-mediated event requests; RLS is enabled by the store bootstrap.
+export const matricDanceBookings = pgTable("matric_dance_bookings", {
+  revision: integer("revision").notNull().default(0),
+  id: uuid("id").primaryKey(),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  details: jsonb("details").notNull().$type<import("./matric-dance").MatricDanceDetails>(),
+  status: text("status").notNull().default("requested"),
+  adminNote: text("admin_note").notNull().default(""),
+  quoteAmount: numeric("quote_amount", { precision: 12, scale: 2 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

@@ -1,3 +1,5 @@
+import { registerMatricDanceRoutes } from "./matric-dance-routes";
+import { createMatricStore } from "./matric-dance-store";
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import { Server as SocketIOServer } from "socket.io";
@@ -614,6 +616,7 @@ async function runMockSelfieQualityCheck(
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
+  registerMatricDanceRoutes(app, createMatricStore(pool));
 
   try {
     await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo text");

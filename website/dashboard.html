@@ -29,6 +29,8 @@
     .dash-main { padding: 40px 0; }
     .dash-page { display: none; }
     .dash-page.active { display: block; }
+    #matricRetry[hidden] { display:none; }
+    #matricHistory h3 { overflow-wrap:anywhere; }
     .dash-page-title { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 24px; color: var(--grey-900); }
     .dash-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 32px; }
     .dash-stat { background: var(--white); border-radius: var(--radius); padding: 24px; border: 1px solid var(--grey-200); }
@@ -338,6 +340,9 @@
         <div class="dash-nav-item" onclick="showPage('liftclub')" id="nav-liftclub">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 17h10"/><path d="M5 12h14"/><path d="M8 7h8"/><circle cx="7" cy="19" r="2"/><circle cx="17" cy="19" r="2"/></svg>Lift Club
         </div>
+        <div class="dash-nav-item" onclick="showPage('matricdance'); loadMatricDance()" id="nav-matricdance" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showPage('matricdance');loadMatricDance()}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 17h18M5 17l1-7h12l1 7M7 10l2-4h6l2 4"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>Matric Dance
+        </div>
         <div class="dash-nav-item" onclick="showPage('referral')" id="nav-referral">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Rewards
         </div>
@@ -361,6 +366,13 @@
     </aside>
 
     <main class="dash-main">
+      <div class="dash-page" id="page-matricdance">
+        <h1 class="dash-page-title">Matric dance requests</h1>
+        <p style="margin-bottom:20px;color:#666">Review your requests and quotes. A quote needs your confirmation and is not an automatic booking.</p>
+        <a class="btn btn-primary" href="matric-dance.html#request">Request a quote</a>
+        <div id="matricHistory" style="margin-top:28px" role="status" aria-live="polite">Loading requests…</div>
+        <button id="matricRetry" class="btn btn-ghost" type="button" onclick="loadMatricDance()" hidden>Retry</button>
+      </div>
       <!-- OVERVIEW -->
       <div class="dash-page active" id="page-overview">
         <h1 class="dash-page-title">Welcome back, <span id="overviewName">—</span></h1>
@@ -1124,6 +1136,54 @@
       if (navEl) navEl.classList.add('active');
     }
 
+    async function loadMatricDance() {
+      const box = document.getElementById('matricHistory');
+      const retry = document.getElementById('matricRetry');
+      box.textContent = 'Loading requests…'; retry.hidden = true;
+      try {
+        const response = await fetch(`${API}/api/matric-dance/bookings/me`, {headers:{Authorization:`Bearer ${localStorage.getItem('a2b_token')}`}});
+        if (!response.ok) throw new Error('Could not load requests.');
+        const items = await response.json();
+        if (!Array.isArray(items)) throw new Error('Could not load requests.');
+        box.replaceChildren();
+        if (!items.length) { box.textContent = 'You have no matric dance requests yet.'; return; }
+        items.forEach(item => {
+          const article = document.createElement('article');
+          article.style.cssText = 'padding:20px 0;border-bottom:1px solid #ddd';
+          const details = item.details && typeof item.details === 'object' ? item.details : {};
+          const add = (tag, text) => { const el = document.createElement(tag); el.textContent = text; article.append(el); };
+          add('h3', `Request ${item.id}`);
+          const statusLabels = {requested:'Request received', reviewing:'Under review', quoted:'Quote ready', accepted:'Quote accepted — awaiting confirmation', confirmed:'Booking confirmed', declined:'Unavailable', cancelled:'Cancelled'};
+          add('p', `Status: ${statusLabels[item.status] || item.status || 'Request received'} · Submitted: ${item.createdAt ? new Date(item.createdAt).toLocaleDateString('en-ZA', {timeZone:'Africa/Johannesburg'}) : '—'}`);
+          if (details.eventDate) add('p', `Event: ${details.eventDate}${details.pickupTime ? ' at ' + details.pickupTime : ''} (SAST)`);
+          const vehicleLabels = {luxury:'Luxury', business:'VIP / S-Class preference', luxury_van:'V-Class'};
+          if (details.vehicleType) add('p', `Vehicle: ${vehicleLabels[details.vehicleType] || details.vehicleType}`);
+          const amount = Number(item.quoteAmount);
+          if (item.quoteAmount != null && Number.isFinite(amount)) add('p', `Quote: R${amount.toFixed(2)}${item.status === 'quoted' ? ' — needs confirmation' : ''}`);
+          if (item.adminNote) add('p', `Reply: ${item.adminNote}`);
+          const actionError = document.createElement('p'); actionError.setAttribute('role', 'alert'); article.append(actionError);
+          const buttons = [];
+          function action(label, verb, confirmation) {
+            const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-ghost btn-sm'; button.style.marginRight = '10px'; button.textContent = label;
+            button.addEventListener('click', async () => {
+              if (!window.confirm(confirmation)) return;
+              buttons.forEach(b => { b.disabled = true; }); actionError.textContent = ''; button.textContent = 'Please wait…';
+              try {
+                const response = await fetch(`${API}/api/matric-dance/bookings/${encodeURIComponent(item.id)}/${verb}`, {method:'POST', headers:{Authorization:`Bearer ${localStorage.getItem('a2b_token')}`, 'Content-Type':'application/json'},body:JSON.stringify(verb==='accept'?{expectedRevision:item.revision}:{})});
+                if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.message || body.error || 'Action failed. Please try again.'); }
+                await loadMatricDance();
+              } catch (error) { actionError.textContent = error.message; buttons.forEach(b => { b.disabled = false; }); button.textContent = label; }
+            });
+            buttons.push(button); article.append(button);
+          }
+          if (item.status === 'quoted' && Number.isFinite(amount) && amount > 0) action('Accept quote', 'accept', `Accept the quote of R${amount.toFixed(2)}?\n\nTerms: ${item.adminNote || 'No additional terms provided.'}\n\nNo payment will be taken. Acceptance is subject to final confirmation by A2B.`);
+          if (['requested','reviewing','quoted','accepted'].includes(item.status)) action('Cancel request', 'cancel', 'Cancel this matric dance request?');
+          if (item.status === 'confirmed') add('p', 'To cancel a confirmed booking, contact A2B.');
+          box.append(article);
+        });
+      } catch (_) { box.textContent = 'Could not load your requests. Please try again.'; retry.hidden = false; }
+    }
+
     function copyCode(id) {
       const text = document.getElementById(id).textContent;
       navigator.clipboard.writeText(text).then(() => {
@@ -1872,7 +1932,9 @@
 
     function handleDashboardDeepLink() {
       const hash = (window.location.hash || '').replace('#', '').toLowerCase();
-      if (hash === 'partner' || hash === 'partnerapply') {
+      if (hash === 'matricdance') {
+        showPage('matricdance'); loadMatricDance();
+      } else if (hash === 'partner' || hash === 'partnerapply') {
         document.getElementById('nav-partnerapply').style.display = 'flex';
         showPage('partnerapply');
       } else if (hash === 'fleet') {

@@ -2565,13 +2565,19 @@ export default function ClientHomeScreen() {
     }
   }
 
-  async function requestRide() {
+  async function requestRide(forReservation = false) {
     if (!user || !location || !dropoffCoords) return;
     if (!selectedRouteChoice) {
       Alert.alert("Choose a Route", "Select a route option before requesting your ride.");
       return;
     }
-    setShowPaymentPicker(true);
+    if (forReservation) {
+      setReserveDayOffset(0);
+      setReserveSlot(null);
+      setShowReservePicker(true);
+    } else {
+      setShowPaymentPicker(true);
+    }
     setPaymentMethodsLoading(true);
     try {
       const [res, payLaterRes] = await Promise.all([
@@ -3173,6 +3179,20 @@ export default function ClientHomeScreen() {
             contentContainerStyle={{ paddingBottom: 8 }}
           >
             <Text style={styles.sheetTitle}>Where to?</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Plan matric dance transport"
+              style={styles.matricDanceEntry}
+              onPress={() => router.push("/client/matric-dance" as any)}
+            >
+              <Ionicons name="sparkles-outline" size={22} color={Colors.white} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.matricDanceEntryTitle}>Matric dance</Text>
+                <Text style={styles.matricDanceEntryCopy}>Plan your Luxury, VIP or V-Class arrival</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+            </Pressable>
+
 
             {/* Selfie nudge banner */}
             {!user?.profilePhoto && (
@@ -3467,7 +3487,7 @@ export default function ClientHomeScreen() {
                 rideRequestLoading && { opacity: 0.7 },
                 pressed && !rideRequestLoading && { opacity: 0.9 },
               ]}
-              onPress={requestRide}
+              onPress={() => requestRide()}
               disabled={rideRequestLoading}
             >
               {rideRequestLoading ? (
@@ -3478,6 +3498,17 @@ export default function ClientHomeScreen() {
               ) : (
                 <Text style={styles.requestBtnText}>Request Ride</Text>
               )}
+            </Pressable>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Reserve this ride for later"
+              style={styles.reserveRideBtn}
+              onPress={() => requestRide(true)}
+              disabled={rideRequestLoading || paymentMethodsLoading}
+            >
+              <Ionicons name="calendar-outline" size={20} color={Colors.white} />
+              <Text style={styles.reserveRideBtnText}>Reserve for later</Text>
             </Pressable>
 
             <Pressable style={styles.cancelFullBtn} onPress={cancelRide}>
@@ -4155,10 +4186,17 @@ export default function ClientHomeScreen() {
       </Modal>
 
       {/* Payment Method Picker */}
-      <Modal visible={showPaymentPicker} transparent animationType="slide" onRequestClose={() => setShowPaymentPicker(false)}>
+      <Modal
+        visible={showPaymentPicker || showReservePicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => { setShowPaymentPicker(false); setShowReservePicker(false); }}
+      >
+        {showPaymentPicker ? (
         <Pressable style={styles.modalOverlay} onPress={() => setShowPaymentPicker(false)}>
-          <View style={[styles.modalSheet, { paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 16) }]}>
+          <View style={[styles.modalSheet, { maxHeight: "90%", paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 16) }]}>
             <View style={styles.sheetHandle} />
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12 }}>
             <Text style={styles.sheetTitle}>How would you like to pay?</Text>
             <Text style={{ fontSize: 13, color: Colors.textMuted, fontFamily: "Inter_400Regular", marginBottom: 8 }}>
               Fare: R {selectedRouteChoice?.fare ?? estimatedPrice}
@@ -4312,14 +4350,13 @@ export default function ClientHomeScreen() {
               </View>
               <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
             </Pressable>
+            </ScrollView>
           </View>
         </Pressable>
-      </Modal>
-
-      <Modal visible={showReservePicker} transparent animationType="slide" onRequestClose={() => setShowReservePicker(false)}>
+        ) : (
         <Pressable style={styles.modalOverlay} onPress={() => setShowReservePicker(false)}>
           <View
-            style={[styles.modalSheet, { paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 16) }]}
+            style={[styles.modalSheet, { maxHeight: "90%", paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 16) }]}
             onStartShouldSetResponder={() => true}
           >
             <View style={styles.sheetHandle} />
@@ -4340,7 +4377,6 @@ export default function ClientHomeScreen() {
                     style={{
                       paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, marginRight: 8,
                       backgroundColor: active ? Colors.white : Colors.card,
-                      ...(active ? whiteButtonHiddenStyle : {}),
                       borderWidth: 1, borderColor: active ? Colors.white : Colors.border,
                     }}
                   >
@@ -4349,7 +4385,7 @@ export default function ClientHomeScreen() {
                 );
               })}
             </ScrollView>
-            <ScrollView style={{ maxHeight: 190, marginBottom: 12 }} showsVerticalScrollIndicator={false}>
+            <ScrollView style={{ maxHeight: 190, flexShrink: 1, marginBottom: 12 }} showsVerticalScrollIndicator={false}>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                 {getReserveSlots(reserveDayOffset).map((slot) => {
                   const active = reserveSlot === slot;
@@ -4360,7 +4396,6 @@ export default function ClientHomeScreen() {
                       style={{
                         paddingHorizontal: 13, paddingVertical: 8, borderRadius: 10,
                         backgroundColor: active ? Colors.white : Colors.card,
-                        ...(active ? whiteButtonHiddenStyle : {}),
                         borderWidth: 1, borderColor: active ? Colors.white : Colors.border,
                       }}
                     >
@@ -4384,16 +4419,15 @@ export default function ClientHomeScreen() {
               </Text>
             </View>
             <Pressable
-              disabled={!reserveSlot || reserveSubmitting}
+              disabled={!reserveSlot || reserveSubmitting || paymentMethodsLoading}
               onPress={handleReserveRide}
               style={{
                 backgroundColor: reserveSlot ? Colors.white : Colors.card,
-                ...(reserveSlot ? whiteButtonHiddenStyle : {}),
                 opacity: reserveSubmitting ? 0.6 : 1,
                 paddingVertical: 15, borderRadius: 14, alignItems: "center",
               }}
             >
-              {reserveSubmitting ? (
+              {reserveSubmitting || paymentMethodsLoading ? (
                 <ActivityIndicator color={Colors.primary} />
               ) : (
                 <Text style={{ fontSize: 15, fontFamily: "Inter_600SemiBold", color: reserveSlot ? Colors.primary : Colors.textMuted }}>
@@ -4403,6 +4437,7 @@ export default function ClientHomeScreen() {
             </Pressable>
           </View>
         </Pressable>
+        )}
       </Modal>
 
       <Modal
@@ -6891,6 +6926,21 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.6)",
     justifyContent: "flex-end",
   },
+  matricDanceEntry: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14, marginVertical: 12, borderRadius: 12, backgroundColor: Colors.surface },
+  matricDanceEntryTitle: { color: Colors.white, fontFamily: "Inter_600SemiBold", fontSize: 15 },
+  matricDanceEntryCopy: { color: Colors.textSecondary, fontFamily: "Inter_400Regular", fontSize: 12, marginTop: 4 },
+  reserveRideBtn: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: 14,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  reserveRideBtnText: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.white },
   modalSheet: {
     backgroundColor: Colors.card,
     borderTopLeftRadius: 24,
