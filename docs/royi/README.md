@@ -17,7 +17,7 @@ The original package remains on the Desktop. Current site files were merged, not
 
 ## Implemented
 
-- `buy-celbux.html`: provider readiness, login, server-side quote review, recipient consent, server-issued deposit instructions, expiry handling, own order history and status refresh.
+- `buy-celbux.html`: provider readiness, login, server-side quote review, recipient consent, server-issued deposit instructions with locally rendered QR (no address sent to an external QR service), expiry handling, own order history and status refresh.
 - Website homepage and dashboard wallet links; own voucher-orders tab. Lift Club page explicitly treats vouchers as a separate purchase, preserving manual membership payment.
 - Existing admin dashboard: connection checklist, monthly verified order ledger, all-time unpaid commission, CSV and recording of already-made settlement payments. Admin-only access; recording does not transfer funds.
 - Persistent PostgreSQL quotes, idempotent quote-to-order creation, server-side attribution, provider-only status reconciliation, commission completion/reversal accounting and optimistic transactional settlement checks.
@@ -50,3 +50,5 @@ The API stores receipt digests, not full callback PII. It does not implement wal
 - Browser: real local API and temporary empty database show the unavailable checkout, no deposit addresses, own empty history, admin readiness checklist and empty real ledger. HTTP tests use explicit test-only provider fixtures for the enabled path.
 - Existing build output is tracked and used by production, so the refreshed `server_dist/index.js` must accompany backend changes. Matric was initially missing until that bundle was deployed.
 - Missing provider prerequisites prevent activation, not deployment of the verified website and backend. Production state is recorded in release-status.md.
+
+QR bundle can be regenerated with `node scripts/build-celbux-qr.mjs` using the existing qrcode dependency. Generated browser bundle is tracked for the static site.
