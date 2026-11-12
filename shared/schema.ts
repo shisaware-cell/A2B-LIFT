@@ -765,3 +765,21 @@ export const matricDanceBookings = pgTable("matric_dance_bookings", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ROYI orders are server-mediated; bootstrap enables RLS with no public policies.
+export const royiQuotes = pgTable("royi_quotes", {
+  id: uuid("id").primaryKey(), userId: varchar("user_id").notNull().references(() => users.id),
+  snapshot: jsonb("snapshot").notNull(), createdAt: timestamp("created_at", {withTimezone:true}).defaultNow(),
+});
+export const royiOrders = pgTable("royi_orders", {
+  id: uuid("id").primaryKey(), userId: varchar("user_id").notNull().references(() => users.id),
+  quoteId: uuid("quote_id").notNull().unique().references(() => royiQuotes.id), snapshot: jsonb("snapshot").notNull(),
+  providerId: text("provider_id").unique(), status: text("status").notNull().default("creating"),
+  createdAt: timestamp("created_at", {withTimezone:true}).defaultNow(), updatedAt: timestamp("updated_at", {withTimezone:true}).defaultNow(),
+});
+export const royiLedger = pgTable("royi_ledger", {id:text("id").primaryKey(),earned:numeric("earned",{precision:14,scale:2}).notNull().default("0"),paid:numeric("paid",{precision:14,scale:2}).notNull().default("0")});
+export const royiSettlements = pgTable("royi_settlements", {
+  id:uuid("id").primaryKey(),amountZar:numeric("amount_zar",{precision:12,scale:2}).notNull(),reference:text("reference").notNull().unique(),method:text("method").notNull(),
+  paidAt:timestamp("paid_at",{withTimezone:true}).notNull(),notes:text("notes").notNull().default(""),recordedBy:varchar("recorded_by").notNull().references(()=>users.id),createdAt:timestamp("created_at",{withTimezone:true}).defaultNow(),
+});
+export const royiWebhookReceipts = pgTable("royi_webhook_receipts",{id:text("id").primaryKey(),createdAt:timestamp("created_at",{withTimezone:true}).defaultNow()});

@@ -29,7 +29,7 @@
     .dash-main { padding: 40px 0; }
     .dash-page { display: none; }
     .dash-page.active { display: block; }
-    #matricRetry[hidden] { display:none; }
+    #matricRetry[hidden], #historyRetry[hidden], #celbuxDetail[hidden] { display:none; }
     #matricHistory h3 { overflow-wrap:anywhere; }
     .dash-page-title { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 24px; color: var(--grey-900); }
     .dash-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 32px; }
@@ -334,6 +334,7 @@
         <div class="dash-nav-item" onclick="showPage('wallet')" id="nav-wallet">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M16 12h.01"/></svg>Wallet
         </div>
+        <div class="dash-nav-item" onclick="showPage('celbux'); loadCelbuxHistory()" id="nav-celbux" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showPage('celbux');loadCelbuxHistory()}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 9h10M7 13h6"/></svg>Celbux orders</div>
         <div class="dash-nav-item" onclick="showPage('longdistance')" id="nav-longdistance">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 12H19M12 5l7 7-7 7"/></svg>Long Distance
         </div>
@@ -373,6 +374,7 @@
         <div id="matricHistory" style="margin-top:28px" role="status" aria-live="polite">Loading requests…</div>
         <button id="matricRetry" class="btn btn-ghost" type="button" onclick="loadMatricDance()" hidden>Retry</button>
       </div>
+      <div class="dash-page" id="page-celbux"><h1 class="dash-page-title">Celbux orders</h1><p>A separate voucher purchase through ROYI and 247. It does not credit your A2B wallet or pay for trips or Lift Club.</p><p style="margin:20px 0"><a class="btn btn-primary" href="buy-celbux.html">Buy a Celbux voucher</a></p><div id="celbuxHistory" role="status">Loading orders…</div><button id="historyRetry" class="btn btn-ghost" type="button" hidden>Retry</button><div id="celbuxDetail" hidden></div></div>
       <!-- OVERVIEW -->
       <div class="dash-page active" id="page-overview">
         <h1 class="dash-page-title">Welcome back, <span id="overviewName">—</span></h1>
@@ -412,6 +414,7 @@
       <!-- WALLET -->
       <div class="dash-page" id="page-wallet">
         <h1 class="dash-page-title">Wallet</h1>
+        <p style="margin-bottom:16px"><a href="buy-celbux.html">Buy a separate Celbux voucher</a> — it does not credit your A2B wallet.</p>
         <div class="wallet-card">
           <div class="wallet-label">Available balance</div>
           <div class="wallet-balance" id="walletBalance">R0.00</div>
@@ -1044,6 +1047,7 @@
   </div>
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
+  <script src="assets/celbux.js"></script>
   <script>
     const API = (typeof window !== 'undefined' && window.location && window.location.origin && window.location.protocol.startsWith('http'))
       ? window.location.origin
@@ -1932,7 +1936,9 @@
 
     function handleDashboardDeepLink() {
       const hash = (window.location.hash || '').replace('#', '').toLowerCase();
-      if (hash === 'matricdance') {
+      if (hash === 'celbux') {
+        showPage('celbux'); loadCelbuxHistory();
+      } else if (hash === 'matricdance') {
         showPage('matricdance'); loadMatricDance();
       } else if (hash === 'partner' || hash === 'partnerapply') {
         document.getElementById('nav-partnerapply').style.display = 'flex';

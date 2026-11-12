@@ -1,3 +1,5 @@
+import { registerRoyiRoutes } from "./royi-routes";
+import { createRoyiStore } from "./royi-store";
 import { registerMatricDanceRoutes } from "./matric-dance-routes";
 import { createMatricStore } from "./matric-dance-store";
 import type { Express, Request, Response } from "express";
@@ -617,6 +619,7 @@ async function runMockSelfieQualityCheck(
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   registerMatricDanceRoutes(app, createMatricStore(pool));
+  registerRoyiRoutes(app, createRoyiStore(pool));
 
   try {
     await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo text");

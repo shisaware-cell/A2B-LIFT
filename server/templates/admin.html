@@ -320,6 +320,7 @@ tbody tr:hover { background:#fafaf8; }
       <span class="nav-icon">📂</span> Documents
       <span class="nav-badge" id="nb-documents" style="display:none">0</span>
     </div>
+    <div class="nav-item" onclick="go('royi',this);closeSidebar()"><span class="nav-icon">R</span> Celbux reseller</div>
     <div class="nav-item" onclick="go('matricDance',this);closeSidebar()"><span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></svg></span> Matric dance</div>
     <div class="nav-item" onclick="go('rides',this);closeSidebar()">
       <span class="nav-icon">🗺</span> Rides
@@ -383,6 +384,7 @@ tbody tr:hover { background:#fafaf8; }
   <div class="content">
 
     <!-- DASHBOARD -->
+    <section class="view" id="view-royi"><h2>Celbux reseller</h2><p>Local verified A2B order ledger; this is not external provider payout reconciliation.</p><div id="royiAdmin"></div></section>
     <section class="view" id="view-matricDance"><h2>Matric dance requests</h2><p>Review the itinerary, confirm availability and issue a customer-visible quote. Accepting a quote does not take payment.</p><div id="matricDanceAdmin"></div></section>
 <div class="view active" id="view-overview">
       <div class="stats-row" id="stats-row">
@@ -949,7 +951,7 @@ async function doLogout() {
 let curView = 'overview';
 let tripPage = 1, tripPageSize = 25, tripTotalPages = 1, tripSearchTimer = null, selectedTripId = null;
 let allChauf = [], allWd = [], allSafe = [], allApps = [], allPartners = [], allVehicles = [], allDocuments = [], allSelfies = [], allUsers = [], allReferrals = [], allLiftClubMemberships = [], allLiftClubRoutes = [], allPayLater = [], chaufFilter = 'all', wdFilter = 'all', safeFilter = 'all', appsFilter = 'all', partnersFilter = 'all', vehiclesFilter = 'all', documentsFilter = 'all', referralFilter = 'all', liftClubFilter = 'all', liftClubRouteFilter = 'all';
-const VIEW_TITLES = { matricDance:'Matric dance', overview:'Dashboard', liveMap:'Live Fleet Map', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', documents:'Document Review', rides:'Trips', tripDetail:'Trip Details', payments:'Payments', liftClubApplications:'Lift Club', payLater:'Pay Later', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users', referrals:'Referral Summary' };
+const VIEW_TITLES = { royi:'Celbux reseller', matricDance:'Matric dance', overview:'Dashboard', liveMap:'Live Fleet Map', chauffeurs:'Chauffeurs', applications:'Driver Applications', partners:'Partner Applications', vehicles:'Vehicle Approvals', documents:'Document Review', rides:'Trips', tripDetail:'Trip Details', payments:'Payments', liftClubApplications:'Lift Club', payLater:'Pay Later', selfies:'Liveness Selfies', withdrawals:'Withdrawals', safety:'Safety Reports', users:'All Users', referrals:'Referral Summary' };
 
 function go(view, el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -973,7 +975,7 @@ function go(view, el) {
 }
 
 function loadView() {
-  ({ matricDance:loadMatricDance, overview:loadOverview, liveMap:loadLiveMap, chauffeurs:loadChauf, applications:loadApps, partners:loadPartners, vehicles:loadVehicles, documents:loadDocuments, rides:loadRides, payments:loadPay, liftClubApplications:loadLiftClubApplications, payLater:loadPayLater, selfies:loadSelfies, withdrawals:loadWd, safety:loadSafe, users:loadUsers, referrals:loadReferrals })[curView]?.();
+  ({ royi:loadRoyiAdmin, matricDance:loadMatricDance, overview:loadOverview, liveMap:loadLiveMap, chauffeurs:loadChauf, applications:loadApps, partners:loadPartners, vehicles:loadVehicles, documents:loadDocuments, rides:loadRides, payments:loadPay, liftClubApplications:loadLiftClubApplications, payLater:loadPayLater, selfies:loadSelfies, withdrawals:loadWd, safety:loadSafe, users:loadUsers, referrals:loadReferrals })[curView]?.();
 }
 
 function loadAll() {
@@ -3936,5 +3938,6 @@ if (getToken()) {
 }
 </script>
 <script src="/assets/matric-dance-admin.js"></script>
+<script src="/assets/royi-admin.js"></script>
 </body>
 </html>

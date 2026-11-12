@@ -70,11 +70,350 @@ var init_auth = __esm({
 var import_config = require("dotenv/config");
 var import_express = __toESM(require("express"));
 
-// server/matric-dance-routes.ts
+// server/royi-routes.ts
+var import_node_crypto = __toESM(require("node:crypto"));
 var import_zod2 = require("zod");
 
-// shared/matric-dance.ts
+// server/auth-middleware.ts
+init_auth();
+function extractBearer(req) {
+  const header = req.header("authorization") || req.header("Authorization");
+  if (!header) return null;
+  const [type, token] = header.split(" ");
+  if (type?.toLowerCase() !== "bearer" || !token) return null;
+  return token;
+}
+function authOptional(req, _res, next) {
+  try {
+    const token = extractBearer(req) || req.cookies?.a2b_token || null;
+    if (token) {
+      req.auth = verifyAccessToken(token);
+    }
+  } catch {
+  }
+  next();
+}
+function requireAuth(req, res, next) {
+  const token = extractBearer(req) || req.cookies?.a2b_token || null;
+  if (!token) return res.status(401).json({ message: "Unauthorized" });
+  try {
+    req.auth = verifyAccessToken(token);
+    return next();
+  } catch {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+}
+function requireRole(roles) {
+  return (req, res, next) => {
+    if (!req.auth) return res.status(401).json({ message: "Unauthorized" });
+    if (!roles.includes(req.auth.role)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    return next();
+  };
+}
+
+// server/royi-provider.ts
 var import_zod = require("zod");
+var RoyiUnavailable = class extends Error {
+};
+var assetsSchema = import_zod.z.array(import_zod.z.object({ crypto: import_zod.z.string().regex(/^[A-Z0-9]{2,12}$/), networks: import_zod.z.array(import_zod.z.string().regex(/^[A-Za-z0-9 -]{2,24}$/)).min(1).max(10) })).min(1).max(60);
+function getRoyiConfig(env = process.env) {
+  let assets = [];
+  try {
+    assets = assetsSchema.parse(JSON.parse(env.ROYI_ASSETS_JSON || "[]"));
+  } catch {
+  }
+  let baseUrl = "";
+  try {
+    const u = new URL(env.ROYI_API_BASE_URL || "");
+    if (u.protocol === "https:" && !u.username && !u.password && !u.search && !u.hash && ["usdt2celbux.com", "royi.onefinger.org"].includes(u.hostname)) baseUrl = u.origin;
+  } catch {
+  }
+  const minZar = Number(env.ROYI_MIN_ZAR), maxZar = Number(env.ROYI_MAX_ZAR), apiKey = env.ROYI_API_KEY || "", webhookSecret = env.ROYI_WEBHOOK_SECRET || "";
+  const ready = env.ROYI_ENABLED === "true" && !!baseUrl && apiKey.length >= 16 && webhookSecret.length >= 32 && assets.length > 0 && minZar > 0 && maxZar >= minZar;
+  return { ready, message: ready ? "Provider connected; quotes and orders depend on current provider availability." : "Crypto voucher purchases are not available yet. Provider onboarding and secure connection are pending.", assets, limits: { minZar: Number.isFinite(minZar) && minZar > 0 ? minZar : 0, maxZar: Number.isFinite(maxZar) && maxZar > 0 ? maxZar : 0 }, baseUrl, apiKey, webhookSecret };
+}
+var positive = (value) => typeof value === "number" && Number.isFinite(value) && value > 0;
+function parseRoyiQuote(body, crypto7, network, targetZar) {
+  const q = body?.quote, f = q?.fee_breakdown, deadline = Date.parse(q?.valid_until);
+  if (body?.status !== "success" || q?.crypto !== crypto7 || !positive(q?.spot_rate_zar) || !positive(q?.crypto_required) || !positive(q?.target_voucher_zar) || Math.abs(q.target_voucher_zar - targetZar) > 0.01 || Math.abs(q?.net_voucher_delivered_zar - targetZar) > 0.01 || !Number.isFinite(q?.net_voucher_delivered_zar) || !Number.isFinite(f?.total_fee_zar) || f.total_fee_zar < 0 || !Number.isFinite(f?.total_service_fee_pct) || f.total_service_fee_pct < 0 || !Number.isFinite(f?.a2b_reseller_commission_zar) || f.a2b_reseller_commission_zar < 0 || f.a2b_reseller_commission_zar > f.total_fee_zar || !Number.isFinite(deadline) || deadline <= Date.now() + 3e4 || deadline > Date.now() + 36e5) throw new RoyiUnavailable("Provider quote is incomplete or expired. Please try again later.");
+  const total = targetZar + f.total_fee_zar, gross = q.crypto_required * q.spot_rate_zar;
+  if (Math.abs(gross - total) > Math.max(0.05, total * 1e-3) || Math.abs(f.total_fee_zar - targetZar * f.total_service_fee_pct / 100) > 0.05) throw new RoyiUnavailable("Provider fee totals could not be verified. Checkout is unavailable.");
+  return { crypto: crypto7, network, targetZar, rateZar: q.spot_rate_zar, cryptoRequired: q.crypto_required, totalFeeZar: f.total_fee_zar, serviceFeePercent: f.total_service_fee_pct, commissionZar: f.a2b_reseller_commission_zar, validUntil: new Date(deadline).toISOString() };
+}
+function createRoyiProvider(config = getRoyiConfig) {
+  async function request(path2, method = "GET", body) {
+    const c = config();
+    if (!c.ready) throw new RoyiUnavailable(c.message);
+    let res;
+    try {
+      res = await fetch(c.baseUrl + path2, { method, redirect: "error", signal: AbortSignal.timeout(15e3), headers: { Authorization: `Bearer ${c.apiKey}`, "X-Partner-Key": c.apiKey, "Content-Type": "application/json" }, body: body === void 0 ? void 0 : JSON.stringify(body) });
+    } catch {
+      throw new RoyiUnavailable("ROYI is not responding. Please retry later.");
+    }
+    if (!res.ok) throw new RoyiUnavailable("ROYI is temporarily unavailable. No deposit instructions are available.");
+    const text3 = await res.text();
+    if (text3.length > 262144) throw new RoyiUnavailable("Invalid provider response");
+    try {
+      return JSON.parse(text3);
+    } catch {
+      throw new RoyiUnavailable("Invalid provider response");
+    }
+  }
+  return { quote: (crypto7, network, amount) => request(`/api/otc/quote?crypto=${encodeURIComponent(crypto7)}&network=${encodeURIComponent(network)}&zar_amount=${amount}`), create: (q, phone, ref) => request("/api/orders", "POST", { siteSource: "A2B_LIFT", payoutMethod: "CELBUX_VOUCHER", depositCrypto: q.crypto, depositNetwork: q.network, cryptoAmount: q.cryptoRequired, lockedRate: q.rateZar, phone, customerRef: ref }), status: (id) => request("/api/orders/status/" + encodeURIComponent(id)) };
+}
+
+// server/royi-routes.ts
+var uid = import_zod2.z.string().uuid();
+var quoteInput = import_zod2.z.object({ crypto: import_zod2.z.string().regex(/^[A-Z0-9]{2,12}$/), network: import_zod2.z.string().min(2).max(24), zar_amount: import_zod2.z.coerce.number().positive().max(1e6).multipleOf(0.01) });
+var orderInput = import_zod2.z.object({ quoteId: uid, recipientPhone: import_zod2.z.string().trim().regex(/^(?:\+?27|0)[6-8]\d{8}$/), consent: import_zod2.z.literal(true) });
+var settlementInput = import_zod2.z.object({ amountZar: import_zod2.z.number().positive().max(1e6).multipleOf(0.01), reference: import_zod2.z.string().trim().min(3).max(120), method: import_zod2.z.enum(["BANK_EFT", "USDT_TRC20", "OTHER"]), paidAt: import_zod2.z.string().datetime({ offset: true }), notes: import_zod2.z.string().trim().max(1e3).default("") }).refine((v) => Date.parse(v.paidAt) <= Date.now() + 6e4, "Settlement date cannot be in the future");
+function customerOrder(o) {
+  const { userId, providerId, commissionZar, ...safe } = o;
+  return safe;
+}
+function csvCell(value) {
+  let s = String(value ?? "");
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return '"' + s.replace(/"/g, '""') + '"';
+}
+function registerRoyiRoutes(app2, store, config = getRoyiConfig, provider = createRoyiProvider(config)) {
+  const fail = (res, e) => res.status(e instanceof RoyiUnavailable ? 503 : 500).json({ message: e instanceof RoyiUnavailable ? e.message : "Unable to complete this request. Please retry later." });
+  const recent = /* @__PURE__ */ new Map();
+  function limited(id) {
+    const now = Date.now();
+    if (recent.size > 1e4) {
+      for (const [k, v] of recent) if (v.start < now - 6e4) recent.delete(k);
+    }
+    const row = recent.get(id);
+    if (!row || row.start < now - 6e4) {
+      recent.set(id, { start: now, count: 1 });
+      return false;
+    }
+    return ++row.count > 20;
+  }
+  async function reconcile(o) {
+    if (!o.providerId || o.status === "reversed") return o;
+    const r = await provider.status(o.providerId);
+    if (r?.ok !== true) throw new RoyiUnavailable("Provider order status is not available yet.");
+    if (r.siteSource && r.siteSource !== "A2B_LIFT") throw new RoyiUnavailable("Order attribution could not be verified");
+    let status = { PENDING_DEPOSIT: "awaiting_deposit", AWAITING_DEPOSIT: "awaiting_deposit", PROCESSING: "processing", DEPOSIT_DETECTED: "processing", CONFIRMING: "processing", COMPLETED: "completed", EXPIRED: "expired", FAILED: "failed", REVERSED: "reversed", REFUNDED: "reversed" }[r.status];
+    if (!status) throw new RoyiUnavailable("Provider returned an unknown order state.");
+    if (status === "completed" && (!Number.isFinite(r.payoutZar) || Math.abs(r.payoutZar - o.targetZar) > 0.01 || typeof r.celbuxTxId !== "string" || !r.celbuxTxId || typeof r.cryptoTxId !== "string" || !r.cryptoTxId || !Number.isFinite(Date.parse(r.payoutAt)))) throw new RoyiUnavailable("Voucher completion has not been verified.");
+    await store.reconcile(o.id, status);
+    return await store.get(o.id);
+  }
+  app2.get("/api/otc/config", (_req, res) => {
+    const c = config();
+    res.json({ ready: c.ready, message: c.message, assets: c.assets, limits: c.limits, partner: "A2B_LIFT" });
+  });
+  app2.get("/api/otc/quote", requireAuth, async (req, res) => {
+    const input = quoteInput.safeParse(req.query);
+    if (!input.success) return res.status(400).json({ message: "Select a supported crypto, network and valid voucher amount." });
+    const c = config(), v = input.data;
+    if (!c.ready) return res.status(503).json({ message: c.message });
+    if (!c.assets.some((a) => a.crypto === v.crypto && a.networks.includes(v.network)) || v.zar_amount < c.limits.minZar || v.zar_amount > c.limits.maxZar) return res.status(400).json({ message: "This asset, network or voucher value is not supported." });
+    if (limited(req.auth.sub)) return res.status(429).json({ message: "Too many requests. Please wait a minute." });
+    try {
+      const q = { ...parseRoyiQuote(await provider.quote(v.crypto, v.network, v.zar_amount), v.crypto, v.network, v.zar_amount), id: import_node_crypto.default.randomUUID(), createdAt: (/* @__PURE__ */ new Date()).toISOString() };
+      await store.saveQuote(req.auth.sub, q);
+      return res.json({ quote: q });
+    } catch (e) {
+      return fail(res, e);
+    }
+  });
+  app2.post("/api/otc/orders", requireAuth, async (req, res) => {
+    const input = orderInput.safeParse(req.body);
+    if (!input.success) return res.status(400).json({ message: "A valid quote, South African mobile and recipient consent are required." });
+    const c = config();
+    if (!c.ready) return res.status(503).json({ message: c.message });
+    if (limited(req.auth.sub)) return res.status(429).json({ message: "Too many requests. Please wait a minute." });
+    let reserved;
+    try {
+      const q = await store.quote(input.data.quoteId, req.auth.sub);
+      if (!q) return res.status(404).json({ message: "Quote not found" });
+      if (Date.parse(q.validUntil) <= Date.now()) return res.status(409).json({ message: "Your quote has expired. Get a new quote." });
+      const phone = input.data.recipientPhone.replace(/^\+/, "").replace(/^0/, "27"), result = await store.reserve(req.auth.sub, q, phone);
+      reserved = result.order;
+      if (!result.created) {
+        if (result.order.recipientPhone !== phone) return res.status(409).json({ message: "This quote already belongs to another recipient. Get a new quote." });
+        return res.json({ order: customerOrder(result.order) });
+      }
+      const r = await provider.create(q, phone, reserved.id), expires = Number(r?.expiresInMinutes), exact = Number(r?.exactAmount), address = r?.depositAddress;
+      if (r?.ok !== true || !["string", "number"].includes(typeof r.orderId) || !String(r.orderId) || String(r.orderId).length > 100 || typeof address !== "string" || !/^[A-Za-z0-9:_-]{20,150}$/.test(address) || r.crypto !== q.crypto || r.network !== q.network || !Number.isFinite(exact) || exact < q.cryptoRequired || exact > q.cryptoRequired * 1.01 || !Number.isFinite(expires) || expires < 1 || expires > 60) throw new RoyiUnavailable("Deposit instructions could not be verified. This order requires review; do not send funds.");
+      await store.activate(reserved.id, String(r.orderId), { depositAddress: address, exactAmount: exact, expiresAt: new Date(Date.now() + expires * 6e4).toISOString() });
+      return res.status(201).json({ order: customerOrder(await store.get(reserved.id)) });
+    } catch (e) {
+      if (reserved) await store.markReview(reserved.id).catch(() => {
+      });
+      return fail(res, e);
+    }
+  });
+  app2.get("/api/otc/orders/me", requireAuth, async (req, res) => {
+    try {
+      return res.json((await store.list(req.auth.sub)).map(customerOrder));
+    } catch (e) {
+      return fail(res, e);
+    }
+  });
+  app2.get("/api/otc/orders/:id", requireAuth, async (req, res) => {
+    if (!uid.safeParse(req.params.id).success) return res.status(400).json({ message: "Invalid order reference" });
+    try {
+      const o = await store.get(String(req.params.id));
+      if (!o || o.userId !== req.auth.sub) return res.status(404).json({ message: "Order not found" });
+      if (!config().ready) return res.json({ order: customerOrder(o), message: config().message });
+      if (limited(req.auth.sub)) return res.status(429).json({ message: "Please wait before refreshing again." });
+      return res.json({ order: customerOrder(await reconcile(o)) });
+    } catch (e) {
+      return fail(res, e);
+    }
+  });
+  app2.post("/api/otc/webhook", async (req, res) => {
+    const c = config();
+    if (!c.ready) return res.status(503).json({ message: "Provider connection unavailable" });
+    const timestamp2 = req.header("X-ROYI-Timestamp") || "", signature = (req.header("X-ROYI-Signature") || "").replace(/^sha256=/, ""), raw = req.rawBody;
+    if (!/^\d{10}$/.test(timestamp2) || Math.abs(Date.now() - Number(timestamp2) * 1e3) > 3e5 || !Buffer.isBuffer(raw) || raw.length > 65536 || !/^[a-f0-9]{64}$/i.test(signature)) return res.status(401).json({ message: "Invalid webhook authentication" });
+    const expected = import_node_crypto.default.createHmac("sha256", c.webhookSecret).update(timestamp2 + ".").update(raw).digest();
+    if (!import_node_crypto.default.timingSafeEqual(expected, Buffer.from(signature, "hex"))) return res.status(401).json({ message: "Invalid webhook authentication" });
+    const b = req.body;
+    if (b?.site_source !== "A2B_LIFT" || !["otc.order.completed", "otc.order.updated", "otc.order.reversed"].includes(b.event) || !["string", "number"].includes(typeof b.order_id)) return res.status(400).json({ message: "Invalid webhook event" });
+    try {
+      const o = await store.byProvider(String(b.order_id));
+      if (!o) return res.status(404).json({ message: "Order not found" });
+      const key = import_node_crypto.default.createHash("sha256").update(raw).digest("hex");
+      await reconcile(o);
+      await store.webhookReceipt(key);
+      return res.json({ received: true });
+    } catch (e) {
+      return fail(res, e);
+    }
+  });
+  const admin = requireRole(["admin"]);
+  app2.get("/api/admin/otc/config", requireAuth, admin, (_req, res) => {
+    const c = config();
+    return res.json({ ready: c.ready, message: c.message, checks: [{ label: "Provider explicitly enabled", configured: process.env.ROYI_ENABLED === "true" }, { label: "Approved production API URL", configured: !!c.baseUrl }, { label: "Server-side API credential", configured: c.apiKey.length >= 16 }, { label: "Webhook verification secret", configured: c.webhookSecret.length >= 32 }, { label: "Verified asset/network and limits", configured: c.assets.length > 0 && c.limits.minZar > 0 && c.limits.maxZar >= c.limits.minZar }] });
+  });
+  app2.get("/api/admin/otc/statement", requireAuth, admin, async (req, res) => {
+    const month = String(req.query.month || (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "Africa/Johannesburg" }).slice(0, 7));
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ message: "Use month YYYY-MM" });
+    try {
+      const statement = await store.statement(month);
+      if (req.query.format === "csv") {
+        const header = ["Order", "Created", "Crypto", "Network", "Voucher ZAR", "Commission ZAR", "Status"];
+        const lines = statement.orders.map((o) => [o.id, o.createdAt, o.crypto, o.network, o.targetZar, o.status === "completed" ? o.commissionZar : 0, o.status].map(csvCell).join(","));
+        return res.type("text/csv").attachment(`A2B-ROYI-${month}.csv`).send([header.join(","), ...lines].join("\r\n"));
+      }
+      return res.json(statement);
+    } catch (e) {
+      return fail(res, e);
+    }
+  });
+  app2.post("/api/admin/otc/payouts", requireAuth, admin, async (req, res) => {
+    const p = settlementInput.safeParse(req.body);
+    if (!p.success) return res.status(400).json({ message: "Enter a positive settlement, valid past date, payment method and unique reference." });
+    try {
+      return res.status(201).json(await store.settle(req.auth.sub, p.data));
+    } catch {
+      return res.status(409).json({ message: "Reference already recorded, or amount exceeds verified unpaid commission. No money was moved." });
+    }
+  });
+}
+
+// server/royi-store.ts
+var import_node_crypto2 = __toESM(require("node:crypto"));
+function createRoyiStore(pool3) {
+  let ready;
+  function ensure() {
+    return ready ||= pool3.query(`
+ CREATE TABLE IF NOT EXISTS royi_quotes(id uuid PRIMARY KEY,user_id varchar NOT NULL REFERENCES users(id),snapshot jsonb NOT NULL,created_at timestamptz DEFAULT now());
+ CREATE TABLE IF NOT EXISTS royi_orders(id uuid PRIMARY KEY,user_id varchar NOT NULL REFERENCES users(id),quote_id uuid UNIQUE NOT NULL REFERENCES royi_quotes(id),snapshot jsonb NOT NULL,provider_id text UNIQUE,status text NOT NULL DEFAULT 'creating',created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now());
+ CREATE TABLE IF NOT EXISTS royi_ledger(id text PRIMARY KEY,earned numeric(14,2) NOT NULL DEFAULT 0,paid numeric(14,2) NOT NULL DEFAULT 0);
+ INSERT INTO royi_ledger(id) VALUES('A2B_LIFT') ON CONFLICT DO NOTHING;
+ CREATE TABLE IF NOT EXISTS royi_settlements(id uuid PRIMARY KEY,amount_zar numeric(12,2) NOT NULL CHECK(amount_zar>0),reference text NOT NULL UNIQUE,method text NOT NULL,paid_at timestamptz NOT NULL,notes text NOT NULL DEFAULT '',recorded_by varchar NOT NULL REFERENCES users(id),created_at timestamptz DEFAULT now());
+ CREATE TABLE IF NOT EXISTS royi_webhook_receipts(id text PRIMARY KEY,created_at timestamptz DEFAULT now());
+ CREATE INDEX IF NOT EXISTS royi_orders_user_created ON royi_orders(user_id,created_at DESC);
+ ALTER TABLE royi_quotes ENABLE ROW LEVEL SECURITY; ALTER TABLE royi_orders ENABLE ROW LEVEL SECURITY; ALTER TABLE royi_ledger ENABLE ROW LEVEL SECURITY; ALTER TABLE royi_settlements ENABLE ROW LEVEL SECURITY; ALTER TABLE royi_webhook_receipts ENABLE ROW LEVEL SECURITY;
+ `).catch((e) => {
+      ready = void 0;
+      throw e;
+    });
+  }
+  function order(r) {
+    return { ...r.snapshot, id: r.id, userId: r.user_id, quoteId: r.quote_id, providerId: r.provider_id, status: r.status, createdAt: r.created_at };
+  }
+  return {
+    ensure,
+    async saveQuote(userId, snapshot) {
+      await ensure();
+      await pool3.query("INSERT INTO royi_quotes(id,user_id,snapshot) VALUES($1,$2,$3::jsonb)", [snapshot.id, userId, JSON.stringify(snapshot)]);
+      return snapshot;
+    },
+    async quote(id, userId) {
+      await ensure();
+      return (await pool3.query("SELECT snapshot FROM royi_quotes WHERE id=$1 AND user_id=$2", [id, userId])).rows[0]?.snapshot;
+    },
+    async reserve(userId, q, phone) {
+      await ensure();
+      const id = import_node_crypto2.default.randomUUID(), snapshot = { crypto: q.crypto, network: q.network, targetZar: q.targetZar, cryptoRequired: q.cryptoRequired, commissionZar: q.commissionZar, recipientPhone: phone, depositAddress: null, exactAmount: null, expiresAt: null };
+      const rows = (await pool3.query("INSERT INTO royi_orders(id,user_id,quote_id,snapshot) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(quote_id) DO NOTHING RETURNING *", [id, userId, q.id, JSON.stringify(snapshot)])).rows;
+      if (rows.length) return { order: order(rows[0]), created: true };
+      const existing = (await pool3.query("SELECT * FROM royi_orders WHERE quote_id=$1 AND user_id=$2", [q.id, userId])).rows[0];
+      return { order: order(existing), created: false };
+    },
+    async get(id) {
+      await ensure();
+      const r = (await pool3.query("SELECT * FROM royi_orders WHERE id=$1", [id])).rows[0];
+      return r && order(r);
+    },
+    async byProvider(id) {
+      await ensure();
+      const r = (await pool3.query("SELECT * FROM royi_orders WHERE provider_id=$1", [id])).rows[0];
+      return r && order(r);
+    },
+    async list(userId) {
+      await ensure();
+      return (await pool3.query("SELECT * FROM royi_orders WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100", [userId])).rows.map(order);
+    },
+    async activate(id, providerId, patch) {
+      await pool3.query("UPDATE royi_orders SET provider_id=$2,snapshot=snapshot || $3::jsonb,status='awaiting_deposit',updated_at=now() WHERE id=$1 AND status='creating'", [id, providerId, JSON.stringify(patch)]);
+    },
+    async markReview(id) {
+      await pool3.query("UPDATE royi_orders SET status='review_required',updated_at=now() WHERE id=$1 AND status='creating'", [id]);
+    },
+    async reconcile(id, status) {
+      await ensure();
+      await pool3.query(`WITH changed AS (UPDATE royi_orders SET status=$2,updated_at=now() WHERE id=$1 AND status NOT IN ('completed','reversed') AND $2='completed' RETURNING (snapshot->>'commissionZar')::numeric AS commission) UPDATE royi_ledger SET earned=earned+COALESCE((SELECT SUM(commission) FROM changed),0) WHERE id='A2B_LIFT'`, [id, status]);
+      if (status === "reversed") {
+        await pool3.query(`WITH changed AS (UPDATE royi_orders SET status='reversed',updated_at=now() WHERE id=$1 AND status='completed' RETURNING (snapshot->>'commissionZar')::numeric AS commission) UPDATE royi_ledger SET earned=earned-COALESCE((SELECT SUM(commission) FROM changed),0) WHERE id='A2B_LIFT'`, [id]);
+      } else if (status !== "completed") await pool3.query("UPDATE royi_orders SET status=$2,updated_at=now() WHERE id=$1 AND status NOT IN ('completed','reversed')", [id, status]);
+    },
+    async webhookReceipt(id) {
+      await ensure();
+      return (await pool3.query("INSERT INTO royi_webhook_receipts(id) VALUES($1) ON CONFLICT DO NOTHING RETURNING id", [id])).rows.length > 0;
+    },
+    async statement(month) {
+      await ensure();
+      const start = month + "-01T00:00:00+02:00", r = await pool3.query("SELECT * FROM royi_orders WHERE created_at >= $1::timestamptz AND created_at < $1::timestamptz + interval '1 month' ORDER BY created_at DESC LIMIT 10001", [start]);
+      const orders = r.rows.map(order), done = orders.filter((o) => o.status === "completed"), payouts = (await pool3.query(`SELECT id,amount_zar AS "amountZar",reference,method,paid_at AS "paidAt",notes FROM royi_settlements WHERE paid_at >= $1::timestamptz AND paid_at < $1::timestamptz + interval '1 month' ORDER BY paid_at DESC`, [start])).rows;
+      if (orders.length > 1e4) throw Error("Statement exceeds export limit; provider reconciliation required");
+      const ledger = (await pool3.query("SELECT * FROM royi_ledger WHERE id='A2B_LIFT'")).rows[0];
+      return { period: month, summary: { completedOrders: done.length, volumeZar: Math.round(done.reduce((s, o) => s + o.targetZar, 0) * 100) / 100, commissionEarnedZar: Math.round(done.reduce((s, o) => s + o.commissionZar, 0) * 100) / 100, recordedPaidZar: Math.round(payouts.reduce((s, p) => s + Number(p.amountZar), 0) * 100) / 100, balanceZar: Math.round((Number(ledger.earned) - Number(ledger.paid)) * 100) / 100 }, orders, payouts };
+    },
+    async settle(userId, p) {
+      await ensure();
+      const r = await pool3.query(`WITH claim AS (UPDATE royi_ledger SET paid=paid+$1 WHERE id='A2B_LIFT' AND paid+$1<=earned RETURNING id) INSERT INTO royi_settlements(id,amount_zar,reference,method,paid_at,notes,recorded_by) SELECT $2,$1,$3,$4,$5,$6,$7 FROM claim RETURNING id`, [p.amountZar, import_node_crypto2.default.randomUUID(), p.reference, p.method, p.paidAt, p.notes, userId]);
+      if (!r.rows.length) throw Error("Settlement exceeds verified unpaid commission");
+      return r.rows[0];
+    }
+  };
+}
+
+// server/matric-dance-routes.ts
+var import_zod4 = require("zod");
+
+// shared/matric-dance.ts
+var import_zod3 = require("zod");
 
 // shared/fare-policy.ts
 var PLATFORM_COMMISSION_RATE = 0.3;
@@ -202,16 +541,16 @@ var MATRIC_DANCE_CATEGORIES = [
   { id: "luxury_van", title: "V-Class", description: "Premium group transport", maxPassengers: VEHICLE_CATEGORY_PRICING.luxury_van.maxPassengers }
 ];
 var MATRIC_MIN_LEAD_HOURS = 24;
-var text = (max) => import_zod.z.string().trim().min(2).max(max);
-var date = import_zod.z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-var time = import_zod.z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+var text = (max) => import_zod3.z.string().trim().min(2).max(max);
+var date = import_zod3.z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+var time = import_zod3.z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 function southAfricaTime(day, clock) {
   const value = Date.parse(`${day}T${clock}:00+02:00`);
   return Number.isFinite(value) && new Date(value + 72e5).toISOString().slice(0, 10) === day ? value : NaN;
 }
-var matricDanceRequestSchema = import_zod.z.object({
+var matricDanceRequestSchema = import_zod3.z.object({
   contactName: text(100),
-  contactPhone: import_zod.z.string().trim().regex(/^\+?[\d ()-]{9,24}$/, "Enter a valid contact number").refine((v) => {
+  contactPhone: import_zod3.z.string().trim().regex(/^\+?[\d ()-]{9,24}$/, "Enter a valid contact number").refine((v) => {
     const n = v.replace(/\D/g, "").length;
     return n >= 9 && n <= 15;
   }, "Enter a valid contact number"),
@@ -220,16 +559,16 @@ var matricDanceRequestSchema = import_zod.z.object({
   pickupTime: time,
   pickupAddress: text(400),
   venueAddress: text(400),
-  vehicleType: import_zod.z.enum(["luxury", "business", "luxury_van"]),
-  preferredModel: import_zod.z.string().trim().max(100).optional().default(""),
-  passengers: import_zod.z.number().int().min(1).max(6),
-  serviceHours: import_zod.z.number().int().min(1).max(12),
-  photoMinutes: import_zod.z.number().int().min(0).max(120),
-  returnRequested: import_zod.z.boolean(),
+  vehicleType: import_zod3.z.enum(["luxury", "business", "luxury_van"]),
+  preferredModel: import_zod3.z.string().trim().max(100).optional().default(""),
+  passengers: import_zod3.z.number().int().min(1).max(6),
+  serviceHours: import_zod3.z.number().int().min(1).max(12),
+  photoMinutes: import_zod3.z.number().int().min(0).max(120),
+  returnRequested: import_zod3.z.boolean(),
   returnDate: date.optional(),
   returnTime: time.optional(),
-  notes: import_zod.z.string().trim().max(2e3).optional().default(""),
-  adultContactConfirmed: import_zod.z.literal(true, { errorMap: () => ({ message: "An adult must be the booking contact" }) })
+  notes: import_zod3.z.string().trim().max(2e3).optional().default(""),
+  adultContactConfirmed: import_zod3.z.literal(true, { errorMap: () => ({ message: "An adult must be the booking contact" }) })
 }).superRefine((value, ctx) => {
   const pickup = southAfricaTime(value.eventDate, value.pickupTime);
   if (!Number.isFinite(pickup) || pickup < Date.now() + MATRIC_MIN_LEAD_HOURS * 36e5) {
@@ -244,48 +583,9 @@ var matricDanceRequestSchema = import_zod.z.object({
 });
 var MATRIC_STATUSES = ["requested", "reviewing", "quoted", "accepted", "confirmed", "declined", "cancelled"];
 
-// server/auth-middleware.ts
-init_auth();
-function extractBearer(req) {
-  const header = req.header("authorization") || req.header("Authorization");
-  if (!header) return null;
-  const [type, token] = header.split(" ");
-  if (type?.toLowerCase() !== "bearer" || !token) return null;
-  return token;
-}
-function authOptional(req, _res, next) {
-  try {
-    const token = extractBearer(req) || req.cookies?.a2b_token || null;
-    if (token) {
-      req.auth = verifyAccessToken(token);
-    }
-  } catch {
-  }
-  next();
-}
-function requireAuth(req, res, next) {
-  const token = extractBearer(req) || req.cookies?.a2b_token || null;
-  if (!token) return res.status(401).json({ message: "Unauthorized" });
-  try {
-    req.auth = verifyAccessToken(token);
-    return next();
-  } catch {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-}
-function requireRole(roles) {
-  return (req, res, next) => {
-    if (!req.auth) return res.status(401).json({ message: "Unauthorized" });
-    if (!roles.includes(req.auth.role)) {
-      return res.status(403).json({ message: "Forbidden" });
-    }
-    return next();
-  };
-}
-
 // server/matric-dance-routes.ts
-var uuid = import_zod2.z.string().uuid();
-var adminPatch = import_zod2.z.object({ status: import_zod2.z.enum(MATRIC_STATUSES), adminNote: import_zod2.z.string().trim().max(2e3).optional(), quoteAmount: import_zod2.z.number().positive().max(1e6).multipleOf(0.01).optional() });
+var uuid = import_zod4.z.string().uuid();
+var adminPatch = import_zod4.z.object({ status: import_zod4.z.enum(MATRIC_STATUSES), adminNote: import_zod4.z.string().trim().max(2e3).optional(), quoteAmount: import_zod4.z.number().positive().max(1e6).multipleOf(0.01).optional() });
 var transitions = {
   requested: ["reviewing", "quoted", "declined"],
   reviewing: ["quoted", "declined"],
@@ -354,7 +654,7 @@ function registerMatricDanceRoutes(app2, store, guards = { auth: requireAuth, ad
 }
 
 // server/matric-dance-store.ts
-var import_node_crypto = __toESM(require("node:crypto"));
+var import_node_crypto3 = __toESM(require("node:crypto"));
 function createMatricStore(pool3) {
   let ready;
   function ensure() {
@@ -378,7 +678,7 @@ function createMatricStore(pool3) {
     },
     async create(userId, details) {
       await ensure();
-      const r = await pool3.query("INSERT INTO matric_dance_bookings(id,user_id,details) VALUES($1,$2,$3::jsonb) RETURNING *", [import_node_crypto.default.randomUUID(), userId, JSON.stringify(details)]);
+      const r = await pool3.query("INSERT INTO matric_dance_bookings(id,user_id,details) VALUES($1,$2,$3::jsonb) RETURNING *", [import_node_crypto3.default.randomUUID(), userId, JSON.stringify(details)]);
       return row(r.rows[0]);
     },
     async get(id) {
@@ -399,7 +699,7 @@ var import_node_http = require("node:http");
 var import_socket = require("socket.io");
 var import_axios2 = __toESM(require("axios"));
 var import_bcryptjs = __toESM(require("bcryptjs"));
-var import_node_crypto4 = __toESM(require("node:crypto"));
+var import_node_crypto6 = __toESM(require("node:crypto"));
 
 // server/storage.ts
 var import_node_postgres = require("drizzle-orm/node-postgres");
@@ -440,6 +740,11 @@ __export(schema_exports, {
   rewardTransactions: () => rewardTransactions,
   rideRatings: () => rideRatings,
   rides: () => rides,
+  royiLedger: () => royiLedger,
+  royiOrders: () => royiOrders,
+  royiQuotes: () => royiQuotes,
+  royiSettlements: () => royiSettlements,
+  royiWebhookReceipts: () => royiWebhookReceipts,
   safetyReports: () => safetyReports,
   savedCards: () => savedCards,
   tripEnquiries: () => tripEnquiries,
@@ -1021,6 +1326,34 @@ var matricDanceBookings = (0, import_pg_core.pgTable)("matric_dance_bookings", {
   createdAt: (0, import_pg_core.timestamp)("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: (0, import_pg_core.timestamp)("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
+var royiQuotes = (0, import_pg_core.pgTable)("royi_quotes", {
+  id: (0, import_pg_core.uuid)("id").primaryKey(),
+  userId: (0, import_pg_core.varchar)("user_id").notNull().references(() => users.id),
+  snapshot: (0, import_pg_core.jsonb)("snapshot").notNull(),
+  createdAt: (0, import_pg_core.timestamp)("created_at", { withTimezone: true }).defaultNow()
+});
+var royiOrders = (0, import_pg_core.pgTable)("royi_orders", {
+  id: (0, import_pg_core.uuid)("id").primaryKey(),
+  userId: (0, import_pg_core.varchar)("user_id").notNull().references(() => users.id),
+  quoteId: (0, import_pg_core.uuid)("quote_id").notNull().unique().references(() => royiQuotes.id),
+  snapshot: (0, import_pg_core.jsonb)("snapshot").notNull(),
+  providerId: (0, import_pg_core.text)("provider_id").unique(),
+  status: (0, import_pg_core.text)("status").notNull().default("creating"),
+  createdAt: (0, import_pg_core.timestamp)("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at", { withTimezone: true }).defaultNow()
+});
+var royiLedger = (0, import_pg_core.pgTable)("royi_ledger", { id: (0, import_pg_core.text)("id").primaryKey(), earned: (0, import_pg_core.numeric)("earned", { precision: 14, scale: 2 }).notNull().default("0"), paid: (0, import_pg_core.numeric)("paid", { precision: 14, scale: 2 }).notNull().default("0") });
+var royiSettlements = (0, import_pg_core.pgTable)("royi_settlements", {
+  id: (0, import_pg_core.uuid)("id").primaryKey(),
+  amountZar: (0, import_pg_core.numeric)("amount_zar", { precision: 12, scale: 2 }).notNull(),
+  reference: (0, import_pg_core.text)("reference").notNull().unique(),
+  method: (0, import_pg_core.text)("method").notNull(),
+  paidAt: (0, import_pg_core.timestamp)("paid_at", { withTimezone: true }).notNull(),
+  notes: (0, import_pg_core.text)("notes").notNull().default(""),
+  recordedBy: (0, import_pg_core.varchar)("recorded_by").notNull().references(() => users.id),
+  createdAt: (0, import_pg_core.timestamp)("created_at", { withTimezone: true }).defaultNow()
+});
+var royiWebhookReceipts = (0, import_pg_core.pgTable)("royi_webhook_receipts", { id: (0, import_pg_core.text)("id").primaryKey(), createdAt: (0, import_pg_core.timestamp)("created_at", { withTimezone: true }).defaultNow() });
 
 // shared/email-validation.ts
 var COMMON_TLD_TYPOS = {
@@ -2007,7 +2340,7 @@ var import_drizzle_orm4 = require("drizzle-orm");
 var import_drizzle_orm3 = require("drizzle-orm");
 
 // server/media-object-store.ts
-var import_node_crypto2 = __toESM(require("node:crypto"));
+var import_node_crypto4 = __toESM(require("node:crypto"));
 var ensureTablePromise = null;
 async function ensureMediaObjectStore() {
   if (!ensureTablePromise) {
@@ -2031,7 +2364,7 @@ async function ensureMediaObjectStore() {
 }
 async function storeMediaObject(input) {
   await ensureMediaObjectStore();
-  const id = import_node_crypto2.default.randomUUID();
+  const id = import_node_crypto4.default.randomUUID();
   await pool2.query(
     `INSERT INTO app_media_objects (id, owner_user_id, purpose, mime_type, data)
      VALUES ($1, $2, $3, $4, $5)`,
@@ -3374,11 +3707,11 @@ function normalizePaystackReference(value) {
 }
 
 // server/password-reset.ts
-var import_node_crypto3 = __toESM(require("node:crypto"));
+var import_node_crypto5 = __toESM(require("node:crypto"));
 var PASSWORD_RESET_TOKEN_TTL_MS = 30 * 60 * 1e3;
 var PASSWORD_RESET_MIN_LENGTH = 8;
 function createPasswordResetToken() {
-  const token = import_node_crypto3.default.randomBytes(32).toString("base64url");
+  const token = import_node_crypto5.default.randomBytes(32).toString("base64url");
   return {
     token,
     tokenHash: hashPasswordResetToken(token),
@@ -3386,7 +3719,7 @@ function createPasswordResetToken() {
   };
 }
 function hashPasswordResetToken(token) {
-  return import_node_crypto3.default.createHash("sha256").update(token).digest("hex");
+  return import_node_crypto5.default.createHash("sha256").update(token).digest("hex");
 }
 function buildPasswordResetUrl(token, baseUrl) {
   const url = new URL(
@@ -3804,6 +4137,7 @@ async function runMockSelfieQualityCheck(selfieUrl, faceData, challenge) {
 async function registerRoutes(app2) {
   const httpServer = (0, import_node_http.createServer)(app2);
   registerMatricDanceRoutes(app2, createMatricStore(pool2));
+  registerRoyiRoutes(app2, createRoyiStore(pool2));
   try {
     await pool2.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo text");
     await pool2.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS active_driver_device_id text");
@@ -5230,7 +5564,7 @@ If you did not request this, you can ignore this email.`,
         return res.status(409).json({ message: "Please complete or cancel any active trip before deleting your account." });
       }
       const deletedEmail = `deleted-${userId}@deleted.a2b.local`;
-      const deletedPassword = await import_bcryptjs.default.hash(import_node_crypto4.default.randomBytes(32).toString("hex"), 10);
+      const deletedPassword = await import_bcryptjs.default.hash(import_node_crypto6.default.randomBytes(32).toString("hex"), 10);
       await client.query("BEGIN");
       await maybeQuery("DELETE FROM notifications WHERE user_id = $1", [userId]);
       await maybeQuery("DELETE FROM saved_cards WHERE user_id = $1", [userId]);
@@ -11512,7 +11846,7 @@ If you did not request this, you can ignore this email.`,
       }
       const rawBody = req.rawBody;
       const raw = typeof rawBody === "string" ? rawBody : Buffer.isBuffer(rawBody) ? rawBody : JSON.stringify(req.body);
-      const hash = import_node_crypto4.default.createHmac("sha512", secret).update(raw).digest("hex");
+      const hash = import_node_crypto6.default.createHmac("sha512", secret).update(raw).digest("hex");
       if (hash !== signature) {
         console.warn("Invalid Paystack webhook signature");
         return res.status(401).json({ message: "Invalid signature" });
@@ -14447,7 +14781,7 @@ If you did not request this, you can ignore this email.`,
   });
   app2.post("/api/payments/webhook", async (req, res) => {
     try {
-      const hash = import_node_crypto4.default.createHmac("sha512", PAYSTACK_SECRET).update(JSON.stringify(req.body)).digest("hex");
+      const hash = import_node_crypto6.default.createHmac("sha512", PAYSTACK_SECRET).update(JSON.stringify(req.body)).digest("hex");
       if (hash !== req.headers["x-paystack-signature"]) {
         return res.status(401).json({ message: "Invalid signature" });
       }
