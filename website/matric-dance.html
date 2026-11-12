@@ -1,8 +1,99 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Matric dance travel | A2B Lift</title><meta name="description" content="Plan your matric dance chauffeur booking with A2B Lift. Request Luxury, VIP with S-Class preference, or V-Class transport, photos and a return journey."><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="assets/matric-dance.css"></head><body>
-<header><a class="brand" href="index.html">A2B<strong>Lift</strong></a><nav><a href="index.html">Home</a><a href="dashboard.html#matricdance">My requests</a></nav></header>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Matric dance travel | A2B Lift</title><meta name="description" content="Plan your matric dance chauffeur booking with A2B Lift. Request Luxury, VIP with S-Class preference, or V-Class transport, photos and a return journey."><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="icon" type="image/png" href="assets/images/favicon.png?v=20260505"><link rel="shortcut icon" href="assets/images/favicon.png?v=20260505"><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="assets/matric-dance.css"></head><body>
+<header class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="index.html" class="logo">
+        <img src="assets/images/icon.png" alt="A2B Lift" class="logo-img" />
+        <span class="logo-text">A2B<strong>Lift</strong></span>
+      </a>
+      <nav class="nav-links">
+        <a href="rides.html">Rides</a>
+        <a href="long-distance.html">Long Distance</a>
+        <a href="lift-club.html">Daily Lift Club</a>
+        <a href="earn.html">Earn</a>
+        <a href="dashboard.html#partner">Become a Partner</a>
+      </nav>
+      <div class="nav-actions">
+        <a href="login.html" class="btn btn-ghost btn-sm">Log in</a>
+        <a href="driver-register.html" class="btn btn-primary btn-sm">Become a driver</a>
+      </div>
+      <button class="hamburger" id="hamburger" aria-label="Toggle menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <div class="mobile-nav" id="mobileNav">
+    <a href="rides.html">Rides</a>
+    <a href="long-distance.html">Long Distance</a>
+    <a href="lift-club.html">Daily Lift Club</a>
+    <a href="earn.html">Earn</a>
+    <a href="dashboard.html#partner">Become a Partner</a>
+    <div class="mobile-cta">
+      <a href="login.html" class="btn btn-ghost">Log in</a>
+      <a href="driver-register.html" class="btn btn-primary">Become a driver</a>
+    </div>
+  </div>
 <main><section class="hero"><div class="hero-copy"><p>Matric dance travel</p><h1>Arrive for the occasion.</h1><p>Tell us about your evening and we’ll prepare a quote for your journey.</p><a class="button light" href="#request">Request a quote</a></div><img src="assets/images/matric-dance-sedan.jpg" alt="Luxury sedan for a matric dance"></section>
 <section class="intro wrap"><div><h2>Your evening, planned around you.</h2><p>Share your pickup, venue and plans for photos or a return trip. We’ll review the itinerary and confirm what can be included in your quote.</p><p>Vehicle models are preferences and depend on availability. Sending a request does not confirm a booking or charge you.</p></div><img src="assets/images/matric-dance-vclass.jpg" alt="Luxury van for a group journey"></section>
 <section class="wrap details"><h2>Planning your request</h2><div class="detail-grid"><div><h3>Photos and return</h3><p>Photo time is a request, subject to your quote. For a return after midnight, select the next date.</p></div><div><h3>What happens next</h3><p>Your quote will confirm the vehicle make and colour, chauffeur, waiting time, distance, payment and cancellation terms. Images are illustrative.</p></div><div><h3>Booking contact</h3><p>The person making the request must be 18 or older and responsible for the booking.</p></div></div></section>
 <section class="wrap request" id="request"><div class="section-heading"><h2>Request a quote</h2><p>Requests need at least 24 hours’ notice. All dates and times are South African time.</p></div><form id="matricForm"><fieldset><legend>Choose a vehicle</legend><div id="optionsState" role="status">Loading vehicle options…</div><div id="vehicles" class="vehicles"></div><button type="button" id="retryOptions" hidden>Retry loading vehicles</button></fieldset>
 <div class="fields"><label>Contact name<input name="contactName" required minlength="2" maxlength="100" autocomplete="name"></label><label>Contact phone<input name="contactPhone" required minlength="9" maxlength="24" pattern="[+0-9 ()-]{9,24}" autocomplete="tel" type="tel"></label><label>School<input name="school" required minlength="2" maxlength="160"></label><label>Event date<input name="eventDate" required type="date"></label><label>Pickup time<input name="pickupTime" required type="time"></label><label>Pickup address<input name="pickupAddress" required minlength="2" maxlength="400"></label><label>Venue address<input name="venueAddress" required minlength="2" maxlength="400"></label><label>Passengers<input name="passengers" type="number" min="1" max="6" required></label><label>Service hours<input name="serviceHours" type="number" min="1" max="12" value="1" required></label><label>Photo time in minutes<input name="photoMinutes" type="number" min="0" max="120" value="0" required></label><label class="full">Preferred model (optional)<input name="preferredModel" maxlength="100" placeholder="For example, S-Class or V-Class"></label></div>
-<label class="check"><input type="checkbox" name="returnRequested"> Request a return trip</label><div class="fields" id="returnFields" hidden><label>Return date<input name="returnDate" type="date"></label><label>Return time<input name="returnTime" type="time"></label></div><label class="full notes">Additional notes (optional)<textarea name="notes" rows="4" maxlength="2000"></textarea></label><label class="check"><input type="checkbox" name="adultContactConfirmed" required> I am 18 or older and responsible for this booking request.</label><p id="authNotice"></p><p id="formMessage" role="status" aria-live="polite"></p><button class="button" type="submit" id="submitRequest">Send request</button><p class="small">No payment is taken. Your request and any quote remain subject to confirmation.</p></form></section></main><footer><a href="index.html">A2B Lift</a><a href="dashboard.html#matricdance">View my requests</a></footer><script src="assets/matric-dance.js"></script></body></html>
+<label class="check"><input type="checkbox" name="returnRequested"> Request a return trip</label><div class="fields" id="returnFields" hidden><label>Return date<input name="returnDate" type="date"></label><label>Return time<input name="returnTime" type="time"></label></div><label class="full notes">Additional notes (optional)<textarea name="notes" rows="4" maxlength="2000"></textarea></label><label class="check"><input type="checkbox" name="adultContactConfirmed" required> I am 18 or older and responsible for this booking request.</label><p id="authNotice"></p><p id="formMessage" role="status" aria-live="polite"></p><button class="button" type="submit" id="submitRequest">Send request</button><p class="small">No payment is taken. Your request and any quote remain subject to confirmation.</p><p class="small">Already sent a request? <a class="inline-link" href="dashboard.html#matricdance">View my requests</a></p></form></section></main><footer class="footer">
+    <div class="container">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <a href="index.html" class="logo logo--light">
+            <img src="assets/images/icon.png" alt="A2B Lift" class="logo-img" />
+            <span class="logo-text">A2B<strong>Lift</strong></span>
+          </a>
+          <p>Premium rides and long-distance travel across South Africa.</p>
+          <div class="social-row">
+            <a href="#" class="social-btn" aria-label="Facebook">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
+            </a>
+            <a href="#" class="social-btn" aria-label="Instagram">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+            </a>
+            <a href="#" class="social-btn" aria-label="X / Twitter">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+            </a>
+            <a href="#" class="social-btn" aria-label="TikTok">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 0 0-.79-.05 6.34 6.34 0 0 0-6.34 6.34 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.69a8.2 8.2 0 0 0 4.78 1.53V6.78a4.85 4.85 0 0 1-1.01-.09z"/></svg>
+            </a>
+          </div>
+        </div>
+        <div class="footer-col">
+          <h4>Passengers</h4>
+          <a href="rides.html">Book a ride</a>
+          <a href="long-distance.html">Long distance</a>
+          <a href="airport-transfers.html">Airport transfers</a>
+          <a href="matric-dance.html">Matric Dance</a>
+          <a href="support.html">Help &amp; support</a>
+        </div>
+        <div class="footer-col">
+          <h4>Drivers</h4>
+          <a href="driver-register.html">Register to drive</a>
+          <a href="earn.html">How earnings work</a>
+          <a href="referral.html">Reward programme</a>
+          <a href="support.html#drivers">Driver guide</a>
+        </div>
+        <div class="footer-col">
+          <h4>Company</h4>
+          <a href="about.html">About us</a>
+          <a href="safety.html">Safety</a>
+          <a href="blog.html">Blog</a>
+          <a href="support.html">Support</a>
+          <a href="support.html#privacy">Privacy policy</a>
+          <a href="support.html#terms">Terms &amp; conditions</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p>&copy; 2026 A2B Lift. All rights reserved.</p>
+        <div class="footer-legal">
+          <a href="support.html#privacy">Privacy</a>
+          <a href="support.html#terms">Terms</a>
+          <a href="support.html">Cookies</a>
+        </div>
+      </div>
+    </div>
+  </footer><script src="main.js"></script><script src="assets/matric-dance.js"></script></body></html>
