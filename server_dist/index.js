@@ -70,12 +70,336 @@ var init_auth = __esm({
 var import_config = require("dotenv/config");
 var import_express = __toESM(require("express"));
 
+// server/matric-dance-routes.ts
+var import_zod2 = require("zod");
+
+// shared/matric-dance.ts
+var import_zod = require("zod");
+
+// shared/fare-policy.ts
+var PLATFORM_COMMISSION_RATE = 0.3;
+var A2B_LITE_COMMISSION_RATE = 0.1;
+var DRIVER_SHARE_RATE = 1 - PLATFORM_COMMISSION_RATE;
+var REFERRAL_REWARD_RATE = 0.025;
+var VEHICLE_CATEGORY_PRICING = {
+  a2b_lite: {
+    pricePerKm: 3.5,
+    baseFare: 50,
+    includedKm: 0,
+    maxPassengers: 2
+  },
+  budget: { pricePerKm: 8.5, baseFare: 50, includedKm: 0, maxPassengers: 4 },
+  luxury: { pricePerKm: 14.5, baseFare: 60, includedKm: 0, maxPassengers: 4 },
+  business: { pricePerKm: 35, baseFare: 150, includedKm: 0, maxPassengers: 4 },
+  van: { pricePerKm: 15, baseFare: 120, includedKm: 0, maxPassengers: 7 },
+  luxury_van: { pricePerKm: 35, baseFare: 200, includedKm: 0, maxPassengers: 6 }
+};
+function getBillableDistanceKm(distanceKm, includedKm = 0) {
+  const distance = Number(distanceKm);
+  const included = Number(includedKm);
+  if (!Number.isFinite(distance) || distance <= 0) return 0;
+  return Math.max(0, distance - (Number.isFinite(included) ? Math.max(0, included) : 0));
+}
+var CATEGORY_ALIASES = {
+  a2b_lite: "a2b_lite",
+  "a2b-lite": "a2b_lite",
+  lite: "a2b_lite",
+  economy_lite: "a2b_lite",
+  budget: "budget",
+  budget_car: "budget",
+  economy_car: "budget",
+  compact: "budget",
+  economy: "budget",
+  standard: "budget",
+  sedan: "budget",
+  luxury: "luxury",
+  luxury_car: "luxury",
+  luxury_sedan: "luxury",
+  premium: "luxury",
+  business: "business",
+  business_class: "business",
+  vip: "business",
+  vip_car: "business",
+  luxury_vip: "business",
+  luxury_vip_car: "business",
+  business_vip: "business",
+  executive: "business",
+  executive_car: "business",
+  van: "van",
+  minivan: "van",
+  xl: "van",
+  people_carrier: "van",
+  luxury_van: "luxury_van",
+  vclass: "luxury_van",
+  v_class: "luxury_van",
+  "v-class": "luxury_van"
+};
+var VEHICLE_CATEGORY_TITLES = {
+  a2b_lite: "A2B Lite",
+  budget: "Budget",
+  luxury: "Luxury",
+  business: "VIP",
+  van: "Van",
+  luxury_van: "V-Class"
+};
+function normalizeVehicleType(vehicleType) {
+  const normalized = String(vehicleType || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return CATEGORY_ALIASES[normalized] || CATEGORY_ALIASES[String(vehicleType || "").trim().toLowerCase()] || "budget";
+}
+function getVehicleCategoryTitle(vehicleType) {
+  const key = normalizeVehicleType(vehicleType);
+  return VEHICLE_CATEGORY_TITLES[key] || key.replace(/_/g, " ");
+}
+var CATEGORY_MAX_SEATS = {
+  a2b_lite: 2,
+  budget: 4,
+  luxury: 4,
+  business: 4,
+  vip: 4,
+  van: 7,
+  luxury_van: 6,
+  v_class: 6,
+  "v-class": 6,
+  vclass: 6
+};
+function getCategoryMaxSeats(vehicleType) {
+  const normalized = normalizeVehicleType(vehicleType);
+  if (normalized in CATEGORY_MAX_SEATS) {
+    return CATEGORY_MAX_SEATS[normalized];
+  }
+  const rawKey = String(vehicleType || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (rawKey in CATEGORY_MAX_SEATS) {
+    return CATEGORY_MAX_SEATS[rawKey];
+  }
+  return 4;
+}
+function getVehicleCategoryCommissionRate(vehicleType) {
+  const normalized = normalizeVehicleType(vehicleType);
+  return normalized === "a2b_lite" ? A2B_LITE_COMMISSION_RATE : PLATFORM_COMMISSION_RATE;
+}
+function roundCurrency(amount) {
+  return Math.round(amount * 100) / 100;
+}
+function normalizeCommissionRate(rate) {
+  const numericRate = Number(rate);
+  return Number.isFinite(numericRate) && numericRate >= 0 && numericRate <= 1 ? numericRate : PLATFORM_COMMISSION_RATE;
+}
+function getDriverNetFare(grossFare, commissionRate = PLATFORM_COMMISSION_RATE) {
+  const gross = Number(grossFare);
+  if (!Number.isFinite(gross) || gross <= 0) return 0;
+  return roundCurrency(gross * (1 - normalizeCommissionRate(commissionRate)));
+}
+function getPlatformCommission(grossFare, commissionRate = PLATFORM_COMMISSION_RATE) {
+  const gross = Number(grossFare);
+  if (!Number.isFinite(gross) || gross <= 0) return 0;
+  return roundCurrency(gross - getDriverNetFare(gross, commissionRate));
+}
+
+// shared/matric-dance.ts
+var MATRIC_DANCE_CATEGORIES = [
+  { id: "luxury", title: "Luxury", description: "Premium sedan for a couple or small group", maxPassengers: VEHICLE_CATEGORY_PRICING.luxury.maxPassengers },
+  { id: "business", title: "VIP / S-Class preference", description: "Executive sedan; request an S-Class, subject to confirmation", maxPassengers: VEHICLE_CATEGORY_PRICING.business.maxPassengers },
+  { id: "luxury_van", title: "V-Class", description: "Premium group transport", maxPassengers: VEHICLE_CATEGORY_PRICING.luxury_van.maxPassengers }
+];
+var MATRIC_MIN_LEAD_HOURS = 24;
+var text = (max) => import_zod.z.string().trim().min(2).max(max);
+var date = import_zod.z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+var time = import_zod.z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+function southAfricaTime(day, clock) {
+  const value = Date.parse(`${day}T${clock}:00+02:00`);
+  return Number.isFinite(value) && new Date(value + 72e5).toISOString().slice(0, 10) === day ? value : NaN;
+}
+var matricDanceRequestSchema = import_zod.z.object({
+  contactName: text(100),
+  contactPhone: import_zod.z.string().trim().regex(/^\+?[\d ()-]{9,24}$/, "Enter a valid contact number").refine((v) => {
+    const n = v.replace(/\D/g, "").length;
+    return n >= 9 && n <= 15;
+  }, "Enter a valid contact number"),
+  school: text(160),
+  eventDate: date,
+  pickupTime: time,
+  pickupAddress: text(400),
+  venueAddress: text(400),
+  vehicleType: import_zod.z.enum(["luxury", "business", "luxury_van"]),
+  preferredModel: import_zod.z.string().trim().max(100).optional().default(""),
+  passengers: import_zod.z.number().int().min(1).max(6),
+  serviceHours: import_zod.z.number().int().min(1).max(12),
+  photoMinutes: import_zod.z.number().int().min(0).max(120),
+  returnRequested: import_zod.z.boolean(),
+  returnDate: date.optional(),
+  returnTime: time.optional(),
+  notes: import_zod.z.string().trim().max(2e3).optional().default(""),
+  adultContactConfirmed: import_zod.z.literal(true, { errorMap: () => ({ message: "An adult must be the booking contact" }) })
+}).superRefine((value, ctx) => {
+  const pickup = southAfricaTime(value.eventDate, value.pickupTime);
+  if (!Number.isFinite(pickup) || pickup < Date.now() + MATRIC_MIN_LEAD_HOURS * 36e5) {
+    ctx.addIssue({ code: "custom", path: ["eventDate"], message: "Choose a valid pickup at least 24 hours ahead (South Africa time)" });
+  }
+  const category = MATRIC_DANCE_CATEGORIES.find((c) => c.id === value.vehicleType);
+  if (value.passengers > category.maxPassengers) ctx.addIssue({ code: "custom", path: ["passengers"], message: `${category.title} accommodates up to ${category.maxPassengers} passengers` });
+  if (value.returnRequested) {
+    const back = southAfricaTime(value.returnDate || value.eventDate, value.returnTime || "");
+    if (!Number.isFinite(back) || back <= pickup || back > pickup + 48 * 36e5) ctx.addIssue({ code: "custom", path: ["returnTime"], message: "Choose a return after pickup, within 48 hours; select the next date for an after-midnight return" });
+  }
+});
+var MATRIC_STATUSES = ["requested", "reviewing", "quoted", "accepted", "confirmed", "declined", "cancelled"];
+
+// server/auth-middleware.ts
+init_auth();
+function extractBearer(req) {
+  const header = req.header("authorization") || req.header("Authorization");
+  if (!header) return null;
+  const [type, token] = header.split(" ");
+  if (type?.toLowerCase() !== "bearer" || !token) return null;
+  return token;
+}
+function authOptional(req, _res, next) {
+  try {
+    const token = extractBearer(req) || req.cookies?.a2b_token || null;
+    if (token) {
+      req.auth = verifyAccessToken(token);
+    }
+  } catch {
+  }
+  next();
+}
+function requireAuth(req, res, next) {
+  const token = extractBearer(req) || req.cookies?.a2b_token || null;
+  if (!token) return res.status(401).json({ message: "Unauthorized" });
+  try {
+    req.auth = verifyAccessToken(token);
+    return next();
+  } catch {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+}
+function requireRole(roles) {
+  return (req, res, next) => {
+    if (!req.auth) return res.status(401).json({ message: "Unauthorized" });
+    if (!roles.includes(req.auth.role)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    return next();
+  };
+}
+
+// server/matric-dance-routes.ts
+var uuid = import_zod2.z.string().uuid();
+var adminPatch = import_zod2.z.object({ status: import_zod2.z.enum(MATRIC_STATUSES), adminNote: import_zod2.z.string().trim().max(2e3).optional(), quoteAmount: import_zod2.z.number().positive().max(1e6).multipleOf(0.01).optional() });
+var transitions = {
+  requested: ["reviewing", "quoted", "declined"],
+  reviewing: ["quoted", "declined"],
+  quoted: ["quoted", "declined"],
+  accepted: ["confirmed", "declined"],
+  confirmed: [],
+  declined: [],
+  cancelled: []
+};
+function registerMatricDanceRoutes(app2, store, guards = { auth: requireAuth, admin: requireRole(["admin"]) }) {
+  app2.get("/api/matric-dance/options", (_req, res) => res.json({ categories: MATRIC_DANCE_CATEGORIES, minimumLeadHours: MATRIC_MIN_LEAD_HOURS }));
+  app2.post("/api/matric-dance/bookings", guards.auth, async (req, res) => {
+    const parsed = matricDanceRequestSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0].message });
+    try {
+      const own = await store.list(req.auth.sub);
+      if (own.filter((b) => ["requested", "reviewing", "quoted", "accepted"].includes(b.status)).length >= 10) return res.status(429).json({ message: "You already have 10 open requests. Please manage those before requesting another." });
+      return res.status(201).json(await store.create(req.auth.sub, parsed.data));
+    } catch {
+      return res.status(503).json({ message: "Booking requests are temporarily unavailable. Please try again." });
+    }
+  });
+  app2.get("/api/matric-dance/bookings/me", guards.auth, async (req, res) => {
+    try {
+      return res.json(await store.list(req.auth.sub));
+    } catch {
+      return res.status(503).json({ message: "Could not load booking requests. Please retry." });
+    }
+  });
+  for (const action of ["accept", "cancel"]) app2.post(`/api/matric-dance/bookings/:id/${action}`, guards.auth, async (req, res) => {
+    if (!uuid.safeParse(req.params.id).success) return res.status(400).json({ message: "Invalid request reference" });
+    try {
+      const b = await store.get(String(req.params.id));
+      if (!b || b.userId !== req.auth.sub) return res.status(404).json({ message: "Request not found" });
+      if (action === "accept" && req.body?.expectedRevision !== b.revision) return res.status(409).json({ message: "This quote changed. Refresh and review the latest amount and terms before accepting." });
+      const allowed = action === "accept" ? b.status === "quoted" && Number(b.quoteAmount) > 0 : ["requested", "reviewing", "quoted", "accepted"].includes(b.status);
+      if (!allowed) return res.status(409).json({ message: "This request cannot be changed now. Please contact A2B for a confirmed booking." });
+      const updated = await store.update(b.id, b.status, { status: action === "accept" ? "accepted" : "cancelled" }, b.revision);
+      return updated ? res.json(updated) : res.status(409).json({ message: "This request changed. Refresh and try again." });
+    } catch {
+      return res.status(503).json({ message: "Unable to update request. Please retry." });
+    }
+  });
+  app2.get("/api/admin/matric-dance/bookings", guards.auth, guards.admin, async (_req, res) => {
+    try {
+      return res.json(await store.list());
+    } catch {
+      return res.status(503).json({ message: "Could not load requests" });
+    }
+  });
+  app2.patch("/api/admin/matric-dance/bookings/:id", guards.auth, guards.admin, async (req, res) => {
+    const parsed = adminPatch.safeParse(req.body);
+    if (!uuid.safeParse(req.params.id).success || !parsed.success) return res.status(400).json({ message: "Invalid status, quote or request reference" });
+    if (parsed.data.status !== "quoted" && parsed.data.quoteAmount !== void 0) return res.status(400).json({ message: "Only a quote can set a price; accepted quotes cannot be repriced." });
+    try {
+      const b = await store.get(String(req.params.id));
+      if (!b) return res.status(404).json({ message: "Request not found" });
+      if (!transitions[b.status].includes(parsed.data.status)) return res.status(409).json({ message: "Invalid status transition. A customer must accept a quote before confirmation." });
+      if (parsed.data.status === "quoted" && (!parsed.data.quoteAmount || !parsed.data.adminNote)) return res.status(400).json({ message: "A quote needs an amount and customer-visible terms, vehicle availability and cancellation/payment instructions." });
+      const updated = await store.update(b.id, b.status, parsed.data, b.revision);
+      return updated ? res.json(updated) : res.status(409).json({ message: "Request changed; refresh before updating" });
+    } catch {
+      return res.status(503).json({ message: "Unable to update request" });
+    }
+  });
+}
+
+// server/matric-dance-store.ts
+var import_node_crypto = __toESM(require("node:crypto"));
+function createMatricStore(pool3) {
+  let ready;
+  function ensure() {
+    return ready ||= pool3.query(`CREATE TABLE IF NOT EXISTS matric_dance_bookings (
+      id uuid PRIMARY KEY, user_id varchar NOT NULL REFERENCES users(id), details jsonb NOT NULL,
+      revision integer NOT NULL DEFAULT 0, status text NOT NULL DEFAULT 'requested', admin_note text NOT NULL DEFAULT '', quote_amount numeric(12,2),
+      created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+    ); ALTER TABLE matric_dance_bookings ADD COLUMN IF NOT EXISTS revision integer NOT NULL DEFAULT 0; ALTER TABLE matric_dance_bookings ENABLE ROW LEVEL SECURITY;`).then(() => pool3.query(`CREATE INDEX IF NOT EXISTS matric_dance_user_created ON matric_dance_bookings(user_id, created_at DESC)`)).catch((e) => {
+      ready = void 0;
+      throw e;
+    });
+  }
+  function row(r) {
+    return { id: r.id, userId: r.user_id, details: r.details, status: r.status, adminNote: r.admin_note, quoteAmount: r.quote_amount == null ? null : Number(r.quote_amount), createdAt: r.created_at, updatedAt: r.updated_at, revision: r.revision };
+  }
+  return {
+    async list(userId) {
+      await ensure();
+      const r = await pool3.query(userId ? "SELECT * FROM matric_dance_bookings WHERE user_id=$1 ORDER BY created_at DESC LIMIT 200" : "SELECT * FROM matric_dance_bookings ORDER BY created_at DESC LIMIT 500", userId ? [userId] : []);
+      return r.rows.map(row);
+    },
+    async create(userId, details) {
+      await ensure();
+      const r = await pool3.query("INSERT INTO matric_dance_bookings(id,user_id,details) VALUES($1,$2,$3::jsonb) RETURNING *", [import_node_crypto.default.randomUUID(), userId, JSON.stringify(details)]);
+      return row(r.rows[0]);
+    },
+    async get(id) {
+      await ensure();
+      const r = await pool3.query("SELECT * FROM matric_dance_bookings WHERE id=$1", [id]);
+      return r.rows[0] && row(r.rows[0]);
+    },
+    async update(id, expected, patch, revision) {
+      await ensure();
+      const r = await pool3.query(`UPDATE matric_dance_bookings SET status=$3,admin_note=COALESCE($4,admin_note),quote_amount=COALESCE($5,quote_amount),updated_at=now(),revision=revision+1 WHERE id=$1 AND status=$2 AND revision=$6 RETURNING *`, [id, expected, patch.status, patch.adminNote ?? null, patch.quoteAmount ?? null, revision]);
+      return r.rows[0] && row(r.rows[0]);
+    }
+  };
+}
+
 // server/routes.ts
 var import_node_http = require("node:http");
 var import_socket = require("socket.io");
 var import_axios2 = __toESM(require("axios"));
 var import_bcryptjs = __toESM(require("bcryptjs"));
-var import_node_crypto3 = __toESM(require("node:crypto"));
+var import_node_crypto4 = __toESM(require("node:crypto"));
 
 // server/storage.ts
 var import_node_postgres = require("drizzle-orm/node-postgres");
@@ -102,6 +426,7 @@ __export(schema_exports, {
   liftClubMemberships: () => liftClubMemberships,
   liftClubRoutes: () => liftClubRoutes,
   livenessSessions: () => livenessSessions,
+  matricDanceBookings: () => matricDanceBookings,
   messages: () => messages,
   notifications: () => notifications,
   operatorProfiles: () => operatorProfiles,
@@ -684,6 +1009,17 @@ var rewardCashouts = (0, import_pg_core.pgTable)("reward_cashouts", {
   requestedAt: (0, import_pg_core.timestamp)("requested_at").defaultNow(),
   reviewedAt: (0, import_pg_core.timestamp)("reviewed_at"),
   paidAt: (0, import_pg_core.timestamp)("paid_at")
+});
+var matricDanceBookings = (0, import_pg_core.pgTable)("matric_dance_bookings", {
+  revision: (0, import_pg_core.integer)("revision").notNull().default(0),
+  id: (0, import_pg_core.uuid)("id").primaryKey(),
+  userId: (0, import_pg_core.varchar)("user_id").notNull().references(() => users.id),
+  details: (0, import_pg_core.jsonb)("details").notNull().$type(),
+  status: (0, import_pg_core.text)("status").notNull().default("requested"),
+  adminNote: (0, import_pg_core.text)("admin_note").notNull().default(""),
+  quoteAmount: (0, import_pg_core.numeric)("quote_amount", { precision: 12, scale: 2 }),
+  createdAt: (0, import_pg_core.timestamp)("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
 
 // shared/email-validation.ts
@@ -1671,7 +2007,7 @@ var import_drizzle_orm4 = require("drizzle-orm");
 var import_drizzle_orm3 = require("drizzle-orm");
 
 // server/media-object-store.ts
-var import_node_crypto = __toESM(require("node:crypto"));
+var import_node_crypto2 = __toESM(require("node:crypto"));
 var ensureTablePromise = null;
 async function ensureMediaObjectStore() {
   if (!ensureTablePromise) {
@@ -1695,7 +2031,7 @@ async function ensureMediaObjectStore() {
 }
 async function storeMediaObject(input) {
   await ensureMediaObjectStore();
-  const id = import_node_crypto.default.randomUUID();
+  const id = import_node_crypto2.default.randomUUID();
   await pool2.query(
     `INSERT INTO app_media_objects (id, owner_user_id, purpose, mime_type, data)
      VALUES ($1, $2, $3, $4, $5)`,
@@ -1819,125 +2155,6 @@ async function getAdminSignedUrl(bucket, storagePath, expiresInSeconds = 3600) {
   } catch {
     return null;
   }
-}
-
-// shared/fare-policy.ts
-var PLATFORM_COMMISSION_RATE = 0.3;
-var A2B_LITE_COMMISSION_RATE = 0.1;
-var DRIVER_SHARE_RATE = 1 - PLATFORM_COMMISSION_RATE;
-var REFERRAL_REWARD_RATE = 0.025;
-var VEHICLE_CATEGORY_PRICING = {
-  a2b_lite: {
-    pricePerKm: 3.5,
-    baseFare: 50,
-    includedKm: 0,
-    maxPassengers: 2
-  },
-  budget: { pricePerKm: 8.5, baseFare: 50, includedKm: 0, maxPassengers: 4 },
-  luxury: { pricePerKm: 14.5, baseFare: 60, includedKm: 0, maxPassengers: 4 },
-  business: { pricePerKm: 35, baseFare: 150, includedKm: 0, maxPassengers: 4 },
-  van: { pricePerKm: 15, baseFare: 120, includedKm: 0, maxPassengers: 7 },
-  luxury_van: { pricePerKm: 35, baseFare: 200, includedKm: 0, maxPassengers: 6 }
-};
-function getBillableDistanceKm(distanceKm, includedKm = 0) {
-  const distance = Number(distanceKm);
-  const included = Number(includedKm);
-  if (!Number.isFinite(distance) || distance <= 0) return 0;
-  return Math.max(0, distance - (Number.isFinite(included) ? Math.max(0, included) : 0));
-}
-var CATEGORY_ALIASES = {
-  a2b_lite: "a2b_lite",
-  "a2b-lite": "a2b_lite",
-  lite: "a2b_lite",
-  economy_lite: "a2b_lite",
-  budget: "budget",
-  budget_car: "budget",
-  economy_car: "budget",
-  compact: "budget",
-  economy: "budget",
-  standard: "budget",
-  sedan: "budget",
-  luxury: "luxury",
-  luxury_car: "luxury",
-  luxury_sedan: "luxury",
-  premium: "luxury",
-  business: "business",
-  business_class: "business",
-  vip: "business",
-  vip_car: "business",
-  luxury_vip: "business",
-  luxury_vip_car: "business",
-  business_vip: "business",
-  executive: "business",
-  executive_car: "business",
-  van: "van",
-  minivan: "van",
-  xl: "van",
-  people_carrier: "van",
-  luxury_van: "luxury_van",
-  vclass: "luxury_van",
-  v_class: "luxury_van",
-  "v-class": "luxury_van"
-};
-var VEHICLE_CATEGORY_TITLES = {
-  a2b_lite: "A2B Lite",
-  budget: "Budget",
-  luxury: "Luxury",
-  business: "VIP",
-  van: "Van",
-  luxury_van: "V-Class"
-};
-function normalizeVehicleType(vehicleType) {
-  const normalized = String(vehicleType || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-  return CATEGORY_ALIASES[normalized] || CATEGORY_ALIASES[String(vehicleType || "").trim().toLowerCase()] || "budget";
-}
-function getVehicleCategoryTitle(vehicleType) {
-  const key = normalizeVehicleType(vehicleType);
-  return VEHICLE_CATEGORY_TITLES[key] || key.replace(/_/g, " ");
-}
-var CATEGORY_MAX_SEATS = {
-  a2b_lite: 2,
-  budget: 4,
-  luxury: 4,
-  business: 4,
-  vip: 4,
-  van: 7,
-  luxury_van: 6,
-  v_class: 6,
-  "v-class": 6,
-  vclass: 6
-};
-function getCategoryMaxSeats(vehicleType) {
-  const normalized = normalizeVehicleType(vehicleType);
-  if (normalized in CATEGORY_MAX_SEATS) {
-    return CATEGORY_MAX_SEATS[normalized];
-  }
-  const rawKey = String(vehicleType || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-  if (rawKey in CATEGORY_MAX_SEATS) {
-    return CATEGORY_MAX_SEATS[rawKey];
-  }
-  return 4;
-}
-function getVehicleCategoryCommissionRate(vehicleType) {
-  const normalized = normalizeVehicleType(vehicleType);
-  return normalized === "a2b_lite" ? A2B_LITE_COMMISSION_RATE : PLATFORM_COMMISSION_RATE;
-}
-function roundCurrency(amount) {
-  return Math.round(amount * 100) / 100;
-}
-function normalizeCommissionRate(rate) {
-  const numericRate = Number(rate);
-  return Number.isFinite(numericRate) && numericRate >= 0 && numericRate <= 1 ? numericRate : PLATFORM_COMMISSION_RATE;
-}
-function getDriverNetFare(grossFare, commissionRate = PLATFORM_COMMISSION_RATE) {
-  const gross = Number(grossFare);
-  if (!Number.isFinite(gross) || gross <= 0) return 0;
-  return roundCurrency(gross * (1 - normalizeCommissionRate(commissionRate)));
-}
-function getPlatformCommission(grossFare, commissionRate = PLATFORM_COMMISSION_RATE) {
-  const gross = Number(grossFare);
-  if (!Number.isFinite(gross) || gross <= 0) return 0;
-  return roundCurrency(gross - getDriverNetFare(gross, commissionRate));
 }
 
 // server/luxuryPricingEngine.ts
@@ -2148,45 +2365,6 @@ function validateAdminPassword(value) {
     return { ok: false, message: "Password must be at least 8 characters." };
   }
   return { ok: true };
-}
-
-// server/auth-middleware.ts
-init_auth();
-function extractBearer(req) {
-  const header = req.header("authorization") || req.header("Authorization");
-  if (!header) return null;
-  const [type, token] = header.split(" ");
-  if (type?.toLowerCase() !== "bearer" || !token) return null;
-  return token;
-}
-function authOptional(req, _res, next) {
-  try {
-    const token = extractBearer(req) || req.cookies?.a2b_token || null;
-    if (token) {
-      req.auth = verifyAccessToken(token);
-    }
-  } catch {
-  }
-  next();
-}
-function requireAuth(req, res, next) {
-  const token = extractBearer(req) || req.cookies?.a2b_token || null;
-  if (!token) return res.status(401).json({ message: "Unauthorized" });
-  try {
-    req.auth = verifyAccessToken(token);
-    return next();
-  } catch {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-}
-function requireRole(roles) {
-  return (req, res, next) => {
-    if (!req.auth) return res.status(401).json({ message: "Unauthorized" });
-    if (!roles.includes(req.auth.role)) {
-      return res.status(403).json({ message: "Forbidden" });
-    }
-    return next();
-  };
 }
 
 // server/routes.ts
@@ -3196,11 +3374,11 @@ function normalizePaystackReference(value) {
 }
 
 // server/password-reset.ts
-var import_node_crypto2 = __toESM(require("node:crypto"));
+var import_node_crypto3 = __toESM(require("node:crypto"));
 var PASSWORD_RESET_TOKEN_TTL_MS = 30 * 60 * 1e3;
 var PASSWORD_RESET_MIN_LENGTH = 8;
 function createPasswordResetToken() {
-  const token = import_node_crypto2.default.randomBytes(32).toString("base64url");
+  const token = import_node_crypto3.default.randomBytes(32).toString("base64url");
   return {
     token,
     tokenHash: hashPasswordResetToken(token),
@@ -3208,7 +3386,7 @@ function createPasswordResetToken() {
   };
 }
 function hashPasswordResetToken(token) {
-  return import_node_crypto2.default.createHash("sha256").update(token).digest("hex");
+  return import_node_crypto3.default.createHash("sha256").update(token).digest("hex");
 }
 function buildPasswordResetUrl(token, baseUrl) {
   const url = new URL(
@@ -3625,6 +3803,7 @@ async function runMockSelfieQualityCheck(selfieUrl, faceData, challenge) {
 }
 async function registerRoutes(app2) {
   const httpServer = (0, import_node_http.createServer)(app2);
+  registerMatricDanceRoutes(app2, createMatricStore(pool2));
   try {
     await pool2.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo text");
     await pool2.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS active_driver_device_id text");
@@ -4304,14 +4483,14 @@ async function registerRoutes(app2) {
   });
   app2.post("/api/airport-transfers/book", requireAuth, async (req, res) => {
     try {
-      const { airport, destination, date, time, flightNumber, passengers, phone } = req.body || {};
-      if (!airport || !destination || !date || !time) {
+      const { airport, destination, date: date2, time: time2, flightNumber, passengers, phone } = req.body || {};
+      if (!airport || !destination || !date2 || !time2) {
         return res.status(400).json({ message: "Airport, destination, date, and time are required" });
       }
       const rider = await storage.getUser(req.auth.sub);
       if (!rider) return res.status(404).json({ message: "User not found" });
       const riderName = rider.name || rider.username || "Passenger";
-      const summary = `${airport} \u2192 ${destination} on ${date} at ${time}${flightNumber ? ` (Flight: ${flightNumber})` : ""}`;
+      const summary = `${airport} \u2192 ${destination} on ${date2} at ${time2}${flightNumber ? ` (Flight: ${flightNumber})` : ""}`;
       await storage.createNotification({
         userId: rider.id,
         title: "Airport transfer requested",
@@ -4333,7 +4512,7 @@ async function registerRoutes(app2) {
               [admin.pushToken],
               "New airport transfer",
               `${riderName} booked: ${summary}`,
-              { type: "airport_transfer", riderId: rider.id, airport, destination, date, time, phone: phone || "" },
+              { type: "airport_transfer", riderId: rider.id, airport, destination, date: date2, time: time2, phone: phone || "" },
               { urgent: true, channelId: "ride-alerts-v3" }
             );
           }
@@ -5051,7 +5230,7 @@ If you did not request this, you can ignore this email.`,
         return res.status(409).json({ message: "Please complete or cancel any active trip before deleting your account." });
       }
       const deletedEmail = `deleted-${userId}@deleted.a2b.local`;
-      const deletedPassword = await import_bcryptjs.default.hash(import_node_crypto3.default.randomBytes(32).toString("hex"), 10);
+      const deletedPassword = await import_bcryptjs.default.hash(import_node_crypto4.default.randomBytes(32).toString("hex"), 10);
       await client.query("BEGIN");
       await maybeQuery("DELETE FROM notifications WHERE user_id = $1", [userId]);
       await maybeQuery("DELETE FROM saved_cards WHERE user_id = $1", [userId]);
@@ -9250,13 +9429,13 @@ If you did not request this, you can ignore this email.`,
         available,
         from,
         to,
-        date,
+        date: date2,
         pricePerSeat,
         seatsAvailable
       } = req.body;
       const normalizedFrom = formatLongDistanceCity(from);
       const normalizedTo = formatLongDistanceCity(to);
-      const normalizedDate = String(date || "").trim();
+      const normalizedDate = String(date2 || "").trim();
       const numericPricePerSeat = Number(pricePerSeat);
       const numericSeatsAvailable = Math.max(1, Math.floor(Number(seatsAvailable) || 0));
       if (available) {
@@ -9291,10 +9470,10 @@ If you did not request this, you can ignore this email.`,
   });
   app2.get("/api/long-distance/search", async (req, res) => {
     try {
-      const { from, to, date } = req.query;
+      const { from, to, date: date2 } = req.query;
       const normalizedFrom = formatLongDistanceCity(from);
       const normalizedTo = formatLongDistanceCity(to);
-      const normalizedDate = String(date || "").trim();
+      const normalizedDate = String(date2 || "").trim();
       const allChauffeurs = await storage.getAllChauffeurs();
       const available = allChauffeurs.filter((c) => {
         if (!c.availableForLongDistance || !c.isApproved) return false;
@@ -9335,7 +9514,7 @@ If you did not request this, you can ignore this email.`,
         driverId,
         from,
         to,
-        date,
+        date: date2,
         seats,
         paymentMethod,
         paystackRef,
@@ -9344,7 +9523,7 @@ If you did not request this, you can ignore this email.`,
       } = req.body || {};
       const seatsRequested = Math.max(1, Math.floor(Number(seats) || 1));
       const method = paymentMethod === "cash" ? "cash" : paymentMethod === "card" ? "card" : null;
-      if (!driverId || !from || !to || !date || !method) {
+      if (!driverId || !from || !to || !date2 || !method) {
         return res.status(400).json({ message: "driverId, from, to, date, seats, and a valid payment method are required" });
       }
       const rider = await storage.getUser(req.auth.sub);
@@ -9383,7 +9562,7 @@ If you did not request this, you can ignore this email.`,
       const riderFirstName = String(passengerName || rider.name || "Passenger").trim().split(" ")[0] || "Passenger";
       const routeFrom = chauffeur2.longDistanceFrom || from;
       const routeTo = chauffeur2.longDistanceTo || to;
-      const travelDate = chauffeur2.longDistanceDate || date;
+      const travelDate = chauffeur2.longDistanceDate || date2;
       const paymentNote = method === "cash" ? "The rider selected cash payment for the day of travel." : "Card payment was confirmed online.";
       const driverBody = `${riderFirstName} booked ${seatsRequested} seat${seatsRequested === 1 ? "" : "s"} for ${routeFrom} to ${routeTo} on ${travelDate}. ${paymentNote}`;
       await storage.createNotification({
@@ -11333,7 +11512,7 @@ If you did not request this, you can ignore this email.`,
       }
       const rawBody = req.rawBody;
       const raw = typeof rawBody === "string" ? rawBody : Buffer.isBuffer(rawBody) ? rawBody : JSON.stringify(req.body);
-      const hash = import_node_crypto3.default.createHmac("sha512", secret).update(raw).digest("hex");
+      const hash = import_node_crypto4.default.createHmac("sha512", secret).update(raw).digest("hex");
       if (hash !== signature) {
         console.warn("Invalid Paystack webhook signature");
         return res.status(401).json({ message: "Invalid signature" });
@@ -14268,7 +14447,7 @@ If you did not request this, you can ignore this email.`,
   });
   app2.post("/api/payments/webhook", async (req, res) => {
     try {
-      const hash = import_node_crypto3.default.createHmac("sha512", PAYSTACK_SECRET).update(JSON.stringify(req.body)).digest("hex");
+      const hash = import_node_crypto4.default.createHmac("sha512", PAYSTACK_SECRET).update(JSON.stringify(req.body)).digest("hex");
       if (hash !== req.headers["x-paystack-signature"]) {
         return res.status(401).json({ message: "Invalid signature" });
       }
