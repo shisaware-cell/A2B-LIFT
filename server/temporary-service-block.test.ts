@@ -7,8 +7,8 @@ import {
   TEMPORARY_SERVICE_BLOCK_MESSAGE,
 } from "../lib/maintenance-config";
 
-test("temporary service block configuration is lifted (false) allowing users to log in", () => {
-  assert.equal(TEMPORARY_SERVICE_BLOCK, false, "TEMPORARY_SERVICE_BLOCK must be false when block is lifted");
+test("temporary service block configuration is active (true) blocking login while outage is in effect", () => {
+  assert.equal(TEMPORARY_SERVICE_BLOCK, true, "TEMPORARY_SERVICE_BLOCK must be true while the temporary outage is in effect");
   assert.equal(
     TEMPORARY_SERVICE_BLOCK_MESSAGE,
     "Temporarily unavailable, try again later",
