@@ -32,6 +32,39 @@ export default function SplashLanding() {
     );
   }
 
+  // Full-screen outage view: logo + notice only, no login/register/terms UI.
+  if (TEMPORARY_SERVICE_BLOCK) {
+    return (
+      <View style={[styles.container, styles.outageContainer]}>
+        <View
+          style={[
+            styles.content,
+            {
+              paddingTop: insets.top + (Platform.OS === "web" ? 67 : 0),
+              paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 16),
+            },
+          ]}
+        >
+          <EntranceView direction="up" duration={800} delay={200} style={styles.outageLogoArea}>
+            {isDriverApp ? (
+              <Image source={require("../assets/images/driver-icon.png")} style={styles.driverLogo} resizeMode="contain" />
+            ) : (
+              <View style={styles.clientLogoFrame}>
+                <Image source={require("../assets/images/icon.png")} style={styles.clientLogo} resizeMode="cover" />
+              </View>
+            )}
+          </EntranceView>
+          <EntranceView duration={800} delay={500} style={styles.outageNoticeArea}>
+            <View style={styles.outageBanner}>
+              <Ionicons name="warning" size={22} color={Colors.warning} />
+              <Text style={styles.outageBannerText}>{TEMPORARY_SERVICE_BLOCK_MESSAGE}</Text>
+            </View>
+          </EntranceView>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <LinearGradient
@@ -52,13 +85,6 @@ export default function SplashLanding() {
         </EntranceView>
 
         <EntranceView duration={800} delay={600} style={styles.bottomArea}>
-          {TEMPORARY_SERVICE_BLOCK && (
-            <View style={styles.outageBanner}>
-              <Ionicons name="warning" size={20} color={Colors.warning} />
-              <Text style={styles.outageBannerText}>{TEMPORARY_SERVICE_BLOCK_MESSAGE}</Text>
-            </View>
-          )}
-
           <View style={styles.featureRow}>
             <View style={styles.featureItem}>
               <Ionicons name="shield-checkmark" size={20} color={Colors.textSecondary} />
@@ -188,6 +214,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     gap: 8,
   },
+  outageContainer: {
+    backgroundColor: "#000000",
+  },
+  outageLogoArea: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  outageNoticeArea: {
+    width: "100%",
+    paddingHorizontal: 24,
+  },
   outageBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -196,9 +234,8 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255, 183, 77, 0.35)",
     borderWidth: 1,
     borderRadius: 12,
-    paddingVertical: 12,
+    paddingVertical: 14,
     paddingHorizontal: 14,
-    marginBottom: 4,
   },
   outageBannerText: {
     flex: 1,
