@@ -11,8 +11,8 @@ test("temporary service block configuration is active (true) blocking login whil
   assert.equal(TEMPORARY_SERVICE_BLOCK, true, "TEMPORARY_SERVICE_BLOCK must be true while the temporary outage is in effect");
   assert.equal(
     TEMPORARY_SERVICE_BLOCK_MESSAGE,
-    "Temporarily unavailable, try again later",
-    "Message must match 'Temporarily unavailable, try again later'",
+    "A2B PTY LTD is currently involved in some legal issues and will resume shortly, try again later",
+    "Message must match the outage notice wording",
   );
 });
 

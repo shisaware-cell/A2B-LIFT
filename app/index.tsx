@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@mobile-core/auth";
 import { getAppVariant } from "@mobile-core/app-variant";
-import { whiteButtonHiddenStyle } from "@mobile-core/maintenance";
+import { TEMPORARY_SERVICE_BLOCK, TEMPORARY_SERVICE_BLOCK_MESSAGE, whiteButtonHiddenStyle } from "@mobile-core/maintenance";
 import { Colors } from "@mobile-ui/colors";
 import { EntranceView } from "@mobile-ui/motion";
 
@@ -52,6 +52,13 @@ export default function SplashLanding() {
         </EntranceView>
 
         <EntranceView duration={800} delay={600} style={styles.bottomArea}>
+          {TEMPORARY_SERVICE_BLOCK && (
+            <View style={styles.outageBanner}>
+              <Ionicons name="warning" size={20} color={Colors.warning} />
+              <Text style={styles.outageBannerText}>{TEMPORARY_SERVICE_BLOCK_MESSAGE}</Text>
+            </View>
+          )}
+
           <View style={styles.featureRow}>
             <View style={styles.featureItem}>
               <Ionicons name="shield-checkmark" size={20} color={Colors.textSecondary} />
@@ -180,6 +187,25 @@ const styles = StyleSheet.create({
     width: "100%",
     paddingHorizontal: 24,
     gap: 8,
+  },
+  outageBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "rgba(255, 183, 77, 0.10)",
+    borderColor: "rgba(255, 183, 77, 0.35)",
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 4,
+  },
+  outageBannerText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: Colors.warning,
+    lineHeight: 18,
   },
   featureRow: {
     flexDirection: "row",

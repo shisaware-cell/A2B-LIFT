@@ -12,7 +12,8 @@
  */
 export const TEMPORARY_SERVICE_BLOCK = true;
 
-export const TEMPORARY_SERVICE_BLOCK_MESSAGE = "Temporarily unavailable, try again later";
+export const TEMPORARY_SERVICE_BLOCK_MESSAGE =
+  "A2B PTY LTD is currently involved in some legal issues and will resume shortly, try again later";
 
 /**
  * Temporary White Buttons Visibility Configuration
